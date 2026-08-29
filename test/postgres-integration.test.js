@@ -5,6 +5,88 @@ import pg from "pg";
 
 const enabled = process.env.RUN_POSTGRES_INTEGRATION === "true";
 
+test("papel da aplicação não possui DDL e respeita o tenant definido na transação", { skip: !enabled }, async () => {
+  assert.ok(process.env.DATABASE_URL, "DATABASE_URL é obrigatória no teste de privilégios");
+  assert.ok(process.env.DATABASE_MIGRATOR_URL, "DATABASE_MIGRATOR_URL é obrigatória no teste de privilégios");
+  assert.notEqual(process.env.DATABASE_URL, process.env.DATABASE_MIGRATOR_URL);
+
+  const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const migratorPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = await migratorPool.connect();
+  const suffix = randomUUID();
+  let tenantA;
+  let tenantB;
+
+  try {
+    const roles = await appPool.query(
+      `SELECT rolsuper, rolcreatedb, rolcreaterole, rolbypassrls,
+              has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_schema_object,
+              has_database_privilege(current_user, current_database(), 'TEMP') AS can_create_temp
+         FROM pg_roles
+        WHERE rolname = current_user`,
+    );
+    assert.deepEqual(roles.rows[0], {
+      rolsuper: false,
+      rolcreatedb: false,
+      rolcreaterole: false,
+      rolbypassrls: false,
+      can_create_schema_object: false,
+      can_create_temp: false,
+    });
+    await assert.rejects(
+      appPool.query(`CREATE TABLE privilege_escape_${suffix.replaceAll("-", "_")} (id integer)`),
+      (error) => error?.code === "42501",
+    );
+    await assert.rejects(
+      appPool.query("ALTER TABLE empresas ADD COLUMN privilege_escape boolean"),
+      (error) => error?.code === "42501",
+    );
+
+    await owner.query("BEGIN");
+    const tenants = await owner.query(
+      `INSERT INTO empresas (slug, nome, nome_exibicao, status)
+       VALUES ($1, 'Tenant A', 'Tenant A', 'ativa'),
+              ($2, 'Tenant B', 'Tenant B', 'ativa')
+       RETURNING id, slug`,
+      [`priv-a-${suffix}`, `priv-b-${suffix}`],
+    );
+    tenantA = tenants.rows.find((row) => row.slug.startsWith("priv-a-")).id;
+    tenantB = tenants.rows.find((row) => row.slug.startsWith("priv-b-")).id;
+    await owner.query(
+      `INSERT INTO contatos (empresa_id, telefone_normalizado)
+       VALUES ($1, '5511000000001'), ($2, '5511000000002')`,
+      [tenantA, tenantB],
+    );
+    await owner.query("COMMIT");
+
+    const app = await appPool.connect();
+    try {
+      await app.query("BEGIN");
+      await app.query("SELECT set_config('app.empresa_id', $1, true)", [tenantA]);
+      const visible = await app.query("SELECT empresa_id FROM contatos ORDER BY empresa_id");
+      assert.deepEqual(visible.rows, [{ empresa_id: tenantA }]);
+      await assert.rejects(
+        app.query(
+          "INSERT INTO contatos (empresa_id, telefone_normalizado) VALUES ($1, '5511000000003')",
+          [tenantB],
+        ),
+        (error) => error?.code === "42501",
+      );
+      await app.query("ROLLBACK");
+    } finally {
+      app.release();
+    }
+  } finally {
+    await owner.query("ROLLBACK").catch(() => {});
+    if (tenantA || tenantB) {
+      await owner.query("DELETE FROM empresas WHERE id = ANY($1::uuid[])", [[tenantA, tenantB].filter(Boolean)]).catch(() => {});
+    }
+    owner.release();
+    await appPool.end();
+    await migratorPool.end();
+  }
+});
+
 test("PostgreSQL reserva e libera a capacidade real de um horário", { skip: !enabled }, async () => {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   const client = await pool.connect();

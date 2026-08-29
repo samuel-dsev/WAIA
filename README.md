@@ -53,7 +53,10 @@ Copie `.env.example` para `.env` e preencha valores reais fora do Git.
 Principais variáveis:
 
 - `INFRASTRUCTURE_MODE=postgres`
-- `DATABASE_URL`
+- `POSTGRES_USER` e `POSTGRES_PASSWORD`: papel owner usado somente por bootstrap, migrações e manutenção
+- `DATABASE_APP_USER` e `DATABASE_APP_PASSWORD`: papel restrito usado pela API e pelo worker
+- `DATABASE_MIGRATOR_URL`: necessária apenas ao executar migrações fora do Compose
+- `DATABASE_URL`: necessária apenas ao executar API, worker, seed ou administração fora do Compose
 - `REDIS_URL`
 - `SESSION_PEPPER`
 - `MASTER_KEYRING`
@@ -88,6 +91,8 @@ Serviços:
 - `postgres`: volume persistente, sem porta pública.
 - `redis`: volume persistente, sem porta pública.
 
+O Compose não repassa `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL` à API ou ao worker. O serviço `db-init` mantém a propriedade do banco e dos objetos com o owner, remove `CREATE`, `TEMP`, superusuário e bypass de RLS do papel da aplicação, e concede somente privilégios operacionais.
+
 Endpoints esperados:
 
 - `https://api.suaplataforma.com/webhook`
@@ -101,7 +106,7 @@ Endpoints esperados:
 Executar migrações:
 
 ```bash
-docker compose run --rm api npm run db:migrate
+docker compose run --rm migrate
 ```
 
 Seed demonstrativo do Capitão Mor:
@@ -150,7 +155,7 @@ Atualização:
 ```bash
 docker compose pull
 docker compose up -d --build
-docker compose run --rm api npm run db:migrate
+docker compose run --rm migrate
 ```
 
 Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar backup se a migração aplicada não for compatível.
@@ -160,7 +165,7 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 - Validação de assinatura Meta preservada.
 - Sessões administrativas opacas, cookies `HttpOnly`, `Secure` em produção e CSRF em mutações.
 - Autorização aplicada no backend por papel e vínculo com empresa.
-- RLS habilitado no PostgreSQL com contexto transacional.
+- RLS habilitado no PostgreSQL com contexto transacional; o papel da aplicação não possui DDL, propriedade dos objetos, `CREATE`, `TEMP` ou `BYPASSRLS`.
 - Mutações administrativas e auditoria são atômicas; falha ao auditar reverte a alteração principal.
 - API e painel mascaram segredos.
 - Logs estruturados usam sanitização.
@@ -170,11 +175,11 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 143 testes aprovados e 1 teste PostgreSQL opcional ignorado sem banco.
+- `npm test`: 143 testes aprovados e 2 testes PostgreSQL opcionais ignorados sem banco.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
-- `docker compose -p waia-audit config --quiet`: configuração válida.
+- `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
 - Migrações e seed executados em PostgreSQL 16 real; 10 migrações descobertas.
-- Teste transacional real de capacidade de agenda aprovado com `RUN_POSTGRES_INTEGRATION=true`.
+- Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

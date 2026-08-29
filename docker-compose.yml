@@ -4,6 +4,37 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  INFRASTRUCTURE_MODE: postgres
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+  DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+  DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-15000}
+  REDIS_URL: redis://redis:6379
+  REDIS_QUEUE_NAME: ${REDIS_QUEUE_NAME:-waia-messages}
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+  TENANT_CONCURRENCY: ${TENANT_CONCURRENCY:-1}
+  RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS:-3600000}
+  RETENTION_BATCH_SIZE: ${RETENTION_BATCH_SIZE:-500}
+  WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS:-10000}
+  WORKER_HEARTBEAT_TTL_MS: ${WORKER_HEARTBEAT_TTL_MS:-30000}
+  MASTER_KEYRING: ${MASTER_KEYRING:-}
+  SESSION_PEPPER: ${SESSION_PEPPER:-}
+  SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+  OPENAI_MAX_OUTPUT_TOKENS: ${OPENAI_MAX_OUTPUT_TOKENS:-300}
+  WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+  WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v26.0}
+  META_APP_SECRET: ${META_APP_SECRET:-}
+  WHATSAPP_REQUEST_TIMEOUT_MS: ${WHATSAPP_REQUEST_TIMEOUT_MS:-15000}
+  GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
+  GOOGLE_SERVICE_ACCOUNT_EMAIL: ${GOOGLE_SERVICE_ACCOUNT_EMAIL:-}
+  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ${GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY:-}
+  GOOGLE_SERVICE_ACCOUNT_FILE: ${GOOGLE_SERVICE_ACCOUNT_FILE:-.secrets/google-service-account.json}
+  GOOGLE_SHEETS_SYNC_INTERVAL_MS: ${GOOGLE_SHEETS_SYNC_INTERVAL_MS:-120000}
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -32,15 +63,10 @@ services:
     build: .
     restart: unless-stopped
     command: npm run start:api
-    env_file:
-      - .env
     environment:
-      NODE_ENV: production
-      INFRASTRUCTURE_MODE: postgres
+      <<: *runtime-environment
       API_PORT: 3001
       WEBHOOK_PORT: 3001
-      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
-      REDIS_URL: redis://redis:6379
       COOKIE_SECURE: "true"
       PANEL_ORIGIN: https://${PANEL_DOMAIN:-painel.localhost}
     expose:
@@ -66,13 +92,10 @@ services:
     build: .
     restart: unless-stopped
     command: npm run start:worker
-    env_file:
-      - .env
     environment:
-      NODE_ENV: production
-      INFRASTRUCTURE_MODE: postgres
-      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
-      REDIS_URL: redis://redis:6379
+      <<: *runtime-environment
+      COOKIE_SECURE: "true"
+      PANEL_ORIGIN: https://${PANEL_DOMAIN:-painel.localhost}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -114,12 +137,9 @@ services:
     build: .
     restart: "no"
     command: npm run db:migrate
-    env_file:
-      - .env
     environment:
       NODE_ENV: production
-      INFRASTRUCTURE_MODE: postgres
-      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+      DATABASE_MIGRATOR_URL: postgres://${POSTGRES_USER:-waia_owner}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
     depends_on:
       db-init:
         condition: service_completed_successfully

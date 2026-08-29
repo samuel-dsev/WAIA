@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 29 de agosto de 2026 após auditoria integral de código, testes, banco, infraestrutura e painel.
+Atualizado em 29 de agosto de 2026 após corrigir e comprovar em infraestrutura real a separação entre migrador e aplicação.
 
 ## Diagnóstico executivo
 
@@ -42,19 +42,26 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O histórico `codex-session-*.md` foi excluído do contexto de build Docker, reduzindo o envio de aproximadamente 3,5 MB para cerca de 240 KB no primeiro rebuild.
 - `.env.example` agora indica `INFRASTRUCTURE_MODE=postgres`, coerente com os executáveis oficiais.
 - `npm start` e `npm run dev` agora apontam para a API oficial; a demonstração antiga exige `npm run start:legacy` ou `npm run dev:legacy`.
+- Corrigida a falsa separação de papéis PostgreSQL: a configuração anterior transferia banco e objetos ao `waia_app`, concedia `CREATE` e executava migrações com a credencial da aplicação.
+- Migrações agora exigem `DATABASE_MIGRATOR_URL`; API e worker recebem apenas `DATABASE_URL` do papel restrito e não recebem a senha do owner.
+- O bootstrap repara volumes antigos, devolve propriedade ao owner, revoga `CREATE` e `TEMP` do papel da aplicação e mantém privilégios DML por grants atuais e default privileges.
+- Adicionado teste PostgreSQL real para propriedades do papel, negação de `CREATE TABLE`/`ALTER TABLE` e isolamento RLS entre dois tenants sintéticos.
 
 ## Validação executada
 
-- `npm test`: 144 testes descobertos; 143 aprovados e 1 teste PostgreSQL opcional ignorado sem `RUN_POSTGRES_INTEGRATION=true`.
+- `npm test`: 145 testes descobertos; 143 aprovados e 2 testes PostgreSQL opcionais ignorados sem `RUN_POSTGRES_INTEGRATION=true`.
 - `node --check`: 131 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
-- `docker compose -p waia-audit config --quiet`: configuração válida.
+- `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
 - PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
 - Migração de banco vazio e seed concluídos; dez migrações descobertas.
 - Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
 - API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
 - `GET /health/ready` retornou HTTP 200.
+- O teste real confirmou `waia_app` como `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` e `NOBYPASSRLS`, sem `CREATE` no schema e sem `TEMP` no banco; tentativas de `CREATE TABLE`, `ALTER TABLE` e escrita em outro tenant foram rejeitadas.
+- A inspeção dos contêineres confirmou ausência de `POSTGRES_PASSWORD` e `DATABASE_MIGRATOR_URL` na API e no worker.
+- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `10` migrações reaplicadas.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 
@@ -78,7 +85,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - A validação administrativa ainda depende de algumas constraints do banco para domínios e limites; o erro agora é seguro, mas a UX deve validar antes da escrita.
 - Cabeçalhos HTTP estão razoáveis com Helmet, mas CSP do app está desabilitada e a política do proxy ainda precisa de hardening para produção.
 - O arquivo `codex-session-01a044fd-4841-73b3-b456-d9d028928dee.md` tem cerca de 2,7 MB e permanece na raiz. Não foi removido por pertencer ao histórico do usuário.
-- Esta pasta não contém `.git`; portanto não há diff, commit ou rollback por controle de versão comprovável nesta cópia.
+- O repositório Git está presente, na branch `main`, conectado a `origin`; as mudanças desta continuidade permanecem locais e ainda não foram commitadas.
 - A entrada legada mantém endpoints de diagnóstico/sincronização sem autenticação e aceita webhook sem assinatura quando não há segredo; ela não deve ser exposta nem usada como produção.
 
 ## Plano para concluir o projeto
@@ -95,9 +102,9 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 6. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
 7. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
-8. Criar teste de integração contínuo com PostgreSQL/Redis e RLS, incluindo concorrência de webhook, pedidos e agenda.
+8. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS e agenda, para concorrência de webhook e pedidos.
 9. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
-10. Inicializar/reconectar o repositório Git e retirar o artefato de sessão somente após autorização do usuário.
+10. Retirar o artefato de sessão da raiz somente após autorização do usuário.
 
 ### Fase 3 — homologação e produção
 
@@ -113,6 +120,6 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - O atendimento humano será feito no painel WAIA ou integrado a uma caixa externa?
 - Qual provedor/estratégia será adotado para reduzir duplicidade no envio Meta?
 - Quais domínio, VPS, RPO/RTO, política de retenção e orçamento por tenant serão usados?
-- O artefato de sessão da raiz pode ser removido e esta cópia deve ser transformada em repositório Git?
+- O artefato de sessão da raiz pode ser removido?
 
 Nenhuma credencial real foi lida, exposta ou usada nesta auditoria.

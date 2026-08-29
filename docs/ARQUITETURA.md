@@ -36,6 +36,8 @@ O worker recebe apenas referências por ID. Segredos não entram em Redis. Um lo
 
 As tabelas operacionais possuem `empresa_id` direto ou uma relação composta que o valida. Repositórios sempre filtram explicitamente pelo tenant. PostgreSQL aplica `ENABLE/FORCE ROW LEVEL SECURITY`, com contexto definido somente por `SET LOCAL` dentro de transação. Consultas globais exigem papel de administrador da plataforma.
 
+Migrações e DDL usam o owner por `DATABASE_MIGRATOR_URL`. API e worker usam exclusivamente `waia_app`, que não possui objetos, superusuário, criação de banco/papel, `BYPASSRLS`, `CREATE` no schema nem `TEMP` no banco. O bootstrap também repara volumes antigos antes de reaplicar os privilégios operacionais mínimos.
+
 O mesmo telefone pode existir em tenants diferentes. Conversas, históricos, pedidos, consumo, logs e limites são identificados por empresa e nunca apenas pelo telefone.
 
 ## Segurança

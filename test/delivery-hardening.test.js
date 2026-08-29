@@ -54,17 +54,25 @@ test("rota PUT de módulos usa contrato em lote do painel", async () => {
   assert.deepEqual(captured.body.enabledModules, ["catalog", "appointments"]);
 });
 
-test("infra publica painel com proxy de API e papel da aplicação sem bypass de RLS", async () => {
-  const [nginx, compose, roleScript, migration] = await Promise.all([
+test("infra publica painel e separa migrador do papel restrito da aplicação", async () => {
+  const [nginx, compose, roleScript, migration, migrateScript] = await Promise.all([
     readFile(new URL("../infra/panel/nginx.conf", import.meta.url), "utf8"),
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../infra/postgres/init-app-role.sh", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/008_credential_links_and_runtime_safety.sql", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/migrate.js", import.meta.url), "utf8"),
   ]);
   assert.match(nginx, /location \/api\/[^]*proxy_pass http:\/\/api:3001/u);
   assert.match(compose, /DATABASE_APP_USER/u);
+  assert.match(compose, /DATABASE_MIGRATOR_URL: postgres:\/\/\$\{POSTGRES_USER/u);
   assert.match(compose, /service_completed_successfully/u);
   assert.match(roleScript, /NOSUPERUSER[^\n]*NOBYPASSRLS/u);
+  assert.match(roleScript, /REASSIGN OWNED BY %I TO %I', :'app_user', :'owner_user'/u);
+  assert.match(roleScript, /REVOKE CREATE ON SCHEMA public FROM %I/u);
+  assert.doesNotMatch(roleScript, /GRANT[^\n]*CREATE[^\n]*TO %I[^\n]*app_user/u);
+  assert.doesNotMatch(roleScript, /GRANT EXECUTE ON ALL FUNCTIONS/u);
+  assert.match(migrateScript, /process\.env\.DATABASE_MIGRATOR_URL/u);
+  assert.doesNotMatch(migrateScript, /createPostgresPool\(\)/u);
   assert.match(migration, /REFERENCES credenciais_empresa \(empresa_id, id\)/u);
 });
 
