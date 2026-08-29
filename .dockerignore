@@ -1,0 +1,16 @@
+node_modules
+.git
+.env
+.secrets
+backups
+npm-debug.log
+.env
+.env.*
+.secrets
+.git
+.codex
+.agents
+coverage
+tmp
+*.log
+codex-session-*.md

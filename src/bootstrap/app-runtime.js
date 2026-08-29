@@ -1,0 +1,461 @@
+import { randomUUID } from "node:crypto";
+import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { fileURLToPath } from "node:url";
+import { assertRuntimeConfiguration, config as defaultConfig } from "../config.js";
+import { createStructuredLogger } from "../operations/logger.js";
+import { createHealthService } from "../operations/health.js";
+import { createPostgresPool } from "../infra/postgres/pool.js";
+import { withTenantTransaction } from "../infra/postgres/transaction.js";
+import {
+  BullMqJobQueue,
+  RedisConversationLockManager,
+  RedisTenantConcurrencyLimiter,
+  RedisTenantRateLimiter,
+  createBullMqWorker,
+  createRedisConnection,
+} from "../infra/redis/index.js";
+import {
+  PostgresOutboxRepository,
+  PostgresTenantResolver,
+  PostgresWebhookRepository,
+} from "../infra/postgres/repositories/webhook-repository.js";
+import { PostgresConversationRepository } from "../modules/conversations/index.js";
+import { PostgresAuthRepository, createSessionTokenCodec, MemoryAuthRateLimiter } from "../modules/auth/index.js";
+import { AuthService, authErrorMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
+import { AdminService, PostgresAdminRepository, adminErrorMiddleware, createAdminRouter } from "../modules/admin/index.js";
+import {
+  CredentialVaultService,
+  PostgresCredentialRepository,
+} from "../modules/secrets/credential-vault-service.js";
+import { keyringFromSerialized } from "../security/keyring-config.js";
+import {
+  PostgresAiConfigResolver,
+  PostgresAiLedger,
+  AiSecretResolver,
+  ResponsesClientFactory,
+  VersionedPricingCatalog,
+} from "../modules/ai/postgres-adapters.js";
+import { MultiTenantAiService } from "../modules/ai/index.js";
+import { PostgresTenantDefinitionRepository } from "../tenants/postgres-config-loader.js";
+import { ConversationService } from "../modules/conversations/index.js";
+import {
+  ConversationHandoffRepository,
+  PostgresAppointmentRepository,
+  PostgresOrderRepository,
+} from "../modules/business/repositories.js";
+import {
+  PostgresJobHandlerRepository,
+  createWorkerHandlers,
+} from "../modules/jobs/handlers.js";
+import {
+  PostgresJobRepository,
+  PostgresOutboxDispatchRepository,
+  createJobProcessor,
+  createOutboxDispatcher,
+  startOutboxDispatcher,
+} from "../modules/jobs/index.js";
+import {
+  createMetaSignatureVerifier,
+  createWebhookHandler,
+  createWebhookIngestionService,
+  createWebhookVerificationHandler,
+} from "../modules/webhook/index.js";
+import { createMetaGateway } from "../integrations/index.js";
+import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
+import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
+import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
+
+const publicDirectory = fileURLToPath(new URL("../../public", import.meta.url));
+const panelDirectory = fileURLToPath(new URL("../../panel", import.meta.url));
+
+export async function probeWorkerHeartbeats(redis) {
+  let cursor = "0";
+  do {
+    const result = await redis.scan(cursor, "MATCH", "waia:worker:heartbeat:*", "COUNT", 100);
+    cursor = String(result?.[0] ?? "0");
+    if (Array.isArray(result?.[1]) && result[1].length > 0) {
+      return { state: "healthy" };
+    }
+  } while (cursor !== "0");
+  return { state: "unavailable" };
+}
+
+function requiredSecret(value, name) {
+  if (!value) throw new Error(`${name} obrigatorio para inicializar a API administrativa.`);
+  return value;
+}
+
+function jsonParser() {
+  return express.json({
+    limit: "1mb",
+    verify: (request, _response, buffer) => {
+      request.rawBody = buffer;
+    },
+  });
+}
+
+function firstMetaMessageId(result) {
+  return result?.messages?.[0]?.id || result?.id || null;
+}
+
+export function createPostgresRuntime({
+  config = defaultConfig,
+  pool = createPostgresPool({
+    connectionString: config.database.url,
+    max: config.database.poolMax,
+    statement_timeout: config.database.statementTimeoutMs,
+  }),
+  redis = createRedisConnection({ url: config.redis.url }),
+  logger = null,
+} = {}) {
+  const logSink = logger ? null : createPostgresOperationalLogSink(pool);
+  const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
+  const conversationRepository = new PostgresConversationRepository(pool);
+  const conversationService = new ConversationService({ repository: conversationRepository });
+  const keyring = config.security.masterKeyring
+    ? keyringFromSerialized(config.security.masterKeyring)
+    : null;
+  const credentialRepository = new PostgresCredentialRepository(pool);
+  const adminRepository = new PostgresAdminRepository(pool);
+  const health = createHealthService({
+    database: { health: () => pool.query("SELECT 1").then(() => ({ state: "healthy" })) },
+    redis: { health: () => redis.ping().then(() => ({ state: "healthy" })) },
+    worker: { health: () => probeWorkerHeartbeats(redis) },
+    integrations: {},
+  });
+  const credentialVault = keyring
+    ? new CredentialVaultService({
+      repository: credentialRepository,
+      keyring,
+      auditWriter: { write: (event, { transaction } = {}) => adminRepository.writeAudit({
+        id: randomUUID(),
+        empresaId: event.empresaId,
+        actorId: event.actorId === "system" ? null : event.actorId,
+        action: event.action,
+        resource: "credentials",
+        resourceId: event.credentialId,
+        result: "success",
+        changedFields: [],
+        occurredAt: event.occurredAt,
+      }, { transaction }) },
+    })
+    : null;
+  const authRepository = new PostgresAuthRepository(pool);
+  const tokenCodec = createSessionTokenCodec({
+    pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
+  });
+  const authService = new AuthService({
+    repository: authRepository,
+    tokenCodec,
+    rateLimiter: config.environment === "production"
+      ? new RedisAuthRateLimiter(runtimeRedis(redis))
+      : new MemoryAuthRateLimiter({ environment: config.environment }),
+    audit: { write: (event) => adminRepository.writeAudit({
+      id: randomUUID(),
+      empresaId: event.empresaId,
+      actorId: event.actorUserId,
+      action: event.action,
+      resource: "auth",
+      result: event.result,
+      changedFields: [],
+      occurredAt: event.occurredAt,
+    }) },
+  });
+  const adminService = new AdminService({
+    repository: adminRepository,
+    credentialVault,
+    conversationService,
+    healthService: health,
+  });
+  const aiService = new MultiTenantAiService({
+    configResolver: new PostgresAiConfigResolver(pool),
+    conversationService,
+    clientFactory: new ResponsesClientFactory({ environment: config.environment }),
+    secretResolver: new AiSecretResolver({
+      sharedApiKey: config.openai.apiKey,
+      credentialVault,
+    }),
+    ledger: new PostgresAiLedger(pool),
+    pricingCatalog: new VersionedPricingCatalog(),
+    logger: runtimeLogger,
+  });
+  const tenantDefinitionRepository = new PostgresTenantDefinitionRepository(pool, {
+    paymentResolver: new PostgresPaymentResolver(pool, { credentialVault }),
+  });
+  const metaGateway = createMetaGateway({
+    credentialResolver: new PostgresMetaCredentialResolver({
+      pool,
+      credentialVault,
+      apiVersion: config.whatsapp.apiVersion,
+    }),
+    timeoutMs: config.whatsapp.requestTimeoutMs,
+    logger: runtimeLogger,
+  });
+  const queue = new BullMqJobQueue({
+    connection: redis,
+    queueName: config.redis.queueName,
+  });
+  return Object.freeze({
+    pool,
+    redis,
+    logger: runtimeLogger,
+    logSink,
+    conversationService,
+    adminService,
+    authService,
+    aiService,
+    tenantDefinitionRepository,
+    metaGateway,
+    queue,
+    health,
+  });
+}
+
+function runtimeRedis(redis) {
+  return redis;
+}
+
+class RedisAuthRateLimiter {
+  constructor(redis, { maxAttempts = 5, windowMs = 15 * 60_000, prefix = "waia:auth-rate:" } = {}) {
+    if (typeof redis?.multi !== "function") throw new TypeError("Cliente Redis invalido.");
+    this.redis = redis;
+    this.maxAttempts = maxAttempts;
+    this.windowMs = windowMs;
+    this.prefix = prefix;
+  }
+
+  async consume({ key }) {
+    const bucket = Math.floor(Date.now() / this.windowMs);
+    const redisKey = `${this.prefix}${key}:${bucket}`;
+    const result = await this.redis.multi().incr(redisKey).pexpire(redisKey, this.windowMs).pttl(redisKey).exec();
+    const current = Number(result?.[0]?.[1] || 0);
+    const ttl = Number(result?.[2]?.[1] || this.windowMs);
+    return {
+      allowed: current <= this.maxAttempts,
+      retryAfterMs: Math.max(1, ttl),
+      remaining: Math.max(0, this.maxAttempts - current),
+    };
+  }
+}
+
+class PostgresPaymentResolver {
+  constructor(pool, { credentialVault } = {}) {
+    this.pool = pool;
+    this.credentialVault = credentialVault;
+  }
+
+  async resolve({ empresaId, type }) {
+    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const result = await client.query(
+        `SELECT tipo, nome, identificador_mascarado, favorecido, instrucoes, credencial_id
+           FROM formas_pagamento
+          WHERE empresa_id = $1 AND tipo = $2 AND ativa AND deleted_at IS NULL
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [empresaId, type],
+      );
+      return result.rows[0] || null;
+    });
+    if (!row) return null;
+    const value = row.credencial_id && this.credentialVault
+      ? await this.credentialVault.getCredentialForUse({ empresaId, credentialId: row.credencial_id })
+      : row.identificador_mascarado || row.nome;
+    return { value, recipient: row.favorecido || row.nome, instructions: row.instrucoes || "" };
+  }
+}
+
+class PostgresMetaCredentialResolver {
+  constructor({ pool, credentialVault, apiVersion }) {
+    this.pool = pool;
+    this.credentialVault = credentialVault;
+    this.apiVersion = apiVersion;
+  }
+
+  async resolveMeta({ empresaId, numeroWhatsappId }) {
+    if (!this.credentialVault) return null;
+    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
+      await client.query(
+        `SELECT id, finalidade
+           FROM credenciais_empresa
+          WHERE empresa_id = $1
+            AND provedor = 'meta'
+            AND status = 'ativa'
+            AND finalidade IN ($2, 'whatsapp')
+          ORDER BY CASE WHEN finalidade = $2 THEN 0 ELSE 1 END, created_at DESC
+          LIMIT 1`,
+        [empresaId, `whatsapp:${numeroWhatsappId}`],
+      )
+    ).rows[0]);
+    if (!row) return null;
+    const accessToken = await this.credentialVault.getCredentialForUse({
+      empresaId,
+      credentialId: row.id,
+    });
+    const phoneNumberId = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
+      await client.query(
+        "SELECT phone_number_id FROM numeros_whatsapp WHERE empresa_id = $1 AND id = $2",
+        [empresaId, numeroWhatsappId],
+      )
+    ).rows[0]?.phone_number_id);
+    return {
+      accessToken,
+      phoneNumberId,
+      apiVersion: this.apiVersion,
+    };
+  }
+}
+
+export function createApiApp({
+  runtime,
+  config = defaultConfig,
+  logger = runtime?.logger || console,
+} = {}) {
+  if (!runtime) throw new TypeError("runtime e obrigatorio.");
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+  app.use(helmet({
+    contentSecurityPolicy: false,
+  }));
+  app.use(rateLimit({
+    windowMs: 60_000,
+    limit: 1_200,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
+  app.use((request, _response, next) => {
+    request.context = { correlationId: request.get("x-correlation-id") || randomUUID() };
+    next();
+  });
+  app.use(jsonParser());
+  app.get("/health/live", (_request, response) => response.json(runtime.health.live()));
+  app.get("/health/ready", async (request, response, next) => {
+    try {
+      const ready = await runtime.health.ready();
+      response.status(ready.status === "ready" ? 200 : 503).json(ready);
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get("/privacy", (_request, response) => response.sendFile("privacy.html", { root: publicDirectory }));
+  app.get("/data-deletion", (_request, response) => response.sendFile("data-deletion.html", { root: publicDirectory }));
+  app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
+  app.get("/webhook", createWebhookVerificationHandler({ verifyToken: config.whatsapp.verifyToken }));
+  app.post("/webhook", createWebhookHandler({
+    signatureVerifier: createMetaSignatureVerifier({
+      appSecret: config.whatsapp.appSecret,
+      allowUnsigned: config.environment !== "production",
+    }),
+    ingestionService: createWebhookIngestionService({
+      tenantResolver: new PostgresTenantResolver(runtime.pool),
+      repository: new PostgresWebhookRepository(runtime.pool),
+      outbox: new PostgresOutboxRepository(),
+      logger,
+    }),
+    logger,
+  }));
+  const authRouter = createAuthRouter({
+    authService: runtime.authService,
+    secureCookies: config.security.cookieSecure,
+    sessionTtlMs: config.security.sessionTtlHours * 60 * 60_000,
+  });
+  app.use("/api/admin/auth", authRouter);
+  app.use("/api/admin", createAdminRouter({
+    adminService: runtime.adminService,
+    authenticate: createAuthMiddleware({ authService: runtime.authService }),
+    csrf: requireCsrf({ authService: runtime.authService }),
+  }));
+  app.use(authErrorMiddleware);
+  app.use(adminErrorMiddleware);
+  app.use((error, request, response, _next) => {
+    logger.error?.("api_request_failed", {
+      correlationId: request.context?.correlationId,
+      error,
+    });
+    response.status(500).json({ error: "INTERNAL_ERROR", message: "Nao foi possivel concluir a solicitacao." });
+  });
+  return app;
+}
+
+export function createWorkerRuntime({
+  runtime,
+  config = defaultConfig,
+  logger = runtime?.logger || console,
+} = {}) {
+  if (!runtime) throw new TypeError("runtime e obrigatorio.");
+  const jobRepository = new PostgresJobRepository(runtime.pool);
+  const handlerRepository = new PostgresJobHandlerRepository(runtime.pool);
+  const processor = createJobProcessor({
+    repository: jobRepository,
+    handlers: createWorkerHandlers({
+      repository: handlerRepository,
+      conversationService: runtime.conversationService,
+      tenantDefinitionRepository: runtime.tenantDefinitionRepository,
+      metaGateway: runtime.metaGateway,
+      aiService: runtime.aiService,
+      orderRepository: new PostgresOrderRepository(runtime.pool),
+      appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
+      handoffRepository: new ConversationHandoffRepository(runtime.conversationService),
+      logger,
+      firstMetaMessageId,
+    }),
+    lockManager: new RedisConversationLockManager(runtime.redis),
+    tenantLimiter: new RedisTenantConcurrencyLimiter(runtime.redis, {
+      maxPerTenant: config.redis.tenantConcurrency,
+    }),
+    tenantRateLimiter: new RedisTenantRateLimiter(runtime.redis),
+    logger,
+  });
+  const worker = createBullMqWorker({
+    connection: runtime.redis,
+    queueName: config.redis.queueName,
+    concurrency: config.redis.workerConcurrency,
+    processor,
+    logger,
+  });
+  const dispatcher = startOutboxDispatcher(createOutboxDispatcher({
+    repository: new PostgresOutboxDispatchRepository(runtime.pool),
+    queue: runtime.queue,
+    logger,
+  }), { logger });
+  const retention = startRetentionScheduler(createRetentionRunner({
+    pool: runtime.pool,
+    conversationService: runtime.conversationService,
+    batchSize: config.maintenance.retentionBatchSize,
+    logger,
+  }), { intervalMs: config.maintenance.retentionIntervalMs, logger });
+  const heartbeat = startWorkerHeartbeat(runtime.redis, {
+    intervalMs: config.maintenance.heartbeatIntervalMs,
+    ttlMs: config.maintenance.heartbeatTtlMs,
+    logger,
+  });
+  return Object.freeze({
+    processor,
+    worker,
+    dispatcher,
+    retention,
+    heartbeat,
+    async close() {
+      await dispatcher.close();
+      await retention.close();
+      await heartbeat.close();
+      await worker.close();
+      await runtime.queue.close();
+    },
+  });
+}
+
+export function assertConfigured(config = defaultConfig) {
+  assertRuntimeConfiguration(config);
+  if (config.infrastructureMode !== "postgres") {
+    throw new Error("API e worker oficiais exigem INFRASTRUCTURE_MODE=postgres.");
+  }
+  if (!config.database.url) {
+    throw new Error("DATABASE_URL obrigatorio em INFRASTRUCTURE_MODE=postgres.");
+  }
+  if (!config.redis.url) {
+    throw new Error("REDIS_URL obrigatorio em INFRASTRUCTURE_MODE=postgres.");
+  }
+}

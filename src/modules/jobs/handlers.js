@@ -1,0 +1,285 @@
+import { withTenantTransaction } from "../../infra/postgres/transaction.js";
+import { createRuntimeStateRepository } from "../business/repositories.js";
+import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
+
+const TYPE_FROM_DATABASE = Object.freeze({
+  texto: "text",
+  imagem: "image",
+  audio: "audio",
+  video: "video",
+  documento: "document",
+  interativo: "interactive",
+  status: "status",
+  sistema: "system",
+});
+
+function fromDatabase(value) {
+  return TYPE_FROM_DATABASE[value] || value;
+}
+
+function permanent(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  error.retryable = false;
+  return error;
+}
+
+export class PostgresJobHandlerRepository {
+  constructor(pool) {
+    if (!pool?.connect) throw new TypeError("Pool PostgreSQL invalido.");
+    this.pool = pool;
+  }
+
+  inboundMessage({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const result = await client.query(
+        `SELECT m.id, m.empresa_id, m.conversa_id, m.contato_id, m.numero_whatsapp_id,
+                m.tipo, m.corpo, m.media_external_id, m.external_message_id,
+                m.correlation_id, c.telefone_normalizado
+           FROM mensagens m
+           JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
+          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'entrada'
+          LIMIT 1`,
+        [empresaId, messageId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        empresaId: row.empresa_id,
+        conversationId: row.conversa_id,
+        contactId: row.contato_id,
+        numeroWhatsappId: row.numero_whatsapp_id,
+        type: fromDatabase(row.tipo),
+        text: row.corpo || "",
+        mediaId: row.media_external_id || null,
+        externalMessageId: row.external_message_id,
+        correlationId: row.correlation_id,
+        senderPhone: row.telefone_normalizado,
+      };
+    });
+  }
+
+  statusEvent({ empresaId, statusEventId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const result = await client.query(
+        `SELECT id, external_message_id, status, provider_timestamp, error_code
+           FROM whatsapp_status_events
+          WHERE empresa_id = $1 AND id = $2
+          LIMIT 1`,
+        [empresaId, statusEventId],
+      );
+      const row = result.rows[0];
+      return row && {
+        id: row.id,
+        externalMessageId: row.external_message_id,
+        status: row.status,
+        occurredAt: row.provider_timestamp,
+        errorCode: row.error_code,
+      };
+    });
+  }
+
+  preparedReply({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT id, corpo, outbound_payload, external_message_id, status
+           FROM mensagens
+          WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'
+          LIMIT 1`,
+        [empresaId, messageId],
+      )).rows[0];
+      return row && {
+        id: row.id,
+        text: row.corpo,
+        buttons: row.outbound_payload?.buttons || [],
+        externalMessageId: row.external_message_id,
+        status: row.status,
+      };
+    });
+  }
+
+  prepareReply({ empresaId, message, reply, origin }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const sequence = (await client.query(
+        `UPDATE conversas SET next_sequence = next_sequence + 1
+          WHERE empresa_id = $1 AND id = $2
+          RETURNING next_sequence - 1 AS sequence`,
+        [empresaId, message.conversationId],
+      )).rows[0]?.sequence;
+      const row = (await client.query(
+        `INSERT INTO mensagens (
+           empresa_id, conversa_id, contato_id, numero_whatsapp_id, direcao, tipo,
+           corpo, status, origem_resposta, sequence, correlation_id, source_message_id,
+           outbound_payload, processing_at
+         ) VALUES ($1,$2,$3,$4,'saida',$5,$6,'processando',$7,$8,$9,$10,$11::jsonb,now())
+         ON CONFLICT (empresa_id, source_message_id)
+           WHERE source_message_id IS NOT NULL AND direcao = 'saida'
+         DO NOTHING
+         RETURNING id, corpo, outbound_payload, external_message_id, status`,
+        [
+          empresaId, message.conversationId, message.contactId, message.numeroWhatsappId,
+          reply.buttons?.length ? "interativo" : "texto", reply.text,
+          origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
+          message.id, JSON.stringify({ buttons: reply.buttons || [] }),
+        ],
+      )).rows[0];
+      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], status: row.status };
+      const existing = (await client.query(
+        `SELECT id, corpo, outbound_payload, external_message_id, status
+           FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
+        [empresaId, message.id],
+      )).rows[0];
+      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], externalMessageId: existing.external_message_id, status: existing.status };
+    });
+  }
+
+  markReplySent({ empresaId, replyId, externalMessageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
+      `UPDATE mensagens
+          SET external_message_id = $3, status = 'enviada', sent_at = now(), error_code = NULL, error_sanitized = NULL
+        WHERE empresa_id = $1 AND id = $2 AND direcao = 'saida'`,
+      [empresaId, replyId, externalMessageId],
+    ));
+  }
+}
+
+export function createWorkerHandlers({
+  repository,
+  conversationService,
+  tenantDefinitionRepository,
+  metaGateway,
+  aiService,
+  orderRepository,
+  appointmentRepository,
+  handoffRepository,
+  logger = console,
+  firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
+} = {}) {
+  if (typeof repository?.inboundMessage !== "function") throw new TypeError("repository.inboundMessage e obrigatorio.");
+  if (typeof repository?.statusEvent !== "function") throw new TypeError("repository.statusEvent e obrigatorio.");
+  if (typeof conversationService?.getConversation !== "function") throw new TypeError("conversationService.getConversation e obrigatorio.");
+  if (typeof conversationService?.recordMessage !== "function") throw new TypeError("conversationService.recordMessage e obrigatorio.");
+  if (typeof conversationService?.applyMetaStatus !== "function") throw new TypeError("conversationService.applyMetaStatus e obrigatorio.");
+  if (typeof tenantDefinitionRepository?.load !== "function") throw new TypeError("tenantDefinitionRepository.load e obrigatorio.");
+  if (typeof metaGateway?.sendReply !== "function") throw new TypeError("metaGateway.sendReply e obrigatorio.");
+
+  async function processInboundMessage(reference) {
+    const message = await repository.inboundMessage(reference);
+    if (!message) throw permanent("Mensagem de entrada nao encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
+    const conversation = await conversationService.getConversation({
+      empresaId: reference.empresaId,
+      conversationId: message.conversationId,
+    });
+    if (conversation.mode !== "bot") {
+      logger.info?.("conversation_automation_skipped", {
+        empresaId: reference.empresaId,
+        conversationId: message.conversationId,
+        mode: conversation.mode,
+      });
+      return { skipped: true, reason: "conversation_not_in_bot_mode" };
+    }
+    let prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+    if (prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
+      return { replied: true, resumed: true };
+    }
+    let reply;
+    if (!prepared) {
+      const definition = await tenantDefinitionRepository.load(reference.empresaId);
+      if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
+      const runtime = createConfiguredTenantRuntime({
+      definition,
+      stateRepository: createRuntimeStateRepository(conversationService),
+      orderRepository,
+      appointmentRepository,
+      handoffRepository,
+      aiHandler: aiService
+        ? async ({ config, input }) => ({
+          reply: await aiService.reply({
+            empresaId: config.empresaId,
+            conversationId: input.conversationId,
+            messageId: message.id,
+            correlationId: message.correlationId,
+            message: input.text,
+            context: config,
+          }),
+        })
+        : null,
+      logger,
+      });
+    try {
+      await metaGateway.markRead?.({
+        empresaId: reference.empresaId,
+        numeroWhatsappId: message.numeroWhatsappId,
+      }, { messageId: message.externalMessageId });
+    } catch (error) {
+      logger.warn?.("whatsapp_mark_read_failed", {
+        empresaId: reference.empresaId,
+        conversationId: message.conversationId,
+        code: error?.code || "META_MARK_READ_FAILED",
+      });
+    }
+      reply = await runtime.handle({
+        conversationId: message.conversationId,
+        contactId: message.contactId,
+        type: message.type,
+        text: message.text,
+        mediaId: message.mediaId,
+      });
+      if (repository.prepareReply) {
+        prepared = await repository.prepareReply({
+          empresaId: reference.empresaId,
+          message,
+          reply,
+          origin: reply.module === "ai_freeform" ? "ai" : "deterministic_flow",
+        });
+      }
+    } else {
+      reply = { text: prepared.text, buttons: prepared.buttons };
+    }
+    const sent = await metaGateway.sendReply({
+      empresaId: reference.empresaId,
+      numeroWhatsappId: message.numeroWhatsappId,
+    }, {
+      to: message.senderPhone,
+      text: reply.text,
+      buttons: reply.buttons,
+    });
+    const externalMessageId = firstMetaMessageId(sent);
+    if (prepared && repository.markReplySent) {
+      await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
+    } else {
+      await conversationService.recordMessage({
+        empresaId: reference.empresaId,
+        conversationId: message.conversationId,
+        direction: "outbound",
+        type: reply.buttons?.length ? "interactive" : "text",
+        body: reply.text,
+        externalMessageId,
+        status: "sent",
+        origin: reply.module === "ai_freeform" ? "ai" : "deterministic_flow",
+        correlationId: message.correlationId,
+      });
+    }
+    return { replied: true };
+  }
+
+  async function applyWhatsappStatus(reference) {
+    const status = await repository.statusEvent(reference);
+    if (!status) throw permanent("Evento de status nao encontrado.", "STATUS_EVENT_NOT_FOUND");
+    if (status.status === "unknown") return { skipped: true, reason: "unknown_status" };
+    await conversationService.applyMetaStatus({
+      empresaId: reference.empresaId,
+      externalMessageId: status.externalMessageId,
+      status: status.status,
+      occurredAt: status.occurredAt || new Date(),
+      errorCode: status.errorCode,
+    });
+    return { applied: true, status: status.status };
+  }
+
+  return Object.freeze({
+    process_inbound_message: processInboundMessage,
+    apply_whatsapp_status: applyWhatsappStatus,
+  });
+}

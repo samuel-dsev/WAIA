@@ -1,0 +1,31 @@
+{
+  "name": "capitao-mor-whatsapp-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/api.js",
+    "dev:legacy": "node --watch src/server.js",
+    "start": "node src/api.js",
+    "start:legacy": "node src/server.js",
+    "start:api": "node src/api.js",
+    "start:worker": "node src/worker.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "admin:create": "node scripts/create-admin.js",
+    "load:test": "node scripts/load-scenarios.js",
+    "check:whatsapp": "node scripts/check-whatsapp.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "bullmq": "^6.3.1",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.6.2",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "openai": "^7.5.0",
+    "pg": "^8.23.0",
+    "zod": "^4.4.3"
+  }
+}

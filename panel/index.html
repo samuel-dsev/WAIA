@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="same-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <title>Painel administrativo</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Ir para o conteúdo principal</a>
+
+  <main id="loginView" class="login-layout">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="brand-mark" aria-hidden="true">WA</div>
+      <p class="eyebrow">Central de atendimento</p>
+      <h1 id="loginTitle">Acesse o painel</h1>
+      <p class="muted">Gerencie empresas, conversas e operações em um único lugar.</p>
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="loginEmail">E-mail</label>
+          <input id="loginEmail" name="email" type="email" autocomplete="username" maxlength="254" required>
+          <span class="field-error" id="loginEmailError"></span>
+        </div>
+        <div class="field">
+          <label for="loginPassword">Senha</label>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="256" required>
+          <span class="field-error" id="loginPasswordError"></span>
+        </div>
+        <button class="button button-primary button-block" type="submit">Entrar</button>
+        <p id="loginError" class="alert alert-error" role="alert" hidden></p>
+      </form>
+    </section>
+  </main>
+
+  <div id="appShell" class="app-shell" hidden>
+    <aside id="sidebar" class="sidebar" aria-label="Navegação principal">
+      <div class="sidebar-brand">
+        <span class="brand-mark brand-mark-small" aria-hidden="true">WA</span>
+        <span><strong>WAIA</strong><small>Operações</small></span>
+      </div>
+      <nav id="primaryNav">
+        <button type="button" data-view="dashboard" data-permission="dashboard"><span aria-hidden="true">◫</span> Visão geral</button>
+        <button type="button" data-view="companies" data-permission="platform"><span aria-hidden="true">◇</span> Empresas</button>
+        <button type="button" data-view="numbers" data-permission="numbers"><span aria-hidden="true">#</span> Números WhatsApp</button>
+        <button type="button" data-view="settings" data-permission="settings"><span aria-hidden="true">⚙</span> Módulos e configurações</button>
+        <button type="button" data-view="catalog" data-permission="settings"><span aria-hidden="true">□</span> Catálogo e serviços</button>
+        <button type="button" data-view="events" data-permission="settings"><span aria-hidden="true">◇</span> Eventos</button>
+        <button type="button" data-view="menus" data-permission="settings"><span aria-hidden="true">≡</span> Menus</button>
+        <button type="button" data-view="menuItems" data-permission="settings"><span aria-hidden="true">+</span> Itens de menu</button>
+        <button type="button" data-view="payments" data-permission="settings"><span aria-hidden="true">$</span> Pagamentos</button>
+        <button type="button" data-view="availability" data-permission="settings"><span aria-hidden="true">◫</span> Disponibilidades</button>
+        <button type="button" data-view="integrations" data-permission="settings"><span aria-hidden="true">↔</span> Integrações</button>
+        <button type="button" data-view="contacts" data-permission="operations"><span aria-hidden="true">◎</span> Contatos</button>
+        <button type="button" data-view="conversations" data-permission="operations"><span aria-hidden="true">◌</span> Conversas e mensagens</button>
+        <button type="button" data-view="orders" data-permission="operations"><span aria-hidden="true">□</span> Pedidos</button>
+        <button type="button" data-view="appointments" data-permission="operations"><span aria-hidden="true">▦</span> Agendamentos</button>
+        <button type="button" data-view="usage" data-permission="usage"><span aria-hidden="true">⌁</span> Consumo de IA</button>
+        <button type="button" data-view="logs" data-permission="logs"><span aria-hidden="true">!</span> Logs e falhas</button>
+        <button type="button" data-view="audit" data-permission="logs"><span aria-hidden="true">#</span> Auditoria</button>
+        <button type="button" data-view="users" data-permission="users"><span aria-hidden="true">♙</span> Usuários e permissões</button>
+        <button type="button" data-view="diagnostics" data-permission="diagnostics"><span aria-hidden="true">♥</span> Diagnósticos</button>
+      </nav>
+      <p class="security-note">As permissões exibidas aqui são informativas. O backend valida cada operação.</p>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button id="menuToggle" class="icon-button mobile-only" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Abrir menu">☰</button>
+        <div class="tenant-control">
+          <label for="tenantSelect">Contexto</label>
+          <select id="tenantSelect" aria-describedby="tenantHelp"></select>
+          <small id="tenantHelp">Todos os dados são filtrados no servidor.</small>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshToggle" class="button button-quiet" type="button" aria-pressed="true" title="Pausar atualização periódica">Atualização automática</button>
+          <div class="user-menu">
+            <span id="sessionUser" class="user-name"></span>
+            <button id="logoutButton" class="button button-secondary" type="button">Sair</button>
+          </div>
+        </div>
+      </header>
+
+      <main id="mainContent" class="main-content" tabindex="-1">
+        <div class="page-heading">
+          <div>
+            <p id="viewEyebrow" class="eyebrow">Operações</p>
+            <h1 id="viewTitle">Visão geral</h1>
+            <p id="viewDescription" class="muted"></p>
+          </div>
+          <div id="viewActions" class="page-actions"></div>
+        </div>
+
+        <form id="filterForm" class="filter-bar" aria-label="Filtros da listagem">
+          <div class="field field-inline">
+            <label for="searchFilter">Pesquisar</label>
+            <input id="searchFilter" name="search" type="search" maxlength="120" placeholder="Nome, contato ou identificador">
+          </div>
+          <div class="field field-inline">
+            <label for="statusFilter">Estado</label>
+            <select id="statusFilter" name="status">
+              <option value="">Todos</option>
+              <option value="active">Ativo</option>
+              <option value="pending">Pendente</option>
+              <option value="failed">Falhou</option>
+              <option value="suspended">Suspenso</option>
+            </select>
+          </div>
+          <div class="field field-inline">
+            <label for="fromFilter">De</label>
+            <input id="fromFilter" name="from" type="date">
+          </div>
+          <div class="field field-inline">
+            <label for="toFilter">Até</label>
+            <input id="toFilter" name="to" type="date">
+          </div>
+          <button class="button button-primary" type="submit">Aplicar filtros</button>
+          <button id="clearFilters" class="button button-quiet" type="button">Limpar</button>
+        </form>
+
+        <section id="contentState" aria-live="polite" aria-atomic="true"></section>
+        <section id="viewContent" aria-label="Conteúdo da página"></section>
+        <nav id="pagination" class="pagination" aria-label="Paginação" hidden>
+          <button id="previousPage" class="button button-secondary" type="button">Anterior</button>
+          <span id="pageSummary" aria-live="polite"></span>
+          <button id="nextPage" class="button button-secondary" type="button">Próxima</button>
+          <label for="pageSize">Itens por página</label>
+          <select id="pageSize">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </nav>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+    <form method="dialog" class="dialog-card">
+      <p class="eyebrow">Confirmação necessária</p>
+      <h2 id="confirmTitle">Confirmar ação</h2>
+      <p id="confirmMessage"></p>
+      <div class="dialog-actions">
+        <button id="confirmCancel" class="button button-secondary" value="cancel">Cancelar</button>
+        <button id="confirmAccept" class="button button-danger" value="confirm">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" aria-labelledby="detailTitle">
+    <div class="dialog-card dialog-wide">
+      <div class="dialog-heading">
+        <h2 id="detailTitle">Detalhes</h2>
+        <button id="detailClose" class="icon-button" type="button" aria-label="Fechar">×</button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+  </dialog>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <noscript>Este painel precisa de JavaScript para funcionar.</noscript>
+</body>
+</html>

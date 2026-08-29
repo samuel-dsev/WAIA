@@ -1,0 +1,186 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      panel:
+        condition: service_started
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      PANEL_DOMAIN: ${PANEL_DOMAIN:-painel.localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - public
+      - internal
+    logging: *default-logging
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: npm run start:api
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      INFRASTRUCTURE_MODE: postgres
+      API_PORT: 3001
+      WEBHOOK_PORT: 3001
+      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+      REDIS_URL: redis://redis:6379
+      COOKIE_SECURE: "true"
+      PANEL_ORIGIN: https://${PANEL_DOMAIN:-painel.localhost}
+    expose:
+      - "3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+      - egress
+    stop_grace_period: 45s
+    logging: *default-logging
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: npm run start:worker
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      INFRASTRUCTURE_MODE: postgres
+      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "node", "-e", "import('ioredis').then(async({default:R})=>{const r=new R(process.env.REDIS_URL,{maxRetriesPerRequest:1});const v=await r.get('waia:worker:heartbeat:'+process.env.HOSTNAME);await r.quit();process.exit(v?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+
+  db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-waia}
+      POSTGRES_USER: ${POSTGRES_USER:-waia_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatorio}
+      DATABASE_APP_USER: ${DATABASE_APP_USER:-waia_app}
+      DATABASE_APP_PASSWORD: ${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}
+    volumes:
+      - ./infra/postgres/init-app-role.sh:/usr/local/bin/init-app-role.sh:ro
+    command: ["sh", "/usr/local/bin/init-app-role.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    logging: *default-logging
+
+  migrate:
+    build: .
+    restart: "no"
+    command: npm run db:migrate
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      INFRASTRUCTURE_MODE: postgres
+      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    logging: *default-logging
+
+  panel:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panel:/usr/share/nginx/html:ro
+      - ./infra/panel/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - "8080"
+    networks:
+      - internal
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-waia}
+      POSTGRES_USER: ${POSTGRES_USER:-waia_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatorio}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  public:
+  internal:
+    internal: true
+  egress:
