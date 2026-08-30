@@ -46,7 +46,7 @@ export function normalizeJobReference(input) {
     correlationId: requiredString(input.correlationId, "correlationId"),
     payloadVersion,
   };
-  if (normalized.type === "process_inbound_message"
+  if (["process_inbound_message", "send_human_message"].includes(normalized.type)
       && (!normalized.conversationId || !normalized.messageId)) {
     throw new TypeError("Job de mensagem exige conversationId e messageId.");
   }

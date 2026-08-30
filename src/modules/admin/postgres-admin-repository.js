@@ -1,6 +1,6 @@
 import { hashPassword } from "../auth/password.js";
 import { withPlatformTransaction, withTenantTransaction } from "../../infra/postgres/transaction.js";
-import { AdminValidationError } from "./errors.js";
+import { AdminForbiddenError, AdminValidationError } from "./errors.js";
 
 const TENANT_STATUS_TO_DB = Object.freeze({ draft: "rascunho", active: "ativa", suspended: "suspensa", archived: "arquivada" });
 const TENANT_STATUS_FROM_DB = Object.freeze(Object.fromEntries(Object.entries(TENANT_STATUS_TO_DB).map(([key, value]) => [value, key])));
@@ -97,7 +97,7 @@ const RESOURCES = Object.freeze({
     filters: { status: "status", mode: "modo_atendimento", contactId: "contato_id", numberId: "numero_whatsapp_id" }, sorts: { lastMessageAt: "ultima_mensagem_at", createdAt: "created_at", status: "status" }, search: ["correlation_id::text"],
   }),
   messages: descriptor({
-    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
+    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", operatorId: "operador_usuario_id", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
     filters: { conversationId: "conversa_id", contactId: "contato_id", status: "status", direction: "direcao", type: "tipo", correlationId: "correlation_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", sequence: "sequence", status: "status" },
   }),
   logs: descriptor({
@@ -371,6 +371,87 @@ export class PostgresAdminRepository {
     ).rows[0] || null);
   }
 
+  async queueHumanMessage({ empresaId, conversationId, operatorId, text, idempotencyKey, correlationId, transaction }) {
+    return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
+      const conversation = (await client.query(
+        `SELECT c.id, c.contato_id, c.numero_whatsapp_id, c.status, c.modo_atendimento,
+                c.operador_usuario_id, ct.bloqueado, n.status AS numero_status
+           FROM conversas c
+           JOIN contatos ct ON ct.empresa_id = c.empresa_id AND ct.id = c.contato_id
+           JOIN numeros_whatsapp n ON n.empresa_id = c.empresa_id AND n.id = c.numero_whatsapp_id
+          WHERE c.empresa_id = $1 AND c.id = $2
+          FOR UPDATE OF c`,
+        [empresaId, conversationId],
+      )).rows[0];
+      if (!conversation) return null;
+      if (conversation.status !== "aberta") throw new AdminValidationError("A conversa precisa estar aberta para receber uma resposta.");
+      if (conversation.modo_atendimento !== "humano") throw new AdminValidationError("Assuma a conversa antes de responder.");
+      if (String(conversation.operador_usuario_id) !== String(operatorId)) throw new AdminForbiddenError();
+      if (conversation.bloqueado) throw new AdminValidationError("O contato está bloqueado para envios.");
+      if (conversation.numero_status !== "ativo") throw new AdminValidationError("O número de WhatsApp desta conversa não está ativo.");
+
+      const existing = (await client.query(
+        `SELECT id, conversa_id AS "conversationId", corpo AS text, status,
+                external_message_id AS "externalMessageId", correlation_id AS "correlationId",
+                created_at AS "createdAt"
+           FROM mensagens
+          WHERE empresa_id = $1 AND client_idempotency_key = $2
+          LIMIT 1`,
+        [empresaId, idempotencyKey],
+      )).rows[0];
+      if (existing) {
+        if (String(existing.conversationId) !== String(conversationId)) {
+          throw new AdminValidationError("A chave de idempotência já foi usada em outra conversa.");
+        }
+        return { ...existing, duplicate: true };
+      }
+
+      const sequence = (await client.query(
+        `UPDATE conversas
+            SET next_sequence = next_sequence + 1,
+                ultima_mensagem_at = GREATEST(COALESCE(ultima_mensagem_at, now()), now())
+          WHERE empresa_id = $1 AND id = $2
+        RETURNING next_sequence - 1 AS sequence`,
+        [empresaId, conversationId],
+      )).rows[0].sequence;
+      const message = (await client.query(
+        `INSERT INTO mensagens (
+           empresa_id, conversa_id, contato_id, numero_whatsapp_id, direcao, tipo,
+           corpo, status, origem_resposta, sequence, operador_usuario_id,
+           correlation_id, client_idempotency_key, enqueued_at
+         ) VALUES ($1,$2,$3,$4,'saida','texto',$5,'enfileirada','operador',$6,$7,$8,$9,now())
+         RETURNING id, conversa_id AS "conversationId", corpo AS text, status,
+                   external_message_id AS "externalMessageId", correlation_id AS "correlationId",
+                   created_at AS "createdAt"`,
+        [
+          empresaId,
+          conversationId,
+          conversation.contato_id,
+          conversation.numero_whatsapp_id,
+          text,
+          sequence,
+          operatorId,
+          correlationId,
+          idempotencyKey,
+        ],
+      )).rows[0];
+      await client.query(
+        `INSERT INTO outbox_jobs (
+           empresa_id, conversa_id, mensagem_id, job_type, dedup_key, payload, correlation_id
+         ) VALUES ($1,$2,$3,'send_human_message',$4,$5::jsonb,$6)`,
+        [
+          empresaId,
+          conversationId,
+          message.id,
+          `send_human_message:${idempotencyKey}`,
+          JSON.stringify({ payloadVersion: 1 }),
+          correlationId,
+        ],
+      );
+      return { ...message, duplicate: false };
+    });
+  }
+
   async create({ resource, empresaId, id, data, transaction }) {
     if (resource === "users") return this.#createUser({ empresaId, id, data, transaction });
     const definition = resourceDefinition(resource);
@@ -529,9 +610,9 @@ export class PostgresAdminRepository {
 
   async writeAudit(event, { transaction } = {}) {
     const write = ({ client }) => client.query(
-      `INSERT INTO logs_auditoria (id, empresa_id, ator_usuario_id, acao, recurso_tipo, recurso_id, resultado, campos_alterados_redigidos, occurred_at)
-       VALUES ($1,(SELECT id FROM empresas WHERE id = $2),$3,$4,$5,$6,$7,$8::jsonb,$9)`,
-      [event.id, event.empresaId, event.actorId || null, event.action, event.resource, event.resourceId, event.result === "success" ? "sucesso" : event.result === "denied" ? "negado" : "falha", JSON.stringify({ fields: event.changedFields || [] }), event.occurredAt],
+      `INSERT INTO logs_auditoria (id, empresa_id, ator_usuario_id, acao, recurso_tipo, recurso_id, resultado, campos_alterados_redigidos, correlation_id, occurred_at)
+       VALUES ($1,(SELECT id FROM empresas WHERE id = $2),$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`,
+      [event.id, event.empresaId, event.actorId || null, event.action, event.resource, event.resourceId, event.result === "success" ? "sucesso" : event.result === "denied" ? "negado" : "falha", JSON.stringify({ fields: event.changedFields || [] }), event.correlationId || null, event.occurredAt],
     );
     if (transaction) return write(transaction);
     return withPlatformTransaction(this.pool, { usuarioId: event.actorId || undefined }, write);

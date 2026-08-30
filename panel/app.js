@@ -743,7 +743,7 @@ async function openConversation(id) {
   if (!base) return;
   elements.detailTitle.textContent = "Conversa";
   elements.detailContent.replaceChildren(paragraph("Carregando conversa…"));
-  elements.detailDialog.showModal();
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
   try {
     const payload = await apiFetch(`${base}/${encodeURIComponent(id)}`);
     const conversation = payload.conversation || payload.data || payload;
@@ -757,12 +757,13 @@ async function openConversation(id) {
     messages.setAttribute("aria-label", "Mensagens da conversa");
     for (const message of listFrom(payload.messages || conversation.messages || [])) {
       const item = node("article", "message");
-      item.dataset.direction = message.direction || message.direcao || "inbound";
+      const direction = message.direction || message.direcao || "inbound";
+      item.dataset.direction = ({ entrada: "inbound", saida: "outbound" })[direction] || direction;
       item.append(paragraph(message.text || message.body || "Mensagem sem conteúdo exibível."));
       if (message.mediaMimeType) {
         item.append(button("Ver mídia privada", () => openReceiptPreview(message.id), "button button-secondary button-small"));
       }
-      item.append(nodeWithText("small", `${message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));
+      item.append(nodeWithText("small", `${message.responseOrigin || message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));
       messages.append(item);
     }
     if (!messages.children.length) messages.append(paragraph("Nenhuma mensagem disponível."));
@@ -771,12 +772,64 @@ async function openConversation(id) {
       button("Assumir conversa", () => conversationAction(id, "assume"), "button button-primary button-small"),
       button("Pausar bot", () => conversationAction(id, "pause"), "button button-secondary button-small"),
       button("Devolver ao bot", () => conversationAction(id, "resume"), "button button-secondary button-small"),
-      nodeWithText("p", "O envio manual de mensagens ainda não está disponível nesta etapa. A tela não simula envios.", "handoff-note"),
     );
-    elements.detailContent.replaceChildren(details, messages, tools);
+    elements.detailContent.replaceChildren(details, messages, tools, humanMessageComposer(id, conversation));
   } catch (error) {
     elements.detailContent.replaceChildren(paragraph(error.message || "Não foi possível abrir a conversa."));
   }
+}
+
+function humanMessageComposer(conversationId, conversation) {
+  const section = node("section", "human-composer");
+  section.append(nodeWithText("h3", "Resposta humana"));
+  const mode = String(conversation.mode || "").toLocaleLowerCase("pt-BR");
+  const status = String(conversation.status || "").toLocaleLowerCase("pt-BR");
+  const assignedToCurrentUser = String(conversation.operatorId || "") === String(state.session?.user?.id || "");
+  if (!["human", "humano"].includes(mode) || !["open", "aberta"].includes(status) || !assignedToCurrentUser) {
+    section.append(nodeWithText("p", "Assuma esta conversa com seu usuário para habilitar o envio. O bot continuará sem responder enquanto o atendimento estiver humano ou pausado.", "handoff-note"));
+    return section;
+  }
+
+  const form = document.createElement("form");
+  form.className = "human-composer-form";
+  const label = nodeWithText("label", "Mensagem ao cliente");
+  const textarea = document.createElement("textarea");
+  textarea.name = "text";
+  textarea.required = true;
+  textarea.maxLength = 4096;
+  textarea.rows = 4;
+  textarea.placeholder = "Digite a resposta que será enviada pelo WhatsApp desta empresa.";
+  label.htmlFor = `human-message-${conversationId}`;
+  textarea.id = label.htmlFor;
+  const counter = nodeWithText("small", "0 / 4096", "muted");
+  textarea.addEventListener("input", () => { counter.textContent = `${textarea.value.length} / 4096`; });
+  const submit = button("Enviar pelo WhatsApp", null, "button button-primary", "submit");
+  let idempotencyKey = crypto.randomUUID();
+  form.append(label, textarea, counter, submit);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    submit.disabled = true;
+    textarea.disabled = true;
+    try {
+      await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/conversations/${encodeURIComponent(conversationId)}/messages`, {
+        method: "POST",
+        body: { text: textarea.value, idempotencyKey },
+      });
+    } catch (error) {
+      if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+      toast(error.message || "Não foi possível enviar a mensagem.");
+      submit.disabled = false;
+      textarea.disabled = false;
+      textarea.focus();
+      return;
+    }
+    toast("Mensagem registrada para envio.");
+    idempotencyKey = crypto.randomUUID();
+    await Promise.allSettled([loadCurrentView({ silent: true }), openConversation(conversationId)]);
+  });
+  section.append(form);
+  return section;
 }
 
 async function conversationAction(id, action) {

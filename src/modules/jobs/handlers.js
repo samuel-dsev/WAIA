@@ -67,6 +67,31 @@ export class PostgresJobHandlerRepository {
     });
   }
 
+  outboundHumanMessage({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT m.id, m.conversa_id, m.numero_whatsapp_id, m.corpo, m.external_message_id,
+                m.status, m.correlation_id, c.telefone_normalizado
+           FROM mensagens m
+           JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
+          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'saida'
+            AND m.tipo = 'texto' AND m.origem_resposta = 'operador'
+          LIMIT 1`,
+        [empresaId, messageId],
+      )).rows[0];
+      return row && {
+        id: row.id,
+        conversationId: row.conversa_id,
+        numeroWhatsappId: row.numero_whatsapp_id,
+        text: row.corpo,
+        externalMessageId: row.external_message_id,
+        status: row.status,
+        correlationId: row.correlation_id,
+        recipientPhone: row.telefone_normalizado,
+      };
+    });
+  }
+
   markMediaStored({ empresaId, messageId, mediaId, stored }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const result = await client.query(
@@ -169,6 +194,22 @@ export class PostgresJobHandlerRepository {
         WHERE empresa_id = $1 AND id = $2 AND direcao = 'saida'`,
       [empresaId, replyId, externalMessageId],
     ));
+  }
+
+  markHumanMessageSent({ empresaId, messageId, externalMessageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `UPDATE mensagens
+            SET external_message_id = $3, status = 'enviada', sent_at = COALESCE(sent_at, now()),
+                error_code = NULL, error_sanitized = NULL
+          WHERE empresa_id = $1 AND id = $2 AND direcao = 'saida'
+            AND origem_resposta = 'operador' AND status IN ('enfileirada', 'processando', 'enviada')
+        RETURNING id, external_message_id, status`,
+        [empresaId, messageId, externalMessageId],
+      )).rows[0];
+      if (!row) throw permanent("Mensagem humana não encontrada.", "HUMAN_MESSAGE_NOT_FOUND");
+      return row;
+    });
   }
 }
 
@@ -356,8 +397,41 @@ export function createWorkerHandlers({
     return { applied: true, status: status.status };
   }
 
+  async function sendHumanMessage(reference) {
+    if (typeof repository.outboundHumanMessage !== "function" || typeof repository.markHumanMessageSent !== "function") {
+      throw permanent("Envio humano não configurado no worker.", "HUMAN_MESSAGE_HANDLER_NOT_CONFIGURED");
+    }
+    const message = await repository.outboundHumanMessage(reference);
+    if (!message) throw permanent("Mensagem humana não encontrada.", "HUMAN_MESSAGE_NOT_FOUND");
+    if (message.externalMessageId && ["enviada", "entregue", "lida"].includes(message.status)) {
+      return { sent: true, resumed: true };
+    }
+    const result = await metaGateway.sendReply({
+      empresaId: reference.empresaId,
+      numeroWhatsappId: message.numeroWhatsappId,
+    }, {
+      to: message.recipientPhone,
+      text: message.text,
+      buttons: [],
+    });
+    const externalMessageId = firstMetaMessageId(result);
+    if (!externalMessageId) {
+      const error = new Error("A Meta não retornou o identificador da mensagem.");
+      error.code = "META_MESSAGE_ID_MISSING";
+      error.retryable = true;
+      throw error;
+    }
+    await repository.markHumanMessageSent({
+      empresaId: reference.empresaId,
+      messageId: message.id,
+      externalMessageId,
+    });
+    return { sent: true };
+  }
+
   return Object.freeze({
     process_inbound_message: processInboundMessage,
     apply_whatsapp_status: applyWhatsappStatus,
+    send_human_message: sendHumanMessage,
   });
 }

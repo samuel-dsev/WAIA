@@ -263,3 +263,38 @@ test("worker rejeita comprovante fora da política sem chamar runtime ou IA", as
   assert.deepEqual(await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-media" }), { replied: true });
   assert.match(preparedText, /JPEG, PNG ou WEBP/u);
 });
+
+test("worker envia resposta humana pelo número do tenant e registra o ID Meta", async () => {
+  const events = [];
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() { return null; },
+      async statusEvent() { return null; },
+      async outboundHumanMessage() {
+        return {
+          id: "message-human", conversationId: "conversation-a", numeroWhatsappId: "number-a",
+          text: "Resposta do operador", status: "processando", recipientPhone: "5511999999999",
+        };
+      },
+      async markHumanMessageSent(input) { events.push(["marked", input]); },
+    },
+    conversationService: {
+      async getConversation() { assert.fail("envio humano não carrega o runtime de conversa"); },
+      async recordMessage() { assert.fail("mensagem já foi persistida pela API"); },
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { assert.fail("envio humano não carrega definição do bot"); } },
+    metaGateway: {
+      async sendReply(context, payload) {
+        events.push(["sent", context, payload]);
+        return { messages: [{ id: "wamid.human.out" }] };
+      },
+    },
+  });
+
+  assert.deepEqual(await handlers.send_human_message({ empresaId: "tenant-a", messageId: "message-human" }), { sent: true });
+  assert.deepEqual(events, [
+    ["sent", { empresaId: "tenant-a", numeroWhatsappId: "number-a" }, { to: "5511999999999", text: "Resposta do operador", buttons: [] }],
+    ["marked", { empresaId: "tenant-a", messageId: "message-human", externalMessageId: "wamid.human.out" }],
+  ]);
+});

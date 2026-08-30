@@ -32,6 +32,8 @@ O webhook normaliza eventos de mensagem e status com `phoneNumberId`. A ingestã
 
 O worker recebe apenas referências por ID. Segredos não entram em Redis. Um lock por conversa e a sequência persistida garantem ordem; a confirmação no banco torna reentregas no-op. Retry usa backoff com jitter e dead-letter sanitizada.
 
+Respostas humanas seguem o mesmo contrato assíncrono: o operador autenticado assume a conversa, e a API persiste mensagem de saída, chave de idempotência, outbox e auditoria na mesma transação. O worker resolve telefone, número e credencial dentro do tenant e registra o ID Meta antes de concluir o job. Estados de entrega e leitura continuam chegando pelo webhook assinado.
+
 ## Isolamento
 
 As tabelas operacionais possuem `empresa_id` direto ou uma relação composta que o valida. Repositórios sempre filtram explicitamente pelo tenant. PostgreSQL aplica `ENABLE/FORCE ROW LEVEL SECURITY`, com contexto definido somente por `SET LOCAL` dentro de transação. Consultas globais exigem papel de administrador da plataforma.
@@ -49,6 +51,8 @@ Mídias recebidas não entram em Redis nem no contexto da IA. O worker resolve o
 Produção falha fechada se os segredos de validação do webhook ou a infraestrutura essencial estiverem ausentes. Desenvolvimento e testes podem usar adaptadores simulados explicitamente habilitados.
 
 Sessões administrativas são opacas, revogáveis e persistidas, com cookies `HttpOnly`, `Secure` em produção e `SameSite=Strict`. Mutações exigem CSRF e autorização no backend. A alteração principal e seu log de auditoria compartilham a mesma transação, inclusive para credenciais e mudanças de atendimento; sem auditoria persistida, a mutação é revertida.
+
+O envio manual só é aceito em conversa aberta, no modo humano e pelo usuário atualmente responsável. Contatos bloqueados e números inativos falham antes da criação da mensagem. O texto não é enviado à IA e o Redis recebe apenas a referência persistida.
 
 ## Operação inicial
 

@@ -111,7 +111,7 @@ export class PostgresJobRepository {
         [reference.empresaId, reference.jobId, attempt, leaseMs],
       );
       if (!result.rows[0]) return { outcome: "busy" };
-      if (result.rows[0].job_type === "process_inbound_message" && result.rows[0].mensagem_id) {
+      if (["process_inbound_message", "send_human_message"].includes(result.rows[0].job_type) && result.rows[0].mensagem_id) {
         await client.query(
           `UPDATE mensagens
               SET status = 'processando', processing_at = COALESCE(processing_at, now()),
@@ -154,7 +154,7 @@ export class PostgresJobRepository {
         WHERE empresa_id = $1 AND id = $2 AND status <> 'concluido'`,
         [reference.empresaId, reference.jobId, attempt, error?.message || "Falha temporária."],
       );
-      if (reference.type === "process_inbound_message" && reference.messageId) {
+      if (["process_inbound_message", "send_human_message"].includes(reference.type) && reference.messageId) {
         await client.query(
           `UPDATE mensagens
               SET status = 'enfileirada', tentativas = GREATEST(tentativas, $3),
@@ -175,7 +175,7 @@ export class PostgresJobRepository {
           WHERE empresa_id = $1 AND id = $2 AND status <> 'concluido'`,
         [reference.empresaId, reference.jobId, attempt, error?.message || "Falha permanente."],
       );
-      if (reference.type === "process_inbound_message" && reference.messageId) {
+      if (["process_inbound_message", "send_human_message"].includes(reference.type) && reference.messageId) {
         await client.query(
           `UPDATE mensagens
               SET status = 'falhou', tentativas = GREATEST(tentativas, $3),

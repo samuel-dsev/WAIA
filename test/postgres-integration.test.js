@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 import { PrivateMediaStore } from "../src/infra/media/private-media-store.js";
-import { PostgresJobHandlerRepository } from "../src/modules/jobs/handlers.js";
+import { AdminService, PostgresAdminRepository } from "../src/modules/admin/index.js";
+import { PostgresJobHandlerRepository, createWorkerHandlers } from "../src/modules/jobs/handlers.js";
+import { PostgresJobRepository } from "../src/modules/jobs/postgres-repository.js";
 
 const enabled = process.env.RUN_POSTGRES_INTEGRATION === "true";
 
@@ -250,6 +252,189 @@ test("PostgreSQL persiste metadados verificáveis da mídia privada", { skip: !e
       await owner.query("DELETE FROM empresas WHERE id = $1", [empresaId]).catch(() => {});
     }
     if (storageKey) await store.delete({ empresaId, storageKey }).catch(() => {});
+    owner.release();
+    await appPool.end();
+    await ownerPool.end();
+  }
+});
+
+test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { skip: !enabled }, async () => {
+  const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = await ownerPool.connect();
+  const suffix = randomUUID();
+  const idempotencyKey = randomUUID();
+  const correlationId = randomUUID();
+  let empresaId;
+  let operatorId;
+  try {
+    await owner.query("BEGIN");
+    empresaId = (await owner.query(
+      "INSERT INTO empresas (slug, nome, nome_exibicao, status) VALUES ($1, 'Humano integração', 'Humano integração', 'ativa') RETURNING id",
+      [`human-${suffix}`],
+    )).rows[0].id;
+    operatorId = (await owner.query(
+      "INSERT INTO usuarios (email, nome, password_hash) VALUES ($1, 'Operador integração', 'synthetic-hash') RETURNING id",
+      [`operator-${suffix}@example.invalid`],
+    )).rows[0].id;
+    await owner.query(
+      "INSERT INTO usuarios_empresas (empresa_id, usuario_id, papel, status) VALUES ($1,$2,'operador','ativo')",
+      [empresaId, operatorId],
+    );
+    const numberId = (await owner.query(
+      "INSERT INTO numeros_whatsapp (empresa_id, phone_number_id, status) VALUES ($1,$2,'ativo') RETURNING id",
+      [empresaId, `human-phone-${suffix}`],
+    )).rows[0].id;
+    const contactId = (await owner.query(
+      "INSERT INTO contatos (empresa_id, telefone_normalizado) VALUES ($1,$2) RETURNING id",
+      [empresaId, `55${suffix.replaceAll("-", "").replace(/[^0-9]/gu, "7").slice(0, 11)}`],
+    )).rows[0].id;
+    const conversationId = (await owner.query(
+      `INSERT INTO conversas (
+         empresa_id, contato_id, numero_whatsapp_id, modo_atendimento, operador_usuario_id, correlation_id
+       ) VALUES ($1,$2,$3,'humano',$4,$5) RETURNING id`,
+      [empresaId, contactId, numberId, operatorId, correlationId],
+    )).rows[0].id;
+    await owner.query("COMMIT");
+
+    const service = new AdminService({ repository: new PostgresAdminRepository(appPool) });
+    const auth = {
+      user: { id: operatorId },
+      memberships: [{ empresaId, role: "tenant_operator", permissions: [] }],
+    };
+    const input = {
+      auth,
+      empresaId,
+      conversationId,
+      body: { text: "Resposta humana sintética", idempotencyKey },
+      correlationId,
+    };
+    const first = await service.sendHumanMessage(input);
+    const duplicate = await service.sendHumanMessage(input);
+    assert.equal(duplicate.id, first.id);
+    assert.equal(duplicate.duplicate, true);
+
+    const persisted = (await owner.query(
+      `SELECT m.id, m.status, m.origem_resposta, m.operador_usuario_id,
+              count(o.id)::int AS jobs,
+              min(o.job_type) AS job_type,
+              min(o.payload::text) AS payload
+         FROM mensagens m
+         JOIN outbox_jobs o ON o.empresa_id = m.empresa_id AND o.mensagem_id = m.id
+        WHERE m.empresa_id = $1 AND m.client_idempotency_key = $2
+        GROUP BY m.id`,
+      [empresaId, idempotencyKey],
+    )).rows[0];
+    assert.equal(persisted.status, "enfileirada");
+    assert.equal(persisted.origem_resposta, "operador");
+    assert.equal(persisted.operador_usuario_id, operatorId);
+    assert.equal(persisted.jobs, 1);
+    assert.equal(persisted.job_type, "send_human_message");
+    assert.deepEqual(JSON.parse(persisted.payload), { payloadVersion: 1 });
+
+    const job = (await owner.query(
+      `UPDATE outbox_jobs SET status = 'publicado', published_at = now()
+        WHERE empresa_id = $1 AND mensagem_id = $2
+      RETURNING id, conversa_id, mensagem_id, job_type, correlation_id`,
+      [empresaId, first.id],
+    )).rows[0];
+    const reference = {
+      jobId: job.id,
+      empresaId,
+      conversationId: job.conversa_id,
+      messageId: job.mensagem_id,
+      statusEventId: null,
+      type: job.job_type,
+      correlationId: job.correlation_id,
+      payloadVersion: 1,
+    };
+    assert.equal((await new PostgresJobRepository(appPool).claim(reference)).outcome, "claimed");
+    const handlers = createWorkerHandlers({
+      repository: new PostgresJobHandlerRepository(appPool),
+      conversationService: { async getConversation() {}, async recordMessage() {}, async applyMetaStatus() {} },
+      tenantDefinitionRepository: { async load() {} },
+      metaGateway: { async sendReply(context, payload) {
+        assert.deepEqual(context, { empresaId, numeroWhatsappId: numberId });
+        assert.equal(payload.text, "Resposta humana sintética");
+        return { messages: [{ id: `wamid-human-${suffix}` }] };
+      } },
+    });
+    const result = await handlers.send_human_message(reference);
+    await new PostgresJobRepository(appPool).complete(reference, { result });
+
+    const completed = (await owner.query(
+      `SELECT m.status, m.external_message_id, o.status AS job_status,
+              (SELECT count(*)::int FROM logs_auditoria a
+                WHERE a.empresa_id = $1 AND a.acao = 'conversation.message.send'
+                  AND a.recurso_id = m.id::text) AS audits
+         FROM mensagens m
+         JOIN outbox_jobs o ON o.empresa_id = m.empresa_id AND o.mensagem_id = m.id
+        WHERE m.empresa_id = $1 AND m.id = $2`,
+      [empresaId, first.id],
+    )).rows[0];
+    assert.equal(completed.status, "enviada");
+    assert.equal(completed.external_message_id, `wamid-human-${suffix}`);
+    assert.equal(completed.job_status, "concluido");
+    assert.equal(completed.audits, 2);
+
+    const failedMessage = await service.sendHumanMessage({
+      ...input,
+      body: { text: "Resposta que exercita retry", idempotencyKey: randomUUID() },
+      correlationId: randomUUID(),
+    });
+    const failedJob = (await owner.query(
+      `UPDATE outbox_jobs SET status = 'publicado', published_at = now()
+        WHERE empresa_id = $1 AND mensagem_id = $2
+      RETURNING id, conversa_id, mensagem_id, job_type, correlation_id`,
+      [empresaId, failedMessage.id],
+    )).rows[0];
+    const failedReference = {
+      jobId: failedJob.id,
+      empresaId,
+      conversationId: failedJob.conversa_id,
+      messageId: failedJob.mensagem_id,
+      statusEventId: null,
+      type: failedJob.job_type,
+      correlationId: failedJob.correlation_id,
+      payloadVersion: 1,
+    };
+    const jobRepository = new PostgresJobRepository(appPool);
+    assert.equal((await jobRepository.claim(failedReference, { attempt: 1 })).outcome, "claimed");
+    await jobRepository.retry(failedReference, { attempt: 1, error: { code: "META_TIMEOUT", message: "Falha temporária." } });
+    assert.equal((await owner.query(
+      "SELECT status FROM mensagens WHERE empresa_id = $1 AND id = $2",
+      [empresaId, failedMessage.id],
+    )).rows[0].status, "enfileirada");
+    assert.equal((await jobRepository.claim(failedReference, { attempt: 2 })).outcome, "claimed");
+    await jobRepository.fail(failedReference, {
+      attempt: 2,
+      maxAttempts: 2,
+      error: { code: "META_REQUEST_FAILED", message: "Falha permanente." },
+    });
+    const failedState = (await owner.query(
+      `SELECT m.status, o.status AS job_status,
+              (SELECT count(*)::int FROM jobs_falhos f
+                WHERE f.empresa_id = $1 AND f.mensagem_id = m.id) AS dead_letters
+         FROM mensagens m
+         JOIN outbox_jobs o ON o.empresa_id = m.empresa_id AND o.mensagem_id = m.id
+        WHERE m.empresa_id = $1 AND m.id = $2`,
+      [empresaId, failedMessage.id],
+    )).rows[0];
+    assert.deepEqual(failedState, { status: "falhou", job_status: "falhou", dead_letters: 1 });
+  } finally {
+    await owner.query("ROLLBACK").catch(() => {});
+    if (empresaId) {
+      await owner.query("DELETE FROM logs_auditoria WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM jobs_falhos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM outbox_jobs WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM mensagens WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM conversas WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM contatos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM numeros_whatsapp WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM usuarios_empresas WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM empresas WHERE id = $1", [empresaId]).catch(() => {});
+    }
+    if (operatorId) await owner.query("DELETE FROM usuarios WHERE id = $1", [operatorId]).catch(() => {});
     owner.release();
     await appPool.end();
     await ownerPool.end();

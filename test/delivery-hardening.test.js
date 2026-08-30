@@ -54,6 +54,31 @@ test("rota PUT de módulos usa contrato em lote do painel", async () => {
   assert.deepEqual(captured.body.enabledModules, ["catalog", "appointments"]);
 });
 
+test("rota de resposta humana exige CSRF e devolve aceitação assíncrona", async () => {
+  let captured;
+  let csrfChecked = false;
+  const app = express();
+  app.use(express.json());
+  app.use((request, _response, next) => { request.context = { correlationId: "00000000-0000-4000-8000-000000000044" }; next(); });
+  app.use("/api/admin", createAdminRouter({
+    adminService: {
+      async sendHumanMessage(input) { captured = input; return { id: "message-human", status: "queued" }; },
+    },
+    authenticate(request, _response, next) { request.auth = { user: { id: "operator-a" } }; next(); },
+    csrf(request, _response, next) { csrfChecked = request.get("x-csrf-token") === "csrf-test"; next(); },
+  }));
+  const response = await request(app, "/api/admin/tenants/tenant-a/conversations/conversation-a/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-csrf-token": "csrf-test" },
+    body: JSON.stringify({ text: "Resposta humana", idempotencyKey: "00000000-0000-4000-8000-000000000055" }),
+  });
+  assert.equal(response.status, 202);
+  assert.equal(csrfChecked, true);
+  assert.equal(captured.empresaId, "tenant-a");
+  assert.equal(captured.conversationId, "conversation-a");
+  assert.equal(captured.correlationId, "00000000-0000-4000-8000-000000000044");
+});
+
 test("comprovante privado exige autenticação, tenant e retorna headers seguros", async () => {
   const repository = new MemoryAdminRepository({ tenants: [{ id: "tenant-a", name: "Tenant A", status: "active" }], environment: "test" });
   repository.getPrivateMedia = async ({ empresaId, messageId }) => empresaId === "tenant-a" && messageId === "message-1"

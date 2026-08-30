@@ -98,6 +98,8 @@ O Compose não repassa `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL` à API ou
 
 Comprovantes são baixados pelo worker com a credencial Meta do tenant, aceitos somente como JPEG, PNG, WEBP ou PDF até 10 MB e gravados no volume `media_data`. O banco mantém chave privada, MIME, tamanho, SHA-256 e data de armazenamento. O painel acessa o arquivo somente por endpoint autenticado, sem cache, e cria uma URL temporária no navegador; o conteúdo nunca é enviado à OpenAI.
 
+No atendimento humano, o operador precisa assumir uma conversa antes de responder. O painel envia a mutação com CSRF e UUID de idempotência; API, mensagem, outbox e auditoria compartilham a mesma transação PostgreSQL. O worker recebe somente IDs pelo Redis, resolve o número e a credencial do tenant, envia pela Meta e mantém os estados `enfileirada`, `processando`, `enviada`, `entregue`, `lida` ou `falhou`.
+
 Endpoints esperados:
 
 - `https://api.suaplataforma.com/webhook`
@@ -180,12 +182,13 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 152 testes aprovados e 3 testes PostgreSQL opcionais ignorados sem banco.
+- `npm test`: 158 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
-- Migrações e seed executados em PostgreSQL 16 real; 11 migrações descobertas.
+- Migrações e seed executados em PostgreSQL 16 real; 12 migrações descobertas.
 - Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
 - Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
+- Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

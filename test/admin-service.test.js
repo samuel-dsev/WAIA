@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AdminService, AdminValidationError, MemoryAdminRepository, adminErrorMiddleware } from "../src/modules/admin/index.js";
+import { AdminForbiddenError, AdminService, AdminValidationError, MemoryAdminRepository, adminErrorMiddleware } from "../src/modules/admin/index.js";
 import { ConversationService, MemoryConversationRepository } from "../src/modules/conversations/index.js";
 
 const platform = { user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
@@ -132,4 +132,69 @@ test("falha de auditoria reverte mudança do modo de atendimento", async () => {
   const conversation = await conversationService.getConversation({ empresaId: "tenant-a", conversationId: opened.conversation.id });
   assert.equal(conversation.mode, "bot");
   assert.equal(conversation.operatorId, null);
+});
+
+test("operador registra resposta humana e outbox na mesma unidade auditada", async () => {
+  const { repository } = fixture();
+  let queued;
+  repository.queueHumanMessage = async (input) => {
+    queued = input;
+    return repository.create({
+      resource: "messages",
+      empresaId: input.empresaId,
+      id: "message-human-1",
+      data: { conversationId: input.conversationId, body: input.text, status: "queued" },
+    });
+  };
+  const service = new AdminService({ repository, idGenerator: () => "00000000-0000-4000-8000-000000000099" });
+  const result = await service.sendHumanMessage({
+    auth: operator,
+    empresaId: "tenant-a",
+    conversationId: "conversation-a",
+    body: { text: "Olá!\nComo posso ajudar?", idempotencyKey: "00000000-0000-4000-8000-000000000011" },
+    correlationId: "00000000-0000-4000-8000-000000000022",
+  });
+
+  assert.equal(result.id, "message-human-1");
+  assert.equal(queued.operatorId, "operator-a");
+  assert.equal(queued.correlationId, "00000000-0000-4000-8000-000000000022");
+  assert.equal(queued.transaction.kind, "memory-admin-transaction");
+  assert.equal(repository.audit.at(-1).action, "conversation.message.send");
+  assert.equal(repository.audit.at(-1).resourceId, "message-human-1");
+  assert.deepEqual(repository.audit.at(-1).changedFields, ["text"]);
+});
+
+test("falha de auditoria reverte a resposta humana", async () => {
+  const { repository } = fixture();
+  repository.queueHumanMessage = (input) => repository.create({
+    resource: "messages",
+    empresaId: input.empresaId,
+    id: "message-rollback",
+    data: { conversationId: input.conversationId, body: input.text, status: "queued" },
+  });
+  repository.writeAudit = async () => { throw new Error("auditoria indisponível"); };
+  const service = new AdminService({ repository });
+
+  await assert.rejects(service.sendHumanMessage({
+    auth: operator,
+    empresaId: "tenant-a",
+    conversationId: "conversation-a",
+    body: { text: "Não deve persistir", idempotencyKey: "00000000-0000-4000-8000-000000000033" },
+  }), /auditoria indisponível/u);
+  assert.equal((await repository.list({ resource: "messages", empresaId: "tenant-a" })).items.length, 0);
+});
+
+test("tentativa de responder conversa atribuída a outro operador é auditada", async () => {
+  const { repository } = fixture();
+  repository.queueHumanMessage = async () => { throw new AdminForbiddenError(); };
+  const service = new AdminService({ repository });
+
+  await assert.rejects(service.sendHumanMessage({
+    auth: operator,
+    empresaId: "tenant-a",
+    conversationId: "conversation-a",
+    body: { text: "Tentativa negada", idempotencyKey: "00000000-0000-4000-8000-000000000066" },
+  }), (error) => error.status === 403);
+  assert.equal(repository.audit.at(-1).action, "conversation.message.send");
+  assert.equal(repository.audit.at(-1).result, "denied");
 });

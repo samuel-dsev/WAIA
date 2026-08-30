@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 29 de agosto de 2026 após implementar e comprovar em infraestrutura real o armazenamento privado de comprovantes.
+Atualizado em 30 de agosto de 2026 após implementar e comprovar em infraestrutura real o atendimento humano pelo painel.
 
 ## Diagnóstico executivo
 
@@ -12,7 +12,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
 - Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com onze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- PostgreSQL como fonte de verdade, com doze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
 - Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
 - Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
 - Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.
@@ -22,6 +22,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - OpenAI Responses API com isolamento por tenant, limites, contingência, defesa contra prompt injection e contabilização de custo.
 - Adaptador Google Sheets multiempresa e simuladores testados isoladamente.
 - Comprovantes privados em JPEG, PNG, WEBP ou PDF até 10 MB, com download Meta autenticado por tenant, SHA-256, retenção e visualização auditada no painel.
+- Atendimento humano no painel com assunção da conversa, CSRF, autorização, idempotência, mensagem/outbox/auditoria transacionais e envio assíncrono pelo número do tenant.
 
 ## Correções desta auditoria
 
@@ -53,23 +54,30 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - MIME ou tamanho recusado gera orientação determinística ao usuário e não chama runtime nem IA; bytes de comprovantes nunca são enviados à OpenAI.
 - A retenção remove arquivos privados associados às mensagens anonimizadas.
 - Adicionado `media-init` para corrigir a propriedade do volume sem elevar os privilégios da API ou do worker; `.gitattributes` fixa scripts Alpine em LF no Windows.
+- O operador que assumiu uma conversa agora pode responder pelo painel; outro operador, conversa fora do modo humano, contato bloqueado ou número inativo são recusados no backend.
+- Cada clique usa UUID v4 persistido: repetição da mesma requisição devolve a mensagem existente e não cria outra mensagem nem outro job.
+- A API retorna `202` somente depois de gravar mensagem, outbox e auditoria na mesma transação; falha de auditoria reverte a operação.
+- O worker processa `send_human_message`, envia pelo número/credencial Meta do tenant e mantém retry, dead-letter e estados de entrega/leitura sem carregar texto ou segredos no Redis.
+- A conversa no painel passou a mostrar as 100 mensagens mais recentes em ordem cronológica e o compositor reutiliza a chave de idempotência após falha ambígua de rede.
 
 ## Validação executada
 
-- `npm test`: 155 testes descobertos; 152 aprovados e 3 testes PostgreSQL opcionais ignorados sem `RUN_POSTGRES_INTEGRATION=true`.
-- `node --check`: 133 arquivos JavaScript válidos.
+- `npm test`: 163 testes descobertos; 158 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `node --check`: 134 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
 - PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
-- Migração incremental concluída; onze migrações descobertas e a migração privada de mídia foi aplicada uma vez.
+- Migração incremental concluída; doze migrações descobertas e a migração de atendimento humano foi aplicada uma vez.
 - Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
 - API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
 - `GET /health/ready` retornou HTTP 200.
 - O teste real confirmou `waia_app` como `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` e `NOBYPASSRLS`, sem `CREATE` no schema e sem `TEMP` no banco; tentativas de `CREATE TABLE`, `ALTER TABLE` e escrita em outro tenant foram rejeitadas.
 - A inspeção dos contêineres confirmou ausência de `POSTGRES_PASSWORD` e `DATABASE_MIGRATOR_URL` na API e no worker.
-- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `11` migrações reaplicadas.
+- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `12` migrações reaplicadas.
 - Três integrações PostgreSQL reais passaram: privilégios/RLS, capacidade da agenda e metadados/arquivo privado de mídia.
+- A quarta integração PostgreSQL real comprovou resposta humana idempotente e auditada, envio bem-sucedido, retry e falha final em dead-letter.
+- Redis real recebeu o job `send_human_message` contendo somente IDs, tipo, correlação e versão do payload.
 - API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
@@ -79,7 +87,6 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 ### Bloqueiam produção
 
 - Google Sheets não está ligado ao `createPostgresRuntime` nem aos handlers oficiais. O adaptador existe, mas habilitar o módulo hoje não executa sincronização/exportação real.
-- O painel não envia mensagens humanas; assumir/pausar a conversa funciona, mas o operador não consegue responder por essa interface.
 - Não há tela/endpoint operacional para listar, reenfileirar ou resolver `jobs_falhos`; apenas contadores aparecem no dashboard.
 - Métricas possuem registry em código, porém não são alimentadas nem exportadas para coleta.
 - 2FA/MFA possui colunas no banco, mas não tem fluxo de cadastro, desafio ou recuperação.
@@ -103,11 +110,10 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Fase 1 — fechar o núcleo operacional
 
-1. Implementar envio humano no painel com autorização, CSRF, auditoria, persistência/outbox transacionais e envio pelo número correto do tenant.
-2. Criar gestão de jobs falhos: consulta, detalhe sanitizado, retry explícito e resolução auditada.
-3. Ligar as métricas aos fluxos reais e publicar endpoint protegido para coleta.
-4. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
-5. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
+1. Criar gestão de jobs falhos: consulta, detalhe sanitizado, retry explícito e resolução auditada.
+2. Ligar as métricas aos fluxos reais e publicar endpoint protegido para coleta.
+3. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
+4. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
 
 ### Fase 2 — segurança e recuperação
 
@@ -128,7 +134,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 ## Decisões que ainda dependem do usuário/produto
 
 - Google Sheets será fonte complementar, exportação ou ambos?
-- O atendimento humano será feito no painel WAIA ou integrado a uma caixa externa?
+- O painel WAIA já cobre o atendimento humano mínimo; ainda deve ser decidido se haverá integração futura com uma caixa externa.
 - Qual provedor/estratégia será adotado para reduzir duplicidade no envio Meta?
 - Quais domínio, VPS, RPO/RTO, política de retenção e orçamento por tenant serão usados?
 - O artefato de sessão da raiz pode ser removido?

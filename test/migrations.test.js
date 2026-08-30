@@ -41,3 +41,11 @@ test("mídia privada possui metadados de integridade, limite e retenção", asyn
   assert.match(migration, /media_sha256 ~ '\^\[a-f0-9\]\{64\}\$'/u);
   assert.match(migration, /mensagens_media_retention_idx/u);
 });
+
+test("resposta humana possui idempotência persistente por tenant", async () => {
+  const migration = await readFile(new URL("../db/migrations/012_human_outbound_messages.sql", import.meta.url), "utf8");
+  assert.match(migration, /client_idempotency_key/u);
+  assert.match(migration, /mensagens_operator_idempotency_uq/u);
+  assert.match(migration, /origem_resposta = 'operador'/u);
+  assert.match(migration, /operador_usuario_id IS NOT NULL/u);
+});

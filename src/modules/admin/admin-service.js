@@ -48,6 +48,27 @@ function requiredText(value, field, max = 200) {
   return text;
 }
 
+function requiredHumanMessage(value) {
+  const text = String(value || "").replace(/\r\n?/gu, "\n").trim();
+  if (!text || text.length > 4_096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) {
+    throw new AdminValidationError("A mensagem deve ter entre 1 e 4096 caracteres.", { field: "text" });
+  }
+  return text;
+}
+
+function requiredIdempotencyKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(key)) {
+    throw new AdminValidationError("idempotencyKey deve ser um UUID v4 válido.", { field: "idempotencyKey" });
+  }
+  return key;
+}
+
+function safeCorrelationId(value, fallback) {
+  const id = String(value || "").trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(id) ? id : fallback();
+}
+
 function optionalText(value, field, max = 5_000) {
   if (value === null) return null;
   return requiredText(value, field, max);
@@ -185,7 +206,7 @@ export class AdminService {
     };
   }
 
-  async #audit({ auth, empresaId = null, action, resource, resourceId = null, result = "success", fields = [] }, transaction = null) {
+  async #audit({ auth, empresaId = null, action, resource, resourceId = null, result = "success", fields = [], correlationId = null }, transaction = null) {
     const identity = normalizedAdminAuth(auth);
     await this.repository.writeAudit({
       id: this.idGenerator(),
@@ -196,6 +217,7 @@ export class AdminService {
       resourceId,
       result,
       changedFields: fields.filter((field) => !SENSITIVE_FIELD.test(field)),
+      correlationId,
       occurredAt: this.clock().toISOString(),
     }, { transaction });
   }
@@ -359,10 +381,10 @@ export class AdminService {
     if (definition.pii) await this.#audit({ auth, empresaId, action: `${resource}.read`, resource, resourceId: id });
     if (resource === "conversations") {
       const messages = await this.repository.list({
-        resource: "messages", empresaId, limit: 100, page: 1, sort: "sequence", direction: "asc",
+        resource: "messages", empresaId, limit: 100, page: 1, sort: "sequence", direction: "desc",
         filters: { conversationId: id },
       });
-      return sanitizedAdminView({ conversation: record, messages: messages.items || [] });
+      return sanitizedAdminView({ conversation: record, messages: [...(messages.items || [])].reverse() });
     }
     return sanitizedAdminView(record);
   }
@@ -510,6 +532,62 @@ export class AdminService {
       },
       audit: { action: `conversation.${mode}`, resource: "conversations", resourceId: recordId, fields: ["mode", "operatorId"] },
     });
+  }
+
+  async sendHumanMessage({ auth, empresaId, conversationId, body, correlationId }) {
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.conversations, {
+      write: true,
+      operatorAllowed: true,
+      action: "conversation.message.send",
+      resource: "conversations",
+    });
+    if (typeof this.repository.queueHumanMessage !== "function") {
+      throw new AdminValidationError("Envio humano não configurado.");
+    }
+    assertTenantBody(empresaId, body);
+    const identity = normalizedAdminAuth(auth);
+    const recordId = requiredText(conversationId, "conversationId");
+    const text = requiredHumanMessage(body?.text);
+    const idempotencyKey = requiredIdempotencyKey(body?.idempotencyKey);
+    const requestCorrelationId = safeCorrelationId(correlationId, this.idGenerator);
+    try {
+      return sanitizedAdminView(await this.#auditedMutation({
+        auth,
+        empresaId,
+        mutate: async (transaction) => {
+          const message = await this.repository.queueHumanMessage({
+            empresaId,
+            conversationId: recordId,
+            operatorId: identity.actorId,
+            text,
+            idempotencyKey,
+            correlationId: requestCorrelationId,
+            transaction,
+          });
+          if (!message) throw new AdminNotFoundError();
+          return message;
+        },
+        audit: (message) => ({
+          action: "conversation.message.send",
+          resource: "messages",
+          resourceId: message.id,
+          fields: ["text"],
+          correlationId: requestCorrelationId,
+        }),
+      }));
+    } catch (error) {
+      if (error instanceof AdminForbiddenError) {
+        await this.#audit({
+          auth,
+          empresaId,
+          action: "conversation.message.send",
+          resource: "messages",
+          result: "denied",
+          correlationId: requestCorrelationId,
+        });
+      }
+      throw error;
+    }
   }
 
   async diagnostics({ auth, empresaId = null }) {

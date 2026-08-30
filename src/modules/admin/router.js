@@ -30,6 +30,13 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
   for (const [path, mode] of [["assume", "human"], ["pause", "paused"], ["resume", "bot"]]) {
     router.post(`/tenants/:empresaId/conversations/:id/${path}`, asyncRoute(async (request, response) => response.json(await adminService.setConversationMode({ auth: request.auth, empresaId: request.params.empresaId, conversationId: request.params.id, mode, operatorId: mode === "human" ? request.auth.user.id : null }))));
   }
+  router.post("/tenants/:empresaId/conversations/:id/messages", asyncRoute(async (request, response) => response.status(202).json(await adminService.sendHumanMessage({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    conversationId: request.params.id,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
   router.get("/tenants/:empresaId/messages/:id/media", asyncRoute(async (request, response) => {
     const media = await adminService.getMessageMedia({ auth: request.auth, empresaId: request.params.empresaId, messageId: request.params.id });
     const extension = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" })[media.mimeType] || "bin";
