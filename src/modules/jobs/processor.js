@@ -1,5 +1,6 @@
 import { normalizeJobReference, RetryableJobError, sanitizeJobError } from "./job-reference.js";
 import { TenantConcurrencyLimiter } from "./tenant-limiter.js";
+import { recordMetric } from "../../operations/metrics.js";
 
 function requireMethod(target, method, dependency) {
   if (typeof target?.[method] !== "function") {
@@ -19,6 +20,7 @@ export function createJobProcessor({
   tenantRateLimiter,
   lockTtlMs = 30_000,
   logger = console,
+  metrics,
 } = {}) {
   requireMethod(repository, "claim", "repository");
   requireMethod(repository, "complete", "repository");
@@ -32,6 +34,7 @@ export function createJobProcessor({
   let accepting = true;
 
   async function process(input, execution = {}) {
+    const started = performance.now();
     if (!accepting) throw new RetryableJobError("Worker em encerramento.", "WORKER_SHUTTING_DOWN");
     const reference = normalizeJobReference(input);
     const attempt = Math.max(1, Number(execution.attempt) || 1);
@@ -41,10 +44,12 @@ export function createJobProcessor({
       const sanitized = sanitizeJobError(error);
       if (finalAttempt) {
         await repository.fail(reference, { attempt, maxAttempts, error: sanitized });
+        void recordMetric(metrics, "increment", "waia_jobs_failed_total");
         execution.discard?.();
         error.permanentFailureRecorded = true;
       } else {
         await repository.retry(reference, { attempt, maxAttempts, error: sanitized });
+        void recordMetric(metrics, "increment", "waia_jobs_retried_total");
       }
       logger.warn?.("job_processing_failed", {
         empresaId: reference.empresaId,
@@ -62,12 +67,14 @@ export function createJobProcessor({
       const error = new RetryableJobError("Limite de processamento da empresa atingido.", "TENANT_RATE_LIMIT");
       error.retryAfterMs = rate?.retryAfterMs;
       await recordFailure(error);
+      void recordMetric(metrics, "observe", "waia_job_processing_duration_seconds", (performance.now() - started) / 1_000);
       throw error;
     }
     const releaseTenant = await tenantLimiter.acquire(reference.empresaId);
     if (!releaseTenant) {
       const error = new RetryableJobError("Limite concorrente da empresa atingido.", "TENANT_CONCURRENCY_LIMIT");
       await recordFailure(error);
+      void recordMetric(metrics, "observe", "waia_job_processing_duration_seconds", (performance.now() - started) / 1_000);
       throw error;
     }
 
@@ -98,7 +105,10 @@ export function createJobProcessor({
         }
 
         const claimed = await repository.claim(reference, { attempt, leaseMs: lockTtlMs });
-        if (claimed?.outcome === "completed") return { outcome: "duplicate", reference };
+        if (claimed?.outcome === "completed") {
+          void recordMetric(metrics, "increment", "waia_jobs_duplicate_total");
+          return { outcome: "duplicate", reference };
+        }
         if (claimed?.outcome !== "claimed") {
           throw new RetryableJobError("Job ainda não pode ser processado em ordem.", "JOB_NOT_CLAIMED");
         }
@@ -113,6 +123,7 @@ export function createJobProcessor({
         const result = await handler(reference, claimed.record);
         if (lockLost) throw new RetryableJobError("Lease de processamento foi perdido.", "PROCESSING_LEASE_LOST");
         await repository.complete(reference, { attempt, result });
+        void recordMetric(metrics, "increment", "waia_jobs_completed_total");
         return { outcome: "completed", reference, result };
       } catch (error) {
         await recordFailure(error);
@@ -134,6 +145,7 @@ export function createJobProcessor({
       return await running;
     } finally {
       inflight.delete(running);
+      void recordMetric(metrics, "observe", "waia_job_processing_duration_seconds", (performance.now() - started) / 1_000);
     }
   }
 

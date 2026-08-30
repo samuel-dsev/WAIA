@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { BullMqJobQueue, closeRedisConnection, createRedisConnection } from "../src/infra/redis/index.js";
+import { RedisMetricsRegistry } from "../src/operations/metrics.js";
 
 const enabled = process.env.RUN_REDIS_INTEGRATION === "true";
 
@@ -10,6 +11,8 @@ test("Redis real recebe somente referências da resposta humana", { skip: !enabl
   const suffix = randomUUID();
   const connection = createRedisConnection({ url: process.env.REDIS_URL });
   const queue = new BullMqJobQueue({ connection, queueName: `waia-human-integration-${suffix}` });
+  const metricsPrefix = `waia:metrics:integration:${suffix}`;
+  const metrics = new RedisMetricsRegistry(connection, { prefix: metricsPrefix });
   const reference = {
     jobId: randomUUID(),
     empresaId: randomUUID(),
@@ -31,7 +34,23 @@ test("Redis real recebe somente referências da resposta humana", { skip: !enabl
     ]);
     await job.remove();
     await queue.queue.obliterate({ force: true });
+    await metrics.increment("waia_jobs_completed_total", 2);
+    await metrics.observe("waia_job_processing_duration_seconds", 0.25);
+    await metrics.observe("waia_job_processing_duration_seconds", 0.75);
+    const metricsSnapshot = await metrics.snapshot();
+    assert.equal(metricsSnapshot.counters.waia_jobs_completed_total, 2);
+    assert.deepEqual(metricsSnapshot.summaries.waia_job_processing_duration_seconds, {
+      count: 2,
+      sum: 1,
+      max: 0.75,
+    });
   } finally {
+    await connection.del(
+      `${metricsPrefix}:counters`,
+      `${metricsPrefix}:gauges`,
+      `${metricsPrefix}:summaries`,
+      `${metricsPrefix}:summary:waia_job_processing_duration_seconds`,
+    ).catch(() => {});
     await queue.close();
     await closeRedisConnection(connection);
   }

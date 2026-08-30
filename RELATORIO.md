@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 30 de agosto de 2026 após implementar e comprovar em infraestrutura real a gestão operacional de jobs falhos.
+Atualizado em 30 de agosto de 2026 após implementar e comprovar em infraestrutura real a coleta protegida de métricas operacionais.
 
 ## Diagnóstico executivo
 
@@ -24,6 +24,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Comprovantes privados em JPEG, PNG, WEBP ou PDF até 10 MB, com download Meta autenticado por tenant, SHA-256, retenção e visualização auditada no painel.
 - Atendimento humano no painel com assunção da conversa, CSRF, autorização, idempotência, mensagem/outbox/auditoria transacionais e envio assíncrono pelo número do tenant.
 - Gestão de jobs falhos no painel, restrita a administradores, com consulta sanitizada, retry por novo job, resolução explícita e auditoria transacional.
+- Métricas Prometheus protegidas por Bearer dedicado, com contadores/durações compartilhados entre API e worker no Redis e gauges reais do PostgreSQL, BullMQ e heartbeats.
 
 ## Correções desta auditoria
 
@@ -65,10 +66,15 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O retry manual não reutiliza o ID retido pelo BullMQ: cria uma nova outbox pendente, reenfileira a mensagem somente se ela ainda estiver em `falhou` e encerra o incidente original.
 - A resolução sem retry encerra somente o alerta; ela não transforma uma mensagem falha em sucesso.
 - Retry e resolução exigem motivo, papel administrativo, CSRF e auditoria na mesma transação PostgreSQL; falha da auditoria reverte a decisão.
+- O registry de métricas passou a rejeitar nomes inválidos e valores não finitos/negativos, impedindo labels improvisadas e cardinalidade por identificador.
+- Webhook, requisições HTTP, dispatcher da outbox e processor do worker agora alimentam contadores de sucesso/falha/retry/duplicidade e resumos de duração sem bloquear o fluxo principal.
+- API e worker escrevem no mesmo namespace Redis; o endpoint `/metrics` agrega esses eventos com filas BullMQ, workers ativos e estados duráveis de mensagens, outbox, dead-letter, tenants e uso de IA.
+- A coleta exige `METRICS_BEARER_TOKEN` com pelo menos 32 caracteres em produção, compara o token em tempo constante e responde com `no-store` e formato Prometheus.
+- Nenhuma métrica possui label ou valor de tenant, usuário, conversa, mensagem, telefone, correlação ou conteúdo.
 
 ## Validação executada
 
-- `npm test`: 169 testes descobertos; 164 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `npm test`: 172 testes descobertos; 167 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `node --check`: 134 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
@@ -84,6 +90,8 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Três integrações PostgreSQL reais passaram: privilégios/RLS, capacidade da agenda e metadados/arquivo privado de mídia.
 - A quarta integração PostgreSQL real comprovou resposta humana idempotente e auditada, falha final, listagem sanitizada do dead-letter, retry por novo job e resolução sem alterar falsamente o estado da mensagem.
 - Redis real recebeu o job `send_human_message` contendo somente IDs, tipo, correlação e versão do payload.
+- Redis real acumulou contador e resumo de duração compartilhados; o endpoint real recusou acesso sem Bearer com HTTP 401 e retornou HTTP 200 apenas com token sintético.
+- O scrape real exibiu `waia_metrics_collector_up 1`, um heartbeat de worker e gauges atuais de outbox/BullMQ sem labels de alta cardinalidade.
 - API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
@@ -93,7 +101,6 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 ### Bloqueiam produção
 
 - Google Sheets não está ligado ao `createPostgresRuntime` nem aos handlers oficiais. O adaptador existe, mas habilitar o módulo hoje não executa sincronização/exportação real.
-- Métricas possuem registry em código, porém não são alimentadas nem exportadas para coleta.
 - 2FA/MFA possui colunas no banco, mas não tem fluxo de cadastro, desafio ou recuperação.
 - Backup e, principalmente, restauração ainda não foram exercitados em uma cópia descartável do ambiente alvo.
 - Meta, OpenAI e Google não foram homologados com credenciais reais nesta base SaaS.
@@ -108,6 +115,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - Cabeçalhos HTTP estão razoáveis com Helmet, mas CSP do app está desabilitada e a política do proxy ainda precisa de hardening para produção.
 - O arquivo `codex-session-01a044fd-4841-73b3-b456-d9d028928dee.md` tem cerca de 2,7 MB e permanece na raiz. Não foi removido por pertencer ao histórico do usuário.
 - O volume local `media_data` é adequado para homologação em host único, mas deve entrar no backup/restauração e ser substituído ou replicado se a produção usar múltiplos workers/hosts.
+- Contadores e resumos operacionais usam Redis e podem reiniciar se o volume for perdido; Prometheus deve tratar essa queda como reset de contador. Gauges de estado são recalculados das fontes reais a cada scrape.
 - O repositório Git está presente, na branch `main`, conectado a `origin`; as mudanças desta continuidade permanecem locais e ainda não foram commitadas.
 - A entrada legada mantém endpoints de diagnóstico/sincronização sem autenticação e aceita webhook sem assinatura quando não há segredo; ela não deve ser exposta nem usada como produção.
 
@@ -115,25 +123,24 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Fase 1 — fechar o núcleo operacional
 
-1. Ligar as métricas aos fluxos reais e publicar endpoint protegido para coleta.
-2. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
-3. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
+1. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
+2. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
 
 ### Fase 2 — segurança e recuperação
 
-4. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
-5. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
-6. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS, agenda e jobs falhos, para concorrência de webhook e pedidos.
-7. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
-8. Retirar o artefato de sessão da raiz somente após autorização do usuário.
+3. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
+4. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
+5. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS, agenda, jobs falhos e métricas, para concorrência de webhook e pedidos.
+6. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
+7. Retirar o artefato de sessão da raiz somente após autorização do usuário.
 
 ### Fase 3 — homologação e produção
 
-9. Subir uma homologação isolada com domínio, TLS, volumes, monitoramento e credenciais exclusivas de teste.
-10. Cadastrar duas empresas completas e provar isolamento de números, credenciais, mensagens, limites, painel e integrações.
-11. Homologar Meta, OpenAI e Google com dados sintéticos; testar retries, indisponibilidade e limites reais.
-12. Executar teste ponta a ponta: webhook assinado → persistência/outbox → worker → resposta Meta → status de entrega/leitura.
-13. Fazer revisão LGPD/retenção, runbook de incidentes e checklist de go-live antes de qualquer tráfego real.
+8. Subir uma homologação isolada com domínio, TLS, volumes, monitoramento e credenciais exclusivas de teste.
+9. Cadastrar duas empresas completas e provar isolamento de números, credenciais, mensagens, limites, painel e integrações.
+10. Homologar Meta, OpenAI e Google com dados sintéticos; testar retries, indisponibilidade e limites reais.
+11. Executar teste ponta a ponta: webhook assinado → persistência/outbox → worker → resposta Meta → status de entrega/leitura.
+12. Fazer revisão LGPD/retenção, runbook de incidentes e checklist de go-live antes de qualquer tráfego real.
 
 ## Decisões que ainda dependem do usuário/produto
 

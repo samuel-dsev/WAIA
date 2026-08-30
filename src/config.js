@@ -41,6 +41,9 @@ export const config = {
     sessionTtlHours: numberFromEnv("SESSION_TTL_HOURS", 12),
     allowedPanelOrigin: process.env.PANEL_ORIGIN || "http://localhost:3000",
   },
+  metrics: {
+    bearerToken: process.env.METRICS_BEARER_TOKEN || "",
+  },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
@@ -78,5 +81,12 @@ export function assertRuntimeConfiguration(current = config) {
   if (!current.whatsapp.appSecret) missing.push("META_APP_SECRET");
   if (missing.length) {
     throw new Error(`Configuração de produção incompleta: ${missing.join(", ")}.`);
+  }
+}
+
+export function assertMetricsConfiguration(current = config) {
+  if (current.environment !== "production") return;
+  if (!current.metrics?.bearerToken || current.metrics.bearerToken.length < 32) {
+    throw new Error("Configuração de produção incompleta: METRICS_BEARER_TOKEN>=32.");
   }
 }

@@ -102,10 +102,13 @@ No atendimento humano, o operador precisa assumir uma conversa antes de responde
 
 Administradores da empresa também possuem uma área própria para `jobs_falhos`. A listagem e o detalhe expõem somente campos sanitizados. Reenfileirar encerra o incidente original e cria um novo outbox job com outro ID; marcar como resolvido apenas encerra o alerta, sem alterar o estado final da mensagem. As duas decisões exigem motivo, CSRF, autorização por tenant e auditoria na mesma transação.
 
+Métricas operacionais são publicadas em `/metrics` no formato Prometheus e exigem `Authorization: Bearer <METRICS_BEARER_TOKEN>`. O token é obrigatório em produção e precisa ter pelo menos 32 caracteres. API e worker acumulam contadores e durações agregados no Redis; o scrape complementa esses dados com gauges do PostgreSQL, BullMQ e heartbeat dos workers. Não existem labels com tenant, usuário, conversa, mensagem ou correlação.
+
 Endpoints esperados:
 
 - `https://api.suaplataforma.com/webhook`
 - `https://api.suaplataforma.com/api/admin`
+- `https://api.suaplataforma.com/metrics` — somente para o coletor autenticado
 - `https://api.suaplataforma.com/privacy`
 - `https://api.suaplataforma.com/data-deletion`
 - `https://painel.suaplataforma.com`
@@ -179,12 +182,13 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 - API e painel mascaram segredos.
 - Logs estruturados usam sanitização.
 - Health público é mínimo; diagnósticos detalhados exigem autenticação administrativa.
+- Métricas exigem Bearer dedicado, não usam cache e não expõem identificadores de tenant ou conteúdo operacional.
 
 ## Validação
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 164 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `npm test`: 167 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
 - Migrações e seed executados em PostgreSQL 16 real; 13 migrações descobertas.
@@ -192,6 +196,7 @@ Comandos executados nesta continuidade:
 - Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
 - Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
 - Teste real comprovou gestão do dead-letter: consulta sanitizada, novo outbox job no retry, resolução sem falso sucesso da mensagem e auditoria transacional.
+- Endpoint Prometheus real recusou coleta sem token com HTTP 401 e retornou HTTP 200 com Bearer sintético, gauges PostgreSQL/BullMQ e heartbeat do worker; Redis real acumulou contadores e durações compartilhados.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

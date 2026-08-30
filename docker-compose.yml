@@ -67,6 +67,7 @@ services:
     command: npm run start:api
     environment:
       <<: *runtime-environment
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
       API_PORT: 3001
       WEBHOOK_PORT: 3001
       COOKIE_SECURE: "true"

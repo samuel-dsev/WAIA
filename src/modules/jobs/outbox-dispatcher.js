@@ -1,4 +1,5 @@
 import { normalizeJobReference } from "./job-reference.js";
+import { recordMetric } from "../../operations/metrics.js";
 
 export function createOutboxDispatcher({
   repository,
@@ -8,6 +9,7 @@ export function createOutboxDispatcher({
   retryDelayMs = 1_000,
   reconcileAfterMs = 300_000,
   logger = console,
+  metrics,
 } = {}) {
   if (typeof repository?.claimBatch !== "function"
       || typeof repository?.markPublished !== "function"
@@ -17,26 +19,33 @@ export function createOutboxDispatcher({
   if (typeof queue?.add !== "function") throw new TypeError("queue.add é obrigatório.");
 
   async function dispatchOnce() {
-    const claimed = await repository.claimBatch({ limit: batchSize, leaseMs, reconcileAfterMs });
+    const started = process.hrtime.bigint();
     const results = [];
-    for (const candidate of claimed) {
-      const reference = normalizeJobReference(candidate);
-      try {
-        await queue.add(reference);
-        await repository.markPublished(reference);
-        results.push({ jobId: reference.jobId, outcome: "published" });
-      } catch (error) {
-        await repository.release(reference, { delayMs: retryDelayMs, error });
-        logger.warn?.("outbox_publication_failed", {
-          empresaId: reference.empresaId,
-          jobId: reference.jobId,
-          correlationId: reference.correlationId,
-          code: typeof error?.code === "string" ? error.code : "QUEUE_UNAVAILABLE",
-        });
-        results.push({ jobId: reference.jobId, outcome: "released" });
+    try {
+      const claimed = await repository.claimBatch({ limit: batchSize, leaseMs, reconcileAfterMs });
+      for (const candidate of claimed) {
+        const reference = normalizeJobReference(candidate);
+        try {
+          await queue.add(reference);
+          await repository.markPublished(reference);
+          void recordMetric(metrics, "increment", "waia_outbox_jobs_published_total");
+          results.push({ jobId: reference.jobId, outcome: "published" });
+        } catch (error) {
+          await repository.release(reference, { delayMs: retryDelayMs, error });
+          void recordMetric(metrics, "increment", "waia_outbox_publication_failures_total");
+          logger.warn?.("outbox_publication_failed", {
+            empresaId: reference.empresaId,
+            jobId: reference.jobId,
+            correlationId: reference.correlationId,
+            code: typeof error?.code === "string" ? error.code : "QUEUE_UNAVAILABLE",
+          });
+          results.push({ jobId: reference.jobId, outcome: "released" });
+        }
       }
+      return results;
+    } finally {
+      void recordMetric(metrics, "observe", "waia_outbox_dispatch_duration_seconds", Number(process.hrtime.bigint() - started) / 1e9);
     }
-    return results;
   }
 
   return Object.freeze({ dispatchOnce });

@@ -9,7 +9,7 @@ import {
 import { closePostgresPool } from "./infra/postgres/pool.js";
 import { closeRedisConnection } from "./infra/redis/connection.js";
 
-assertConfigured(config);
+assertConfigured(config, { metrics: true });
 
 const runtime = createPostgresRuntime({ config });
 await runtime.redis.ping();

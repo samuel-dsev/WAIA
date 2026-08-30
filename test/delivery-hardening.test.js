@@ -148,6 +148,7 @@ test("infra publica painel e separa migrador do papel restrito da aplicação", 
   ]);
   assert.match(nginx, /location \/api\/[^]*proxy_pass http:\/\/api:3001/u);
   assert.match(compose, /DATABASE_APP_USER/u);
+  assert.match(compose, /METRICS_BEARER_TOKEN/u);
   assert.match(compose, /DATABASE_MIGRATOR_URL: postgres:\/\/\$\{POSTGRES_USER/u);
   assert.match(compose, /media-init:[^]*chown -R 1000:1000 \/media/u);
   assert.match(compose, /service_completed_successfully/u);
@@ -172,6 +173,8 @@ test("runtime SaaS não aceita fallback global de credenciais Meta", async () =>
   assert.doesNotMatch(configSource, /process\.env\.WHATSAPP_(?:ACCESS_TOKEN|PHONE_NUMBER_ID)/u);
   assert.match(legacySource, /legacyCapitaoMorWhatsapp/u);
   assert.match(envExample, /CAPITAO_MOR_WHATSAPP_ACCESS_TOKEN/u);
+  assert.match(envExample, /METRICS_BEARER_TOKEN=/u);
+  assert.match(configSource, /METRICS_BEARER_TOKEN>=32/u);
   assert.doesNotMatch(envExample, /^WHATSAPP_(?:ACCESS_TOKEN|PHONE_NUMBER_ID)=/mu);
 });
 

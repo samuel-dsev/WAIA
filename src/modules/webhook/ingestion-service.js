@@ -1,3 +1,5 @@
+import { recordMetric } from "../../operations/metrics.js";
+
 function requireMethod(target, name, dependencyName) {
   if (typeof target?.[name] !== "function") {
     throw new TypeError(`${dependencyName}.${name} é obrigatório.`);
@@ -32,6 +34,7 @@ export function createWebhookIngestionService({
   repository,
   outbox,
   logger = console,
+  metrics,
 } = {}) {
   requireMethod(tenantResolver, "resolveByPhoneNumberId", "tenantResolver");
   requireMethod(repository, "withTenantTransaction", "repository");
@@ -39,7 +42,7 @@ export function createWebhookIngestionService({
   requireMethod(repository, "insertStatusEvent", "repository");
   requireMethod(outbox, "add", "outbox");
 
-  async function ingestEvent(event, options = {}) {
+  async function ingestEventCore(event, options = {}) {
     const { correlationId } = options;
     const tenant = Object.hasOwn(options, "tenantContext")
       ? options.tenantContext
@@ -121,6 +124,27 @@ export function createWebhookIngestionService({
 
       throw new TypeError("Tipo de evento de webhook desconhecido.");
     });
+  }
+
+  async function ingestEvent(event, options = {}) {
+    const started = process.hrtime.bigint();
+    void recordMetric(metrics, "increment", "waia_webhook_events_received_total");
+    try {
+      const result = await ingestEventCore(event, options);
+      const outcomeMetrics = {
+        accepted: "waia_webhook_events_accepted_total",
+        duplicate: "waia_webhook_events_duplicate_total",
+        unknown_number: "waia_webhook_events_unknown_number_total",
+        inactive_tenant: "waia_webhook_events_inactive_tenant_total",
+      };
+      if (outcomeMetrics[result.outcome]) void recordMetric(metrics, "increment", outcomeMetrics[result.outcome]);
+      return result;
+    } catch (error) {
+      void recordMetric(metrics, "increment", "waia_webhook_events_failed_total");
+      throw error;
+    } finally {
+      void recordMetric(metrics, "observe", "waia_webhook_ingest_duration_seconds", Number(process.hrtime.bigint() - started) / 1e9);
+    }
   }
 
   async function ingestEvents(events, { correlationId } = {}) {

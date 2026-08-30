@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebhookIngestionService } from "../src/modules/webhook/ingestion-service.js";
+import { MetricsRegistry } from "../src/operations/metrics.js";
 
 function message(phoneNumberId, externalMessageId) {
   return {
@@ -21,7 +22,7 @@ function status(phoneNumberId, externalMessageId) {
   };
 }
 
-function dependencies({ tenants, duplicateIds = new Set(), failTransaction = false } = {}) {
+function dependencies({ tenants, duplicateIds = new Set(), failTransaction = false, metrics = new MetricsRegistry() } = {}) {
   const inserted = [];
   const statusEvents = [];
   const jobs = [];
@@ -57,8 +58,9 @@ function dependencies({ tenants, duplicateIds = new Set(), failTransaction = fal
     repository,
     outbox: { async add(_transaction, job) { jobs.push(job); } },
     logger: { warn() {}, info() {} },
+    metrics,
   });
-  return { service, inserted, statusEvents, jobs, resolutions };
+  return { service, inserted, statusEvents, jobs, resolutions, metrics };
 }
 
 test("resolve e persiste duas empresas pelo phone_number_id correto", async () => {
@@ -81,6 +83,9 @@ test("resolve e persiste duas empresas pelo phone_number_id correto", async () =
     ["tenant-b", "process_inbound_message"],
   ]);
   assert.equal("event" in setup.jobs[0], false);
+  assert.equal(setup.metrics.snapshot().counters.waia_webhook_events_received_total, 2);
+  assert.equal(setup.metrics.snapshot().counters.waia_webhook_events_accepted_total, 2);
+  assert.equal(setup.metrics.snapshot().summaries.waia_webhook_ingest_duration_seconds.count, 2);
 });
 
 test("número desconhecido e empresa suspensa não persistem nem enfileiram", async () => {

@@ -8,6 +8,7 @@ import {
   normalizeJobReference,
   retryDelay,
 } from "../src/modules/jobs/index.js";
+import { MetricsRegistry } from "../src/operations/metrics.js";
 
 function job(overrides = {}) {
   return {
@@ -21,7 +22,7 @@ function job(overrides = {}) {
   };
 }
 
-function setup(handler, references = [job()]) {
+function setup(handler, references = [job()], metrics = new MetricsRegistry()) {
   const repository = new MemoryJobRepository();
   for (const reference of references) repository.seed(reference);
   const processor = createJobProcessor({
@@ -30,8 +31,9 @@ function setup(handler, references = [job()]) {
     lockManager: new MemoryLockManager(),
     lockTtlMs: 100,
     logger: { warn() {} },
+    metrics,
   });
-  return { repository, processor };
+  return { repository, processor, metrics };
 }
 
 test("retry exponencial aplica limite e jitter controlável", () => {
@@ -51,12 +53,15 @@ test("rate limit afeta somente a empresa que excedeu sua janela", async () => {
 test("job duplicado é idempotente no repositório e não executa duas vezes", async () => {
   let calls = 0;
   const reference = job();
-  const { processor } = setup(async () => { calls += 1; return "ok"; });
+  const { processor, metrics } = setup(async () => { calls += 1; return "ok"; });
   const first = await processor.process(reference);
   const duplicate = await processor.process(reference);
   assert.equal(first.outcome, "completed");
   assert.equal(duplicate.outcome, "duplicate");
   assert.equal(calls, 1);
+  assert.equal(metrics.snapshot().counters.waia_jobs_completed_total, 1);
+  assert.equal(metrics.snapshot().counters.waia_jobs_duplicate_total, 1);
+  assert.equal(metrics.snapshot().summaries.waia_job_processing_duration_seconds.count, 2);
 });
 
 test("falha final vai para dead-letter sanitizada", async () => {
@@ -64,7 +69,7 @@ test("falha final vai para dead-letter sanitizada", async () => {
   const error = new Error("falha\nBearer abcdefghijklmnop");
   error.code = "INVALID_INPUT";
   error.retryable = false;
-  const { repository, processor } = setup(async () => { throw error; });
+  const { repository, processor, metrics } = setup(async () => { throw error; });
   let discarded = false;
   await assert.rejects(processor.process(reference, {
     attempt: 1,
@@ -75,6 +80,7 @@ test("falha final vai para dead-letter sanitizada", async () => {
   assert.equal(discarded, true);
   assert.equal(failure.error.code, "INVALID_INPUT");
   assert.equal(failure.error.message, "falha Bearer [REDACTED]");
+  assert.equal(metrics.snapshot().counters.waia_jobs_failed_total, 1);
 });
 
 test("referência da fila rejeita conteúdo operacional", () => {

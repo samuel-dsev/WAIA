@@ -3,7 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "node:url";
-import { assertRuntimeConfiguration, config as defaultConfig } from "../config.js";
+import { assertMetricsConfiguration, assertRuntimeConfiguration, config as defaultConfig } from "../config.js";
 import { createStructuredLogger } from "../operations/logger.js";
 import { createHealthService } from "../operations/health.js";
 import { createPostgresPool } from "../infra/postgres/pool.js";
@@ -67,6 +67,12 @@ import { createRetentionRunner, startRetentionScheduler } from "../operations/re
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
 import { PrivateMediaStore } from "../infra/media/private-media-store.js";
+import {
+  RedisMetricsRegistry,
+  createMetricsHandler,
+  createOperationalMetricsCollector,
+  recordMetric,
+} from "../operations/metrics.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public", import.meta.url));
 const panelDirectory = fileURLToPath(new URL("../../panel", import.meta.url));
@@ -113,6 +119,7 @@ export function createPostgresRuntime({
 } = {}) {
   const logSink = logger ? null : createPostgresOperationalLogSink(pool);
   const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
+  const metrics = new RedisMetricsRegistry(redis);
   const conversationRepository = new PostgresConversationRepository(pool);
   const conversationService = new ConversationService({ repository: conversationRepository });
   const mediaStore = new PrivateMediaStore({ root: config.media.storageRoot, maxBytes: config.media.maxBytes });
@@ -214,6 +221,7 @@ export function createPostgresRuntime({
     metaGateway,
     queue,
     health,
+    metrics,
   });
 }
 
@@ -318,6 +326,9 @@ export function createApiApp({
 } = {}) {
   if (!runtime) throw new TypeError("runtime e obrigatorio.");
   const app = express();
+  const metricsCollector = runtime.metrics && runtime.pool
+    ? createOperationalMetricsCollector({ metrics: runtime.metrics, pool: runtime.pool, queue: runtime.queue, redis: runtime.redis })
+    : null;
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
   app.use(helmet({
@@ -333,6 +344,16 @@ export function createApiApp({
     request.context = { correlationId: request.get("x-correlation-id") || randomUUID() };
     next();
   });
+  app.use((request, response, next) => {
+    const started = process.hrtime.bigint();
+    response.once("finish", () => {
+      void recordMetric(runtime.metrics, "increment", "waia_http_requests_total");
+      if (response.statusCode >= 400 && response.statusCode < 500) void recordMetric(runtime.metrics, "increment", "waia_http_client_errors_total");
+      if (response.statusCode >= 500) void recordMetric(runtime.metrics, "increment", "waia_http_server_errors_total");
+      void recordMetric(runtime.metrics, "observe", "waia_http_request_duration_seconds", Number(process.hrtime.bigint() - started) / 1e9);
+    });
+    next();
+  });
   app.use(jsonParser());
   app.get("/health/live", (_request, response) => response.json(runtime.health.live()));
   app.get("/health/ready", async (request, response, next) => {
@@ -343,6 +364,9 @@ export function createApiApp({
       next(error);
     }
   });
+  app.get("/metrics", metricsCollector
+    ? createMetricsHandler({ collector: metricsCollector, token: config.metrics?.bearerToken })
+    : (_request, response) => response.status(404).end());
   app.get("/privacy", (_request, response) => response.sendFile("privacy.html", { root: publicDirectory }));
   app.get("/data-deletion", (_request, response) => response.sendFile("data-deletion.html", { root: publicDirectory }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
@@ -357,6 +381,7 @@ export function createApiApp({
       repository: new PostgresWebhookRepository(runtime.pool),
       outbox: new PostgresOutboxRepository(),
       logger,
+      metrics: runtime.metrics,
     }),
     logger,
   }));
@@ -412,6 +437,7 @@ export function createWorkerRuntime({
     }),
     tenantRateLimiter: new RedisTenantRateLimiter(runtime.redis),
     logger,
+    metrics: runtime.metrics,
   });
   const worker = createBullMqWorker({
     connection: runtime.redis,
@@ -424,6 +450,7 @@ export function createWorkerRuntime({
     repository: new PostgresOutboxDispatchRepository(runtime.pool),
     queue: runtime.queue,
     logger,
+    metrics: runtime.metrics,
   }), { logger });
   const retention = startRetentionScheduler(createRetentionRunner({
     pool: runtime.pool,
@@ -453,8 +480,9 @@ export function createWorkerRuntime({
   });
 }
 
-export function assertConfigured(config = defaultConfig) {
+export function assertConfigured(config = defaultConfig, { metrics = false } = {}) {
   assertRuntimeConfiguration(config);
+  if (metrics) assertMetricsConfiguration(config);
   if (config.infrastructureMode !== "postgres") {
     throw new Error("API e worker oficiais exigem INFRASTRUCTURE_MODE=postgres.");
   }
