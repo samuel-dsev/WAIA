@@ -1,4 +1,5 @@
 #!/bin/sh
+# Este script é executado no Alpine e deve permanecer com finais de linha LF.
 set -eu
 
 : "${POSTGRES_HOST:?POSTGRES_HOST obrigatorio}"

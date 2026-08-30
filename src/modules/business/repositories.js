@@ -52,6 +52,7 @@ export class PostgresOrderRepository {
         `SELECT id FROM mensagens
           WHERE empresa_id = $1 AND conversa_id = $2 AND media_external_id = $3
             AND direcao = 'entrada' AND tipo IN ('imagem', 'documento')
+            AND media_storage_key IS NOT NULL AND media_sha256 IS NOT NULL
           ORDER BY sequence DESC LIMIT 1`,
         [input.empresaId, input.conversationId, input.receiptId],
       );

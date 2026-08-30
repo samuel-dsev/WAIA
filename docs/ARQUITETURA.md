@@ -44,6 +44,8 @@ O mesmo telefone pode existir em tenants diferentes. Conversas, históricos, ped
 
 Segredos recuperáveis usam AES-256-GCM, IV aleatório, tag de autenticação, versão da chave e AAD vinculada a empresa, credencial, provedor e finalidade. A chave mestra fica fora do banco. APIs retornam apenas máscara e metadados; auditoria nunca registra valores. O runtime multiempresa não aceita token de acesso nem `phone_number_id` globais para a Meta: ambos são resolvidos pelo tenant e pelo cofre.
 
+Mídias recebidas não entram em Redis nem no contexto da IA. O worker resolve o `mediaId` na Meta, limita host, timeout, MIME e tamanho, calcula SHA-256 e grava em armazenamento privado com chave prefixada pelo tenant. A API lê o arquivo somente após autenticação e autorização no tenant, com auditoria, `no-store` e verificação de integridade.
+
 Produção falha fechada se os segredos de validação do webhook ou a infraestrutura essencial estiverem ausentes. Desenvolvimento e testes podem usar adaptadores simulados explicitamente habilitados.
 
 Sessões administrativas são opacas, revogáveis e persistidas, com cookies `HttpOnly`, `Secure` em produção e `SameSite=Strict`. Mutações exigem CSRF e autorização no backend. A alteração principal e seu log de auditoria compartilham a mesma transação, inclusive para credenciais e mudanças de atendimento; sem auditoria persistida, a mutação é revertida.
@@ -51,5 +53,7 @@ Sessões administrativas são opacas, revogáveis e persistidas, com cookies `Ht
 ## Operação inicial
 
 Docker Compose executa proxy, API, worker, painel, PostgreSQL e Redis em rede interna. Somente proxy publica portas. Health público informa apenas vida/prontidão; diagnósticos detalhados exigem autenticação. PostgreSQL e Redis usam volumes e nunca são publicados diretamente.
+
+O volume `media_data` é compartilhado apenas por API e worker. Um inicializador efêmero ajusta sua propriedade para o UID não privilegiado da aplicação; API e worker continuam executando como `node`. A rotina de retenção remove o arquivo depois de anonimizar seus metadados no banco.
 
 O ambiente local pode usar adaptadores em memória para desenvolvimento da interface e dos fluxos sem credenciais externas. O modo de produção exige PostgreSQL, Redis e chave mestra.

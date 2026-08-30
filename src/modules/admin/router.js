@@ -30,6 +30,20 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
   for (const [path, mode] of [["assume", "human"], ["pause", "paused"], ["resume", "bot"]]) {
     router.post(`/tenants/:empresaId/conversations/:id/${path}`, asyncRoute(async (request, response) => response.json(await adminService.setConversationMode({ auth: request.auth, empresaId: request.params.empresaId, conversationId: request.params.id, mode, operatorId: mode === "human" ? request.auth.user.id : null }))));
   }
+  router.get("/tenants/:empresaId/messages/:id/media", asyncRoute(async (request, response) => {
+    const media = await adminService.getMessageMedia({ auth: request.auth, empresaId: request.params.empresaId, messageId: request.params.id });
+    const extension = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" })[media.mimeType] || "bin";
+    response.set({
+      "Cache-Control": "private, no-store, max-age=0",
+      "Content-Disposition": `inline; filename="comprovante-${request.params.id}.${extension}"`,
+      "Content-Length": String(media.data.length),
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": media.mimeType,
+      "X-Content-Type-Options": "nosniff",
+      "X-Media-SHA256": media.sha256,
+    });
+    response.send(media.data);
+  }));
   router.get("/tenants/:empresaId/:resource", asyncRoute(async (request, response) => response.json(await adminService.list({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, query: { ...request.query, limit: request.query.pageSize } }))));
   router.post("/tenants/:empresaId/:resource", asyncRoute(async (request, response) => response.status(201).json(await adminService.create({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, body: request.body }))));
   router.get("/tenants/:empresaId/:resource/:id", asyncRoute(async (request, response) => response.json(await adminService.get({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, id: request.params.id }))));

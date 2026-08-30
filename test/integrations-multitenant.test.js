@@ -122,6 +122,57 @@ test("Meta aplica timeout e nunca registra token nem corpo de erro do provedor",
   );
 });
 
+test("Meta baixa mídia autenticada somente de host e MIME permitidos", async () => {
+  const data = Buffer.from("imagem-sintetica");
+  const calls = [];
+  const gateway = createMetaGateway({
+    credentialResolver: { async resolveMeta() { return { accessToken: "token-media", phoneNumberId: "phone-a", apiVersion: "v99.0" }; } },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/media-1")) {
+        return response(200, { url: "https://lookaside.fbsbx.com/media/file", mime_type: "image/jpeg", file_size: data.length });
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get(name) { return ({ "content-type": "image/jpeg", "content-length": String(data.length) })[name.toLowerCase()] || null; } },
+        async arrayBuffer() { return data; },
+      };
+    },
+  });
+  const downloaded = await gateway.downloadMedia(
+    { empresaId: "tenant-a", numeroWhatsappId: "number-a" },
+    { mediaId: "media-1", maxBytes: 1024, allowedMimeTypes: ["image/jpeg"] },
+  );
+  assert.deepEqual(downloaded.data, data);
+  assert.equal(downloaded.mimeType, "image/jpeg");
+  assert.equal(calls[1].options.headers.Authorization, "Bearer token-media");
+  assert.equal(calls[1].options.method, "GET");
+});
+
+test("Meta rejeita URL, MIME e tamanho de mídia antes de persistir", async () => {
+  const metadata = { url: "https://example.com/file", mime_type: "image/jpeg", file_size: 20 };
+  const gateway = createMetaGateway({
+    credentialResolver: { async resolveMeta() { return { accessToken: "token-media", phoneNumberId: "phone-a" }; } },
+    fetchImpl: async () => response(200, metadata),
+  });
+  await assert.rejects(
+    gateway.downloadMedia(
+      { empresaId: "tenant-a", numeroWhatsappId: "number-a" },
+      { mediaId: "media-1", maxBytes: 10, allowedMimeTypes: ["image/jpeg"] },
+    ),
+    (error) => error.code === "META_MEDIA_TOO_LARGE" && error.retryable === false,
+  );
+  metadata.file_size = 5;
+  await assert.rejects(
+    gateway.downloadMedia(
+      { empresaId: "tenant-a", numeroWhatsappId: "number-a" },
+      { mediaId: "media-1", maxBytes: 10, allowedMimeTypes: ["image/jpeg"] },
+    ),
+    (error) => error.code === "META_MEDIA_URL_INVALID" && error.retryable === false,
+  );
+});
+
 test("Google Sheets mantém configuração, cache válido e falhas isolados por empresa", async () => {
   const cacheRepository = scopedCache();
   const fail = new Set();

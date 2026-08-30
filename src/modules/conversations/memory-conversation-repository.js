@@ -259,15 +259,24 @@ export class MemoryConversationRepository {
       ))
       .sort((left, right) => left.createdAt - right.createdAt || left.sequence - right.sequence)
       .slice(0, input.limit);
+    const mediaStorageKeys = candidates.map(({ mediaStorageKey }) => mediaStorageKey).filter(Boolean);
     for (const message of candidates) {
       message.body = null;
       message.mediaExternalId = null;
       message.mediaStorageKey = null;
+      message.mediaMimeType = null;
+      message.mediaSizeBytes = null;
+      message.mediaSha256 = null;
+      message.mediaStoredAt = null;
       message.errorCode = null;
       message.errorSanitized = null;
       message.redactedAt = new Date(input.redactedAt);
       message.updatedAt = new Date(input.redactedAt);
     }
-    return { anonymized: candidates.length, messageIds: candidates.map(({ id }) => id) };
+    return {
+      anonymized: candidates.length,
+      messageIds: candidates.map(({ id }) => id),
+      mediaStorageKeys,
+    };
   }
 }

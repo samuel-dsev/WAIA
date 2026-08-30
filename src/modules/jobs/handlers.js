@@ -13,6 +13,8 @@ const TYPE_FROM_DATABASE = Object.freeze({
   sistema: "system",
 });
 
+const MEDIA_POLICY_ERRORS = new Set(["META_MEDIA_TOO_LARGE", "META_MEDIA_MIME_NOT_ALLOWED", "META_MEDIA_MIME_MISMATCH"]);
+
 function fromDatabase(value) {
   return TYPE_FROM_DATABASE[value] || value;
 }
@@ -34,7 +36,8 @@ export class PostgresJobHandlerRepository {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const result = await client.query(
         `SELECT m.id, m.empresa_id, m.conversa_id, m.contato_id, m.numero_whatsapp_id,
-                m.tipo, m.corpo, m.media_external_id, m.external_message_id,
+                m.tipo, m.corpo, m.media_external_id, m.media_storage_key,
+                m.media_mime_type, m.media_size_bytes, m.media_sha256, m.external_message_id,
                 m.correlation_id, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
@@ -53,10 +56,35 @@ export class PostgresJobHandlerRepository {
         type: fromDatabase(row.tipo),
         text: row.corpo || "",
         mediaId: row.media_external_id || null,
+        mediaStorageKey: row.media_storage_key || null,
+        mediaMimeType: row.media_mime_type || null,
+        mediaSizeBytes: row.media_size_bytes == null ? null : Number(row.media_size_bytes),
+        mediaSha256: row.media_sha256 || null,
         externalMessageId: row.external_message_id,
         correlationId: row.correlation_id,
         senderPhone: row.telefone_normalizado,
       };
+    });
+  }
+
+  markMediaStored({ empresaId, messageId, mediaId, stored }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const result = await client.query(
+        `UPDATE mensagens
+            SET media_storage_key = $4,
+                media_mime_type = $5,
+                media_size_bytes = $6,
+                media_sha256 = $7,
+                media_stored_at = now(),
+                updated_at = now()
+          WHERE empresa_id = $1 AND id = $2 AND media_external_id = $3
+            AND direcao = 'entrada' AND tipo IN ('imagem', 'documento')
+            AND (media_storage_key IS NULL OR media_storage_key = $4)
+        RETURNING id`,
+        [empresaId, messageId, mediaId, stored.storageKey, stored.mimeType, stored.sizeBytes, stored.sha256],
+      );
+      if (!result.rows[0]) throw permanent("Mensagem de mídia não encontrada.", "MEDIA_MESSAGE_NOT_FOUND");
+      return result.rows[0];
     });
   }
 
@@ -153,6 +181,7 @@ export function createWorkerHandlers({
   orderRepository,
   appointmentRepository,
   handoffRepository,
+  mediaStore,
   logger = console,
   firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
 } = {}) {
@@ -171,6 +200,51 @@ export function createWorkerHandlers({
       empresaId: reference.empresaId,
       conversationId: message.conversationId,
     });
+    let mediaRejected = false;
+    if (["image", "document"].includes(message.type) && message.mediaId && !message.mediaStorageKey) {
+      if (typeof metaGateway?.downloadMedia !== "function" || typeof mediaStore?.put !== "function" || typeof repository.markMediaStored !== "function") {
+        throw permanent("Armazenamento privado de mídia não configurado.", "MEDIA_STORAGE_NOT_CONFIGURED");
+      }
+      try {
+        const downloaded = await metaGateway.downloadMedia({
+          empresaId: reference.empresaId,
+          numeroWhatsappId: message.numeroWhatsappId,
+        }, {
+          mediaId: message.mediaId,
+          maxBytes: mediaStore.maxBytes,
+          allowedMimeTypes: [...mediaStore.allowedMimeTypes],
+        });
+        const stored = await mediaStore.put({
+          empresaId: reference.empresaId,
+          messageId: message.id,
+          data: downloaded.data,
+          mimeType: downloaded.mimeType,
+        });
+        try {
+          await repository.markMediaStored({
+            empresaId: reference.empresaId,
+            messageId: message.id,
+            mediaId: message.mediaId,
+            stored,
+          });
+        } catch (error) {
+          await mediaStore.delete({ empresaId: reference.empresaId, storageKey: stored.storageKey }).catch(() => {});
+          throw error;
+        }
+        message.mediaStorageKey = stored.storageKey;
+        message.mediaMimeType = stored.mimeType;
+        message.mediaSizeBytes = stored.sizeBytes;
+        message.mediaSha256 = stored.sha256;
+      } catch (error) {
+        if (!MEDIA_POLICY_ERRORS.has(error?.code)) throw error;
+        mediaRejected = true;
+        logger.info?.("whatsapp_media_rejected", {
+          empresaId: reference.empresaId,
+          conversationId: message.conversationId,
+          code: error.code,
+        });
+      }
+    }
     if (conversation.mode !== "bot") {
       logger.info?.("conversation_automation_skipped", {
         empresaId: reference.empresaId,
@@ -185,47 +259,51 @@ export function createWorkerHandlers({
     }
     let reply;
     if (!prepared) {
-      const definition = await tenantDefinitionRepository.load(reference.empresaId);
-      if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
-      const runtime = createConfiguredTenantRuntime({
-      definition,
-      stateRepository: createRuntimeStateRepository(conversationService),
-      orderRepository,
-      appointmentRepository,
-      handoffRepository,
-      aiHandler: aiService
-        ? async ({ config, input }) => ({
-          reply: await aiService.reply({
-            empresaId: config.empresaId,
-            conversationId: input.conversationId,
-            messageId: message.id,
-            correlationId: message.correlationId,
-            message: input.text,
-            context: config,
-          }),
-        })
-        : null,
-      logger,
-      });
-    try {
-      await metaGateway.markRead?.({
-        empresaId: reference.empresaId,
-        numeroWhatsappId: message.numeroWhatsappId,
-      }, { messageId: message.externalMessageId });
-    } catch (error) {
-      logger.warn?.("whatsapp_mark_read_failed", {
-        empresaId: reference.empresaId,
-        conversationId: message.conversationId,
-        code: error?.code || "META_MARK_READ_FAILED",
-      });
-    }
-      reply = await runtime.handle({
-        conversationId: message.conversationId,
-        contactId: message.contactId,
-        type: message.type,
-        text: message.text,
-        mediaId: message.mediaId,
-      });
+      try {
+        await metaGateway.markRead?.({
+          empresaId: reference.empresaId,
+          numeroWhatsappId: message.numeroWhatsappId,
+        }, { messageId: message.externalMessageId });
+      } catch (error) {
+        logger.warn?.("whatsapp_mark_read_failed", {
+          empresaId: reference.empresaId,
+          conversationId: message.conversationId,
+          code: error?.code || "META_MARK_READ_FAILED",
+        });
+      }
+      if (mediaRejected) {
+        reply = { text: "Não consegui aceitar esse comprovante. Envie uma imagem JPEG, PNG ou WEBP, ou um PDF, com até 10 MB.", buttons: [] };
+      } else {
+        const definition = await tenantDefinitionRepository.load(reference.empresaId);
+        if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
+        const runtime = createConfiguredTenantRuntime({
+          definition,
+          stateRepository: createRuntimeStateRepository(conversationService),
+          orderRepository,
+          appointmentRepository,
+          handoffRepository,
+          aiHandler: aiService
+            ? async ({ config, input }) => ({
+              reply: await aiService.reply({
+                empresaId: config.empresaId,
+                conversationId: input.conversationId,
+                messageId: message.id,
+                correlationId: message.correlationId,
+                message: input.text,
+                context: config,
+              }),
+            })
+            : null,
+          logger,
+        });
+        reply = await runtime.handle({
+          conversationId: message.conversationId,
+          contactId: message.contactId,
+          type: message.type,
+          text: message.text,
+          mediaId: message.mediaId,
+        });
+      }
       if (repository.prepareReply) {
         prepared = await repository.prepareReply({
           empresaId: reference.empresaId,

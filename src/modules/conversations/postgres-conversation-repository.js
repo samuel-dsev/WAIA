@@ -102,6 +102,10 @@ function mapMessage(row, extra = {}) {
     body: row.corpo,
     mediaExternalId: row.media_external_id,
     mediaStorageKey: row.media_storage_key,
+    mediaMimeType: row.media_mime_type,
+    mediaSizeBytes: row.media_size_bytes == null ? null : Number(row.media_size_bytes),
+    mediaSha256: row.media_sha256,
+    mediaStoredAt: row.media_stored_at,
     externalMessageId: row.external_message_id,
     status: fromDatabase(row.status),
     origin: fromDatabase(row.origem_resposta),
@@ -420,7 +424,7 @@ export class PostgresConversationRepository {
     return this.transaction(input, async ({ client }) => {
       const result = await client.query(
         `WITH candidates AS (
-           SELECT id FROM mensagens
+           SELECT id, media_storage_key FROM mensagens
             WHERE empresa_id = $1 AND redacted_at IS NULL AND created_at < $2
             ORDER BY created_at, id
             LIMIT $3
@@ -428,14 +432,20 @@ export class PostgresConversationRepository {
          )
          UPDATE mensagens message
             SET corpo = NULL, media_external_id = NULL, media_storage_key = NULL,
+                media_mime_type = NULL, media_size_bytes = NULL,
+                media_sha256 = NULL, media_stored_at = NULL,
                 error_code = NULL, error_sanitized = NULL,
                 redacted_at = $4, updated_at = $4
            FROM candidates
           WHERE message.empresa_id = $1 AND message.id = candidates.id
-         RETURNING message.id`,
+         RETURNING message.id, candidates.media_storage_key`,
         [input.empresaId, input.before, input.limit, input.redactedAt],
       );
-      return { anonymized: result.rowCount, messageIds: result.rows.map(({ id }) => id) };
+      return {
+        anonymized: result.rowCount,
+        messageIds: result.rows.map(({ id }) => id),
+        mediaStorageKeys: result.rows.map((row) => row.media_storage_key).filter(Boolean),
+      };
     });
   }
 }

@@ -66,6 +66,7 @@ import { createMetaGateway } from "../integrations/index.js";
 import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
+import { PrivateMediaStore } from "../infra/media/private-media-store.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public", import.meta.url));
 const panelDirectory = fileURLToPath(new URL("../../panel", import.meta.url));
@@ -114,6 +115,7 @@ export function createPostgresRuntime({
   const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
   const conversationRepository = new PostgresConversationRepository(pool);
   const conversationService = new ConversationService({ repository: conversationRepository });
+  const mediaStore = new PrivateMediaStore({ root: config.media.storageRoot, maxBytes: config.media.maxBytes });
   const keyring = config.security.masterKeyring
     ? keyringFromSerialized(config.security.masterKeyring)
     : null;
@@ -168,6 +170,7 @@ export function createPostgresRuntime({
     credentialVault,
     conversationService,
     healthService: health,
+    mediaStore,
   });
   const aiService = new MultiTenantAiService({
     configResolver: new PostgresAiConfigResolver(pool),
@@ -203,6 +206,7 @@ export function createPostgresRuntime({
     logger: runtimeLogger,
     logSink,
     conversationService,
+    mediaStore,
     adminService,
     authService,
     aiService,
@@ -398,6 +402,7 @@ export function createWorkerRuntime({
       orderRepository: new PostgresOrderRepository(runtime.pool),
       appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
       handoffRepository: new ConversationHandoffRepository(runtime.conversationService),
+      mediaStore: runtime.mediaStore,
       logger,
       firstMetaMessageId,
     }),
@@ -423,6 +428,7 @@ export function createWorkerRuntime({
   const retention = startRetentionScheduler(createRetentionRunner({
     pool: runtime.pool,
     conversationService: runtime.conversationService,
+    mediaStore: runtime.mediaStore,
     batchSize: config.maintenance.retentionBatchSize,
     logger,
   }), { intervalMs: config.maintenance.retentionIntervalMs, logger });

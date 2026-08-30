@@ -78,7 +78,7 @@ const RESOURCES = Object.freeze({
   }),
   orders: descriptor({
     table: "pedidos", fields: { status: "status", paymentStatus: "pagamento_status", integrationStatus: "integracao_status" },
-    select: { contactId: "contato_id", conversationId: "conversa_id", buyerName: "nome_comprador", total: "total", currency: "moeda" },
+    select: { contactId: "contato_id", conversationId: "conversa_id", receiptMessageId: "comprovante_mensagem_id", buyerName: "nome_comprador", total: "total", currency: "moeda" },
     filters: { status: "status", paymentStatus: "pagamento_status", contactId: "contato_id", conversationId: "conversa_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", updatedAt: "updated_at", status: "status", total: "total" }, softDelete: true,
   }),
   appointments: descriptor({
@@ -97,7 +97,7 @@ const RESOURCES = Object.freeze({
     filters: { status: "status", mode: "modo_atendimento", contactId: "contato_id", numberId: "numero_whatsapp_id" }, sorts: { lastMessageAt: "ultima_mensagem_at", createdAt: "created_at", status: "status" }, search: ["correlation_id::text"],
   }),
   messages: descriptor({
-    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
+    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
     filters: { conversationId: "conversa_id", contactId: "contato_id", status: "status", direction: "direcao", type: "tipo", correlationId: "correlation_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", sequence: "sequence", status: "status" },
   }),
   logs: descriptor({
@@ -355,6 +355,20 @@ export class PostgresAdminRepository {
       if (definition.softDelete) conditions.push(`${definition.alias}.deleted_at IS NULL`);
       return outputRow(resource, (await client.query(`SELECT ${selectSql(definition)} FROM ${definition.table} ${definition.alias} WHERE ${conditions.join(" AND ")} LIMIT 1`, [empresaId, id])).rows[0]);
     });
+  }
+
+  async getPrivateMedia({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
+      await client.query(
+        `SELECT id, media_storage_key AS "storageKey", media_mime_type AS "mimeType",
+                media_size_bytes::int AS "sizeBytes", media_sha256 AS sha256
+           FROM mensagens
+          WHERE empresa_id = $1 AND id = $2 AND direcao = 'entrada'
+            AND tipo IN ('imagem', 'documento') AND media_storage_key IS NOT NULL
+          LIMIT 1`,
+        [empresaId, messageId],
+      )
+    ).rows[0] || null);
   }
 
   async create({ resource, empresaId, id, data, transaction }) {

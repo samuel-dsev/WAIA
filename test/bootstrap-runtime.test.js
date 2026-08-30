@@ -152,3 +152,114 @@ test("worker handler processa mensagem persistida por referencia e registra resp
   assert.equal(recorded[0].externalMessageId, "wamid.outbound");
   assert.equal(recorded[0].origin, "deterministic_flow");
 });
+
+test("worker armazena comprovante privado antes de continuar uma resposta preparada", async () => {
+  const events = [];
+  const stored = { storageKey: "tenant-a/message-media", mimeType: "image/jpeg", sizeBytes: 4, sha256: "a".repeat(64) };
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-media", empresaId: "tenant-a", conversationId: "conversation-1", contactId: "contact-1",
+          numeroWhatsappId: "number-1", type: "image", text: "", mediaId: "meta-media-1", mediaStorageKey: null,
+          externalMessageId: "wamid.media", correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+      async markMediaStored(input) { events.push("mark"); assert.deepEqual(input.stored, stored); },
+      async preparedReply() { events.push("prepared"); return { id: "reply-1", text: "Recebido", buttons: [], status: "processando" }; },
+      async markReplySent() { events.push("sent-state"); },
+    },
+    conversationService: {
+      async getConversation() { return { mode: "bot" }; },
+      async recordMessage() {},
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { assert.fail("resposta já estava preparada"); } },
+    metaGateway: {
+      async downloadMedia(_context, input) { events.push("download"); assert.equal(input.mediaId, "meta-media-1"); return { data: Buffer.from("test"), mimeType: "image/jpeg", sizeBytes: 4 }; },
+      async sendReply() { events.push("send"); return { messages: [{ id: "wamid.out" }] }; },
+    },
+    mediaStore: {
+      maxBytes: 1024,
+      allowedMimeTypes: new Set(["image/jpeg"]),
+      async put() { events.push("put"); return stored; },
+      async delete() { events.push("delete"); },
+    },
+  });
+  assert.deepEqual(await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-media" }), { replied: true });
+  assert.deepEqual(events, ["download", "put", "mark", "prepared", "send", "sent-state"]);
+});
+
+test("worker preserva mídia privada mesmo quando a conversa está em atendimento humano", async () => {
+  const events = [];
+  const stored = { storageKey: "tenant-a/message-human", mimeType: "application/pdf", sizeBytes: 4, sha256: "b".repeat(64) };
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-human", conversationId: "conversation-1", contactId: "contact-1", numeroWhatsappId: "number-1",
+          type: "document", text: "", mediaId: "meta-media-human", mediaStorageKey: null, externalMessageId: "wamid.human",
+          correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+      async markMediaStored(input) { events.push("mark"); assert.deepEqual(input.stored, stored); },
+    },
+    conversationService: {
+      async getConversation() { return { mode: "human" }; },
+      async recordMessage() { assert.fail("atendimento humano não deve gerar resposta automática"); },
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { assert.fail("runtime não deve ser carregado"); } },
+    metaGateway: {
+      async downloadMedia() { events.push("download"); return { data: Buffer.from("test"), mimeType: "application/pdf", sizeBytes: 4 }; },
+      async sendReply() { assert.fail("atendimento humano não deve enviar resposta automática"); },
+    },
+    mediaStore: {
+      maxBytes: 1024,
+      allowedMimeTypes: new Set(["application/pdf"]),
+      async put() { events.push("put"); return stored; },
+      async delete() { events.push("delete"); },
+    },
+    logger: { info() {} },
+  });
+
+  assert.deepEqual(
+    await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-human" }),
+    { skipped: true, reason: "conversation_not_in_bot_mode" },
+  );
+  assert.deepEqual(events, ["download", "put", "mark"]);
+});
+
+test("worker rejeita comprovante fora da política sem chamar runtime ou IA", async () => {
+  let preparedText;
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-media", conversationId: "conversation-1", contactId: "contact-1", numeroWhatsappId: "number-1",
+          type: "document", text: "", mediaId: "meta-media-1", mediaStorageKey: null, externalMessageId: "wamid.media",
+          correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+      async preparedReply() { return null; },
+      async prepareReply({ reply }) { preparedText = reply.text; return { id: "reply-1", text: reply.text, buttons: [], status: "processando" }; },
+      async markReplySent() {},
+      async markMediaStored() { assert.fail("mídia inválida não deve ser persistida"); },
+    },
+    conversationService: { async getConversation() { return { mode: "bot" }; }, async recordMessage() {}, async applyMetaStatus() {} },
+    tenantDefinitionRepository: { async load() { assert.fail("runtime não deve receber mídia recusada"); } },
+    metaGateway: {
+      async markRead() {},
+      async downloadMedia() { throw Object.assign(new Error("grande"), { code: "META_MEDIA_TOO_LARGE", retryable: false }); },
+      async sendReply(_context, payload) { assert.match(payload.text, /até 10 MB/u); return { messages: [{ id: "wamid.out" }] }; },
+    },
+    mediaStore: { maxBytes: 10, allowedMimeTypes: new Set(["application/pdf"]), async put() { assert.fail(); }, async delete() {} },
+    aiService: { async reply() { assert.fail("IA não deve receber comprovante"); } },
+    logger: { info() {}, warn() {} },
+  });
+  assert.deepEqual(await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-media" }), { replied: true });
+  assert.match(preparedText, /JPEG, PNG ou WEBP/u);
+});

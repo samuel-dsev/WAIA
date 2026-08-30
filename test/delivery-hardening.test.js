@@ -54,6 +54,35 @@ test("rota PUT de módulos usa contrato em lote do painel", async () => {
   assert.deepEqual(captured.body.enabledModules, ["catalog", "appointments"]);
 });
 
+test("comprovante privado exige autenticação, tenant e retorna headers seguros", async () => {
+  const repository = new MemoryAdminRepository({ tenants: [{ id: "tenant-a", name: "Tenant A", status: "active" }], environment: "test" });
+  repository.getPrivateMedia = async ({ empresaId, messageId }) => empresaId === "tenant-a" && messageId === "message-1"
+    ? { storageKey: "tenant-a/message-1", mimeType: "image/jpeg", sizeBytes: 4, sha256: "a".repeat(64) }
+    : null;
+  const service = new AdminService({
+    repository,
+    mediaStore: {
+      async read(input) {
+        assert.deepEqual(input, { empresaId: "tenant-a", storageKey: "tenant-a/message-1", expectedSha256: "a".repeat(64) });
+        return Buffer.from("test");
+      },
+    },
+  });
+  const app = express();
+  app.use("/api/admin", createAdminRouter({
+    adminService: service,
+    authenticate(request, _response, next) { request.auth = platform; next(); },
+    csrf(_request, _response, next) { next(); },
+  }));
+  const response = await request(app, "/api/admin/tenants/tenant-a/messages/message-1/media");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/jpeg");
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "test");
+  assert.equal(repository.audit.at(-1).action, "messages.media.read");
+});
+
 test("infra publica painel e separa migrador do papel restrito da aplicação", async () => {
   const [nginx, compose, roleScript, migration, migrateScript] = await Promise.all([
     readFile(new URL("../infra/panel/nginx.conf", import.meta.url), "utf8"),
@@ -65,6 +94,7 @@ test("infra publica painel e separa migrador do papel restrito da aplicação", 
   assert.match(nginx, /location \/api\/[^]*proxy_pass http:\/\/api:3001/u);
   assert.match(compose, /DATABASE_APP_USER/u);
   assert.match(compose, /DATABASE_MIGRATOR_URL: postgres:\/\/\$\{POSTGRES_USER/u);
+  assert.match(compose, /media-init:[^]*chown -R 1000:1000 \/media/u);
   assert.match(compose, /service_completed_successfully/u);
   assert.match(roleScript, /NOSUPERUSER[^\n]*NOBYPASSRLS/u);
   assert.match(roleScript, /REASSIGN OWNED BY %I TO %I', :'app_user', :'owner_user'/u);
@@ -93,13 +123,14 @@ test("runtime SaaS não aceita fallback global de credenciais Meta", async () =>
 test("retenção percorre tenants isoladamente e continua após falha", async () => {
   const anonymized = [];
   const deleted = [];
+  const deletedMedia = [];
   const errors = [];
   const runner = createRetentionRunner({
     conversationService: {
       async anonymizeExpired(input) {
         anonymized.push(input);
         if (input.empresaId === "tenant-b") throw new Error("falha isolada");
-        return { anonymized: 2 };
+        return { anonymized: 2, mediaStorageKeys: [`${input.empresaId}/message-1`] };
       },
     },
     policies: async () => [
@@ -108,11 +139,16 @@ test("retenção percorre tenants isoladamente e continua após falha", async ()
       { empresa_id: "tenant-c", retencao_mensagens_dias: 90 },
     ],
     cleanupLogs: async (policy) => { deleted.push(policy.empresa_id); return 1; },
+    mediaStore: { async delete(input) { deletedMedia.push(input); } },
     logger: { error(code, fields) { errors.push({ code, fields }); } },
   });
   const result = await runner.runOnce();
   assert.deepEqual(anonymized.map((item) => item.empresaId), ["tenant-a", "tenant-b", "tenant-c"]);
   assert.deepEqual(deleted, ["tenant-a", "tenant-c"]);
+  assert.deepEqual(deletedMedia, [
+    { empresaId: "tenant-a", storageKey: "tenant-a/message-1" },
+    { empresaId: "tenant-c", storageKey: "tenant-c/message-1" },
+  ]);
   assert.equal(errors.length, 1);
   assert.deepEqual(result.map((item) => item.empresaId), ["tenant-a", "tenant-c"]);
 });

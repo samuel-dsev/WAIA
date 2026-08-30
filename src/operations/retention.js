@@ -37,6 +37,7 @@ export function createRetentionRunner({
   batchSize = 500,
   policies = () => listRetentionPolicies(pool),
   cleanupLogs = (policy) => cleanupExpiredLogs(pool, { empresaId: policy.empresa_id, batchSize }),
+  mediaStore,
   logger = console,
 } = {}) {
   if (typeof conversationService?.anonymizeExpired !== "function") throw new TypeError("conversationService.anonymizeExpired é obrigatório.");
@@ -50,8 +51,18 @@ export function createRetentionRunner({
             retentionDays: Number(policy.retencao_mensagens_dias),
             batchSize,
           });
+          let deletedMedia = 0;
+          for (const storageKey of messages.mediaStorageKeys || []) {
+            if (typeof mediaStore?.delete !== "function") continue;
+            try {
+              await mediaStore.delete({ empresaId: policy.empresa_id, storageKey });
+              deletedMedia += 1;
+            } catch (error) {
+              logger.error?.("tenant_media_retention_failed", { empresaId: policy.empresa_id, storageKey, error });
+            }
+          }
           const deletedLogs = await cleanupLogs(policy);
-          results.push({ empresaId: policy.empresa_id, anonymizedMessages: messages.anonymized, deletedLogs });
+          results.push({ empresaId: policy.empresa_id, anonymizedMessages: messages.anonymized, deletedMedia, deletedLogs });
         } catch (error) {
           logger.error?.("tenant_retention_failed", { empresaId: policy.empresa_id, error });
         }

@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 29 de agosto de 2026 após corrigir e comprovar em infraestrutura real a separação entre migrador e aplicação.
+Atualizado em 29 de agosto de 2026 após implementar e comprovar em infraestrutura real o armazenamento privado de comprovantes.
 
 ## Diagnóstico executivo
 
@@ -12,7 +12,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
 - Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com dez migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- PostgreSQL como fonte de verdade, com onze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
 - Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
 - Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
 - Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.
@@ -21,6 +21,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Tenant demonstrativo do Capitão Mor em seed sintético, sem credenciais, PIX ou dados pessoais reais.
 - OpenAI Responses API com isolamento por tenant, limites, contingência, defesa contra prompt injection e contabilização de custo.
 - Adaptador Google Sheets multiempresa e simuladores testados isoladamente.
+- Comprovantes privados em JPEG, PNG, WEBP ou PDF até 10 MB, com download Meta autenticado por tenant, SHA-256, retenção e visualização auditada no painel.
 
 ## Correções desta auditoria
 
@@ -46,22 +47,30 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Migrações agora exigem `DATABASE_MIGRATOR_URL`; API e worker recebem apenas `DATABASE_URL` do papel restrito e não recebem a senha do owner.
 - O bootstrap repara volumes antigos, devolve propriedade ao owner, revoga `CREATE` e `TEMP` do papel da aplicação e mantém privilégios DML por grants atuais e default privileges.
 - Adicionado teste PostgreSQL real para propriedades do papel, negação de `CREATE TABLE`/`ALTER TABLE` e isolamento RLS entre dois tenants sintéticos.
+- O worker agora baixa a mídia da Meta antes de permitir que o pedido avance, inclusive quando a conversa está em atendimento humano; pedido PostgreSQL rejeita comprovante sem arquivo e checksum persistidos.
+- Adicionado armazenamento privado por tenant, compartilhado entre API e worker, com metadados de MIME, tamanho, SHA-256 e data no PostgreSQL.
+- O painel passou a visualizar comprovantes por endpoint autenticado e autorizado, com auditoria, `no-store`, `nosniff` e URL `blob:` temporária.
+- MIME ou tamanho recusado gera orientação determinística ao usuário e não chama runtime nem IA; bytes de comprovantes nunca são enviados à OpenAI.
+- A retenção remove arquivos privados associados às mensagens anonimizadas.
+- Adicionado `media-init` para corrigir a propriedade do volume sem elevar os privilégios da API ou do worker; `.gitattributes` fixa scripts Alpine em LF no Windows.
 
 ## Validação executada
 
-- `npm test`: 145 testes descobertos; 143 aprovados e 2 testes PostgreSQL opcionais ignorados sem `RUN_POSTGRES_INTEGRATION=true`.
-- `node --check`: 131 arquivos JavaScript válidos.
+- `npm test`: 155 testes descobertos; 152 aprovados e 3 testes PostgreSQL opcionais ignorados sem `RUN_POSTGRES_INTEGRATION=true`.
+- `node --check`: 133 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
 - PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
-- Migração de banco vazio e seed concluídos; dez migrações descobertas.
+- Migração incremental concluída; onze migrações descobertas e a migração privada de mídia foi aplicada uma vez.
 - Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
 - API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
 - `GET /health/ready` retornou HTTP 200.
 - O teste real confirmou `waia_app` como `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` e `NOBYPASSRLS`, sem `CREATE` no schema e sem `TEMP` no banco; tentativas de `CREATE TABLE`, `ALTER TABLE` e escrita em outro tenant foram rejeitadas.
 - A inspeção dos contêineres confirmou ausência de `POSTGRES_PASSWORD` e `DATABASE_MIGRATOR_URL` na API e no worker.
-- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `10` migrações reaplicadas.
+- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `11` migrações reaplicadas.
+- Três integrações PostgreSQL reais passaram: privilégios/RLS, capacidade da agenda e metadados/arquivo privado de mídia.
+- API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 
@@ -76,6 +85,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - 2FA/MFA possui colunas no banco, mas não tem fluxo de cadastro, desafio ou recuperação.
 - Backup e, principalmente, restauração ainda não foram exercitados em uma cópia descartável do ambiente alvo.
 - Meta, OpenAI e Google não foram homologados com credenciais reais nesta base SaaS.
+- O download de mídia foi validado com provedor simulado e armazenamento real, mas ainda precisa de homologação com um número Meta exclusivo de teste.
 
 ### Riscos técnicos relevantes
 
@@ -85,6 +95,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - A validação administrativa ainda depende de algumas constraints do banco para domínios e limites; o erro agora é seguro, mas a UX deve validar antes da escrita.
 - Cabeçalhos HTTP estão razoáveis com Helmet, mas CSP do app está desabilitada e a política do proxy ainda precisa de hardening para produção.
 - O arquivo `codex-session-01a044fd-4841-73b3-b456-d9d028928dee.md` tem cerca de 2,7 MB e permanece na raiz. Não foi removido por pertencer ao histórico do usuário.
+- O volume local `media_data` é adequado para homologação em host único, mas deve entrar no backup/restauração e ser substituído ou replicado se a produção usar múltiplos workers/hosts.
 - O repositório Git está presente, na branch `main`, conectado a `origin`; as mudanças desta continuidade permanecem locais e ainda não foram commitadas.
 - A entrada legada mantém endpoints de diagnóstico/sincronização sem autenticação e aceita webhook sem assinatura quando não há segredo; ela não deve ser exposta nem usada como produção.
 
@@ -92,11 +103,11 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Fase 1 — fechar o núcleo operacional
 
-1. Ligar Google Sheets ao runtime oficial com resolvers PostgreSQL/cofre, cache persistente e jobs de sincronização/exportação idempotentes.
-2. Implementar envio humano no painel com autorização, auditoria, persistência da mensagem e envio pelo número correto do tenant.
-3. Criar gestão de jobs falhos: consulta, detalhe sanitizado, retry explícito e resolução auditada.
-4. Ligar as métricas aos fluxos reais e publicar endpoint protegido para coleta.
-5. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
+1. Implementar envio humano no painel com autorização, CSRF, auditoria, persistência/outbox transacionais e envio pelo número correto do tenant.
+2. Criar gestão de jobs falhos: consulta, detalhe sanitizado, retry explícito e resolução auditada.
+3. Ligar as métricas aos fluxos reais e publicar endpoint protegido para coleta.
+4. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
+5. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
 
 ### Fase 2 — segurança e recuperação
 

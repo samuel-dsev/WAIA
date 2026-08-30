@@ -196,6 +196,7 @@ const state = {
   refreshEnabled: true,
   refreshTimer: null,
   requestController: null,
+  receiptObjectUrl: null,
 };
 
 const elements = Object.fromEntries([
@@ -758,6 +759,9 @@ async function openConversation(id) {
       const item = node("article", "message");
       item.dataset.direction = message.direction || message.direcao || "inbound";
       item.append(paragraph(message.text || message.body || "Mensagem sem conteúdo exibível."));
+      if (message.mediaMimeType) {
+        item.append(button("Ver mídia privada", () => openReceiptPreview(message.id), "button button-secondary button-small"));
+      }
       item.append(nodeWithText("small", `${message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));
       messages.append(item);
     }
@@ -790,8 +794,42 @@ function openRecord(view, item) {
     if (/secret|token|password|credentialValue|authorization/iu.test(key)) continue;
     list.append(nodeWithText("dt", humanize(key)), valueNode(value, key));
   }
-  elements.detailContent.replaceChildren(list);
+  const content = [list];
+  if (view === "orders" && item.receiptMessageId) {
+    content.push(button("Visualizar comprovante", () => openReceiptPreview(item.receiptMessageId), "button button-primary"));
+  }
+  elements.detailContent.replaceChildren(...content);
   elements.detailDialog.showModal();
+}
+
+async function openReceiptPreview(messageId) {
+  if (!state.selectedEmpresaId) return;
+  elements.detailTitle.textContent = "Comprovante privado";
+  elements.detailContent.replaceChildren(paragraph("Carregando comprovante…"));
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  try {
+    const response = await fetch(`${API_BASE}/tenants/${encodeURIComponent(state.selectedEmpresaId)}/messages/${encodeURIComponent(messageId)}/media`, {
+      credentials: "include",
+      headers: { Accept: "image/jpeg,image/png,image/webp,application/pdf" },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const error = new Error(payload?.message || "Não foi possível carregar o comprovante.");
+      error.status = response.status;
+      throw error;
+    }
+    if (state.receiptObjectUrl) URL.revokeObjectURL(state.receiptObjectUrl);
+    state.receiptObjectUrl = URL.createObjectURL(await response.blob());
+    const mimeType = response.headers.get("content-type") || "";
+    const preview = mimeType === "application/pdf" ? node("iframe", "receipt-preview") : node("img", "receipt-preview");
+    preview.src = state.receiptObjectUrl;
+    preview.title = "Comprovante recebido";
+    if (preview.tagName === "IMG") preview.alt = "Comprovante recebido para conferência humana";
+    elements.detailContent.replaceChildren(preview, paragraph("Arquivo privado carregado somente nesta sessão autenticada."));
+  } catch (error) {
+    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    elements.detailContent.replaceChildren(paragraph(error.message || "Não foi possível abrir o comprovante."));
+  }
 }
 
 function openCreateTenant() {
@@ -1122,6 +1160,10 @@ elements.refreshToggle.addEventListener("click", () => {
   startRefresh();
 });
 elements.detailClose.addEventListener("click", () => elements.detailDialog.close());
+elements.detailDialog.addEventListener("close", () => {
+  if (state.receiptObjectUrl) URL.revokeObjectURL(state.receiptObjectUrl);
+  state.receiptObjectUrl = null;
+});
 window.addEventListener("hashchange", () => state.session && navigate(location.hash.slice(1), { updateHash: false }));
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && state.refreshEnabled && state.session) loadCurrentView({ silent: true }); });
 

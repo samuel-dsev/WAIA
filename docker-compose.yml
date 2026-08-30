@@ -19,6 +19,8 @@ x-runtime-environment: &runtime-environment
   RETENTION_BATCH_SIZE: ${RETENTION_BATCH_SIZE:-500}
   WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS:-10000}
   WORKER_HEARTBEAT_TTL_MS: ${WORKER_HEARTBEAT_TTL_MS:-30000}
+  MEDIA_STORAGE_ROOT: /app/.data/media
+  MEDIA_MAX_BYTES: ${MEDIA_MAX_BYTES:-10485760}
   MASTER_KEYRING: ${MASTER_KEYRING:-}
   SESSION_PEPPER: ${SESSION_PEPPER:-}
   SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
@@ -71,8 +73,12 @@ services:
       PANEL_ORIGIN: https://${PANEL_DOMAIN:-painel.localhost}
     expose:
       - "3001"
+    volumes:
+      - media_data:/app/.data/media
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      media-init:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -99,8 +105,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      media-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
+    volumes:
+      - media_data:/app/.data/media
     networks:
       - internal
       - egress
@@ -129,6 +139,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
+    logging: *default-logging
+
+  media-init:
+    image: alpine:3.22
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 1000:1000 /media && chmod 700 /media"]
+    volumes:
+      - media_data:/media
     networks:
       - internal
     logging: *default-logging
@@ -198,6 +219,7 @@ volumes:
   redis_data:
   caddy_data:
   caddy_config:
+  media_data:
 
 networks:
   public:

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
+import { PrivateMediaStore } from "../src/infra/media/private-media-store.js";
+import { PostgresJobHandlerRepository } from "../src/modules/jobs/handlers.js";
 
 const enabled = process.env.RUN_POSTGRES_INTEGRATION === "true";
 
@@ -174,5 +176,82 @@ test("PostgreSQL reserva e libera a capacidade real de um horário", { skip: !en
     await client.query("ROLLBACK").catch(() => {});
     client.release();
     await pool.end();
+  }
+});
+
+test("PostgreSQL persiste metadados verificáveis da mídia privada", { skip: !enabled }, async () => {
+  assert.ok(process.env.MEDIA_STORAGE_ROOT, "MEDIA_STORAGE_ROOT é obrigatória no teste de mídia");
+  const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = await ownerPool.connect();
+  const suffix = randomUUID();
+  const correlationId = randomUUID();
+  const store = new PrivateMediaStore({ root: process.env.MEDIA_STORAGE_ROOT, maxBytes: 1024 });
+  let empresaId;
+  let messageId;
+  let storageKey;
+  try {
+    await owner.query("BEGIN");
+    empresaId = (await owner.query(
+      "INSERT INTO empresas (slug, nome, nome_exibicao, status) VALUES ($1, 'Mídia integração', 'Mídia integração', 'ativa') RETURNING id",
+      [`media-${suffix}`],
+    )).rows[0].id;
+    const numberId = (await owner.query(
+      "INSERT INTO numeros_whatsapp (empresa_id, phone_number_id, status) VALUES ($1, $2, 'ativo') RETURNING id",
+      [empresaId, `phone-${suffix}`],
+    )).rows[0].id;
+    const contactId = (await owner.query(
+      "INSERT INTO contatos (empresa_id, telefone_normalizado) VALUES ($1, $2) RETURNING id",
+      [empresaId, `55${suffix.replaceAll("-", "").replace(/[^0-9]/gu, "7").slice(0, 11)}`],
+    )).rows[0].id;
+    const conversationId = (await owner.query(
+      "INSERT INTO conversas (empresa_id, contato_id, numero_whatsapp_id, correlation_id) VALUES ($1,$2,$3,$4) RETURNING id",
+      [empresaId, contactId, numberId, correlationId],
+    )).rows[0].id;
+    messageId = (await owner.query(
+      `INSERT INTO mensagens (empresa_id, conversa_id, contato_id, numero_whatsapp_id, direcao, tipo,
+         media_external_id, external_message_id, status, sequence, correlation_id)
+       VALUES ($1,$2,$3,$4,'entrada','imagem',$5,$6,'enfileirada',1,$7) RETURNING id`,
+      [empresaId, conversationId, contactId, numberId, `media-${suffix}`, `wamid-${suffix}`, correlationId],
+    )).rows[0].id;
+    await owner.query("COMMIT");
+
+    const stored = await store.put({ empresaId, messageId, data: Buffer.from("receipt"), mimeType: "image/jpeg" });
+    storageKey = stored.storageKey;
+    await new PostgresJobHandlerRepository(appPool).markMediaStored({
+      empresaId, messageId, mediaId: `media-${suffix}`, stored,
+    });
+    const app = await appPool.connect();
+    try {
+      await app.query("BEGIN");
+      await app.query("SELECT set_config('app.empresa_id', $1, true)", [empresaId]);
+      const row = (await app.query(
+        "SELECT media_storage_key, media_mime_type, media_size_bytes::int, media_sha256 FROM mensagens WHERE empresa_id = $1 AND id = $2",
+        [empresaId, messageId],
+      )).rows[0];
+      assert.deepEqual(row, {
+        media_storage_key: stored.storageKey,
+        media_mime_type: "image/jpeg",
+        media_size_bytes: 7,
+        media_sha256: stored.sha256,
+      });
+      assert.deepEqual(await store.read({ empresaId, storageKey, expectedSha256: stored.sha256 }), Buffer.from("receipt"));
+      await app.query("ROLLBACK");
+    } finally {
+      app.release();
+    }
+  } finally {
+    await owner.query("ROLLBACK").catch(() => {});
+    if (empresaId) {
+      await owner.query("DELETE FROM mensagens WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM conversas WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM contatos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM numeros_whatsapp WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM empresas WHERE id = $1", [empresaId]).catch(() => {});
+    }
+    if (storageKey) await store.delete({ empresaId, storageKey }).catch(() => {});
+    owner.release();
+    await appPool.end();
+    await ownerPool.end();
   }
 });

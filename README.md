@@ -65,6 +65,8 @@ Principais variáveis:
 - `OPENAI_API_KEY`, se usar chave OpenAI compartilhada
 - `API_DOMAIN` e `PANEL_DOMAIN`
 - `POSTGRES_PASSWORD`
+- `MEDIA_STORAGE_ROOT`: diretório absoluto privado ao executar fora do Compose
+- `MEDIA_MAX_BYTES`: limite por arquivo; padrão de 10 MB
 
 `MASTER_KEYRING` deve ser um JSON com versão ativa e chaves base64, por exemplo com valores gerados fora do repositório:
 
@@ -90,8 +92,11 @@ Serviços:
 - `panel`: Nginx servindo a aplicação estática.
 - `postgres`: volume persistente, sem porta pública.
 - `redis`: volume persistente, sem porta pública.
+- `media-init`: prepara exclusivamente o volume privado para o usuário não privilegiado da API e do worker.
 
 O Compose não repassa `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL` à API ou ao worker. O serviço `db-init` mantém a propriedade do banco e dos objetos com o owner, remove `CREATE`, `TEMP`, superusuário e bypass de RLS do papel da aplicação, e concede somente privilégios operacionais.
+
+Comprovantes são baixados pelo worker com a credencial Meta do tenant, aceitos somente como JPEG, PNG, WEBP ou PDF até 10 MB e gravados no volume `media_data`. O banco mantém chave privada, MIME, tamanho, SHA-256 e data de armazenamento. O painel acessa o arquivo somente por endpoint autenticado, sem cache, e cria uma URL temporária no navegador; o conteúdo nunca é enviado à OpenAI.
 
 Endpoints esperados:
 
@@ -175,11 +180,12 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 143 testes aprovados e 2 testes PostgreSQL opcionais ignorados sem banco.
+- `npm test`: 152 testes aprovados e 3 testes PostgreSQL opcionais ignorados sem banco.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
-- Migrações e seed executados em PostgreSQL 16 real; 10 migrações descobertas.
+- Migrações e seed executados em PostgreSQL 16 real; 11 migrações descobertas.
 - Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
+- Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

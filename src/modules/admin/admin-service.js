@@ -167,12 +167,13 @@ function sanitizedAdminView(value) {
 }
 
 export class AdminService {
-  constructor({ repository, credentialVault, conversationService, healthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, credentialVault, conversationService, healthService, mediaStore, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
     this.credentialVault = credentialVault;
     this.conversationService = conversationService;
     this.healthService = healthService;
+    this.mediaStore = mediaStore;
     this.clock = clock;
     this.idGenerator = idGenerator;
   }
@@ -364,6 +365,25 @@ export class AdminService {
       return sanitizedAdminView({ conversation: record, messages: messages.items || [] });
     }
     return sanitizedAdminView(record);
+  }
+
+  async getMessageMedia({ auth, empresaId, messageId }) {
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.messages, { action: "messages.media.read", resource: "messages" });
+    if (typeof this.repository.getPrivateMedia !== "function" || typeof this.mediaStore?.read !== "function") {
+      throw new AdminNotFoundError();
+    }
+    const id = requiredText(messageId, "messageId");
+    const metadata = await this.repository.getPrivateMedia({ empresaId, messageId: id });
+    if (!metadata) throw new AdminNotFoundError();
+    let data;
+    try {
+      data = await this.mediaStore.read({ empresaId, storageKey: metadata.storageKey, expectedSha256: metadata.sha256 });
+    } catch (error) {
+      if (error?.code === "ENOENT") throw new AdminNotFoundError();
+      throw error;
+    }
+    await this.#audit({ auth, empresaId, action: "messages.media.read", resource: "messages", resourceId: id });
+    return Object.freeze({ data, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes, sha256: metadata.sha256 });
   }
 
   async create({ auth, empresaId, resource, body }) {

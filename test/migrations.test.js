@@ -33,3 +33,11 @@ test("agendamentos reservam capacidade de forma transacional", async () => {
   assert.match(migration, /reservados < capacidade/u);
   assert.match(migration, /BEFORE INSERT OR UPDATE[^]*OR DELETE/u);
 });
+
+test("mídia privada possui metadados de integridade, limite e retenção", async () => {
+  const migration = await readFile(new URL("../db/migrations/011_private_media_storage.sql", import.meta.url), "utf8");
+  assert.match(migration, /media_mime_type text/u);
+  assert.match(migration, /media_size_bytes BETWEEN 1 AND 10485760/u);
+  assert.match(migration, /media_sha256 ~ '\^\[a-f0-9\]\{64\}\$'/u);
+  assert.match(migration, /mensagens_media_retention_idx/u);
+});

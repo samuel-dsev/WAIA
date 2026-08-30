@@ -28,6 +28,10 @@ export const config = {
     heartbeatIntervalMs: numberFromEnv("WORKER_HEARTBEAT_INTERVAL_MS", 10_000),
     heartbeatTtlMs: numberFromEnv("WORKER_HEARTBEAT_TTL_MS", 30_000),
   },
+  media: {
+    storageRoot: process.env.MEDIA_STORAGE_ROOT || "",
+    maxBytes: numberFromEnv("MEDIA_MAX_BYTES", 10 * 1024 * 1024),
+  },
   security: {
     masterKeyring: process.env.MASTER_KEYRING,
     sessionPepper: process.env.SESSION_PEPPER,
@@ -69,6 +73,7 @@ export function assertRuntimeConfiguration(current = config) {
   if (!current.redis.url) missing.push("REDIS_URL");
   if (!current.security.masterKeyring) missing.push("MASTER_KEYRING");
   if (!current.security.sessionPepper) missing.push("SESSION_PEPPER");
+  if (!current.media.storageRoot) missing.push("MEDIA_STORAGE_ROOT");
   if (!current.whatsapp.verifyToken) missing.push("WHATSAPP_VERIFY_TOKEN");
   if (!current.whatsapp.appSecret) missing.push("META_APP_SECRET");
   if (missing.length) {
