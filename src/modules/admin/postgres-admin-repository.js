@@ -204,6 +204,43 @@ function filterConditions(definition, filters, params) {
 }
 function paginationMeta(total, page, pageSize) { return { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) }; }
 
+const FAILED_JOB_SELECT = `
+  f.id,
+  f.job_type AS "jobType",
+  f.conversa_id AS "conversationId",
+  f.mensagem_id AS "messageId",
+  f.tentativas AS attempts,
+  f.max_tentativas AS "maxAttempts",
+  f.error_code AS "errorCode",
+  f.error_sanitized AS error,
+  f.correlation_id AS "correlationId",
+  f.first_failure_at AS "firstFailureAt",
+  f.last_failure_at AS "lastFailureAt",
+  f.resolved_at AS "resolvedAt",
+  f.resolved_by_usuario_id AS "resolvedByUserId",
+  f.resolution_kind AS "resolutionKind",
+  f.resolution_note AS "resolutionNote",
+  f.outbox_job_id AS "originalJobId",
+  original.status AS "originalJobStatus",
+  f.retry_job_id AS "retryJobId",
+  retry.status AS "retryJobStatus",
+  CASE WHEN f.resolved_at IS NULL THEN 'open' ELSE 'resolved' END AS status,
+  f.created_at AS "createdAt",
+  f.updated_at AS "updatedAt"`;
+
+async function failedJobDetail(client, empresaId, id) {
+  return (await client.query(
+    `SELECT ${FAILED_JOB_SELECT}
+       FROM jobs_falhos f
+       LEFT JOIN outbox_jobs original
+         ON original.empresa_id = f.empresa_id AND original.id = f.outbox_job_id
+       LEFT JOIN outbox_jobs retry
+         ON retry.empresa_id = f.empresa_id AND retry.id = f.retry_job_id
+      WHERE f.empresa_id = $1 AND f.id = $2`,
+    [empresaId, id],
+  )).rows[0] || null;
+}
+
 const USER_DEFINITION = Object.freeze({
   ...descriptor({ table: "usuarios", alias: "u", fields: { email: "email", name: "nome", status: "status" }, select: { id: "id", empresaId: "ue.empresa_id", email: "email", name: "nome", role: "ue.papel", status: "status", createdAt: "created_at", updatedAt: "updated_at" }, filters: { status: "status" }, sorts: { name: "nome", email: "email", createdAt: "created_at" }, search: ["email::text", "nome"] }),
   from: "usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id",
@@ -449,6 +486,158 @@ export class PostgresAdminRepository {
         ],
       );
       return { ...message, duplicate: false };
+    });
+  }
+
+  async listFailedJobs({ empresaId, limit = 25, page = 1, sort = "lastFailureAt", direction = "desc", filters = {} }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const columns = { lastFailureAt: "f.last_failure_at", createdAt: "f.created_at", attempts: "f.tentativas" };
+      const sortColumn = columns[sort] || columns.lastFailureAt;
+      const params = [empresaId];
+      const conditions = ["f.empresa_id = $1"];
+      if (filters.status === "open") conditions.push("f.resolved_at IS NULL");
+      if (filters.status === "resolved") conditions.push("f.resolved_at IS NOT NULL");
+      if (filters.search) {
+        params.push(`%${String(filters.search).replaceAll("%", "\\%").replaceAll("_", "\\_")}%`);
+        conditions.push(`(
+          f.job_type ILIKE $${params.length} ESCAPE '\\'
+          OR f.error_code ILIKE $${params.length} ESCAPE '\\'
+          OR f.error_sanitized ILIKE $${params.length} ESCAPE '\\'
+          OR f.correlation_id::text ILIKE $${params.length} ESCAPE '\\'
+        )`);
+      }
+      for (const [name, column] of [
+        ["jobType", "f.job_type"],
+        ["errorCode", "f.error_code"],
+        ["conversationId", "f.conversa_id"],
+        ["messageId", "f.mensagem_id"],
+      ]) {
+        if (!filters[name]) continue;
+        params.push(filters[name]);
+        conditions.push(`${column} = $${params.length}`);
+      }
+      if (filters.from) {
+        params.push(filters.from);
+        conditions.push(`f.last_failure_at >= $${params.length}`);
+      }
+      if (filters.to) {
+        params.push(filters.to);
+        conditions.push(`f.last_failure_at <= $${params.length}`);
+      }
+      const where = `WHERE ${conditions.join(" AND ")}`;
+      const total = Number((await client.query(`SELECT count(*)::int AS total FROM jobs_falhos f ${where}`, params)).rows[0]?.total || 0);
+      params.push(limit, (page - 1) * limit);
+      const items = (await client.query(
+        `SELECT ${FAILED_JOB_SELECT}
+           FROM jobs_falhos f
+           LEFT JOIN outbox_jobs original
+             ON original.empresa_id = f.empresa_id AND original.id = f.outbox_job_id
+           LEFT JOIN outbox_jobs retry
+             ON retry.empresa_id = f.empresa_id AND retry.id = f.retry_job_id
+          ${where}
+          ORDER BY ${sortColumn} ${direction === "asc" ? "ASC" : "DESC"}, f.id ${direction === "asc" ? "ASC" : "DESC"}
+          LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      )).rows;
+      return { items, pagination: paginationMeta(total, page, limit) };
+    });
+  }
+
+  getFailedJob({ empresaId, id }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => failedJobDetail(client, empresaId, id));
+  }
+
+  retryFailedJob({ empresaId, id, retryJobId, actorId, reason, correlationId, transaction }) {
+    return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
+      const failed = (await client.query(
+        `SELECT id, outbox_job_id, resolved_at
+           FROM jobs_falhos
+          WHERE empresa_id = $1 AND id = $2
+          FOR UPDATE`,
+        [empresaId, id],
+      )).rows[0];
+      if (!failed) return null;
+      if (failed.resolved_at) throw new AdminValidationError("Este job falho já foi encerrado.");
+      if (!failed.outbox_job_id) throw new AdminValidationError("O job original não possui referência segura para retentativa.");
+
+      const original = (await client.query(
+        `SELECT id, conversa_id, mensagem_id, job_type, payload, status
+           FROM outbox_jobs
+          WHERE empresa_id = $1 AND id = $2
+          FOR UPDATE`,
+        [empresaId, failed.outbox_job_id],
+      )).rows[0];
+      if (!original) throw new AdminValidationError("O job original não foi encontrado.");
+      if (original.status !== "falhou") throw new AdminValidationError("Somente jobs com falha final podem ser reenfileirados.");
+
+      if (["process_inbound_message", "send_human_message"].includes(original.job_type)) {
+        const message = (await client.query(
+          "SELECT status FROM mensagens WHERE empresa_id = $1 AND id = $2 FOR UPDATE",
+          [empresaId, original.mensagem_id],
+        )).rows[0];
+        if (!message) throw new AdminValidationError("A mensagem vinculada ao job não foi encontrada.");
+        if (message.status !== "falhou") {
+          throw new AdminValidationError("A mensagem já avançou de estado e não pode ser reenviada com segurança.");
+        }
+      }
+
+      await client.query(
+        `INSERT INTO outbox_jobs (
+           id, empresa_id, conversa_id, mensagem_id, job_type, dedup_key,
+           payload, status, tentativas, disponivel_at, correlation_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'pendente',0,now(),$8)`,
+        [
+          retryJobId,
+          empresaId,
+          original.conversa_id,
+          original.mensagem_id,
+          original.job_type,
+          `manual-retry:${id}:${retryJobId}`,
+          JSON.stringify(original.payload || { payloadVersion: 1 }),
+          correlationId,
+        ],
+      );
+      if (["process_inbound_message", "send_human_message"].includes(original.job_type)) {
+        await client.query(
+          `UPDATE mensagens
+              SET status = 'enfileirada', error_code = NULL, error_sanitized = NULL,
+                  enqueued_at = now(), processing_at = NULL
+            WHERE empresa_id = $1 AND id = $2 AND status = 'falhou'`,
+          [empresaId, original.mensagem_id],
+        );
+      }
+      await client.query(
+        `UPDATE jobs_falhos
+            SET resolved_at = now(), resolved_by_usuario_id = $3,
+                resolution_kind = 'reenfileirado', resolution_note = $4,
+                retry_job_id = $5, updated_at = now()
+          WHERE empresa_id = $1 AND id = $2`,
+        [empresaId, id, actorId, reason, retryJobId],
+      );
+      return failedJobDetail(client, empresaId, id);
+    });
+  }
+
+  resolveFailedJob({ empresaId, id, actorId, reason, transaction }) {
+    return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
+      const failed = (await client.query(
+        `SELECT id, resolved_at
+           FROM jobs_falhos
+          WHERE empresa_id = $1 AND id = $2
+          FOR UPDATE`,
+        [empresaId, id],
+      )).rows[0];
+      if (!failed) return null;
+      if (failed.resolved_at) throw new AdminValidationError("Este job falho já foi encerrado.");
+      await client.query(
+        `UPDATE jobs_falhos
+            SET resolved_at = now(), resolved_by_usuario_id = $3,
+                resolution_kind = 'resolvido', resolution_note = $4,
+                updated_at = now()
+          WHERE empresa_id = $1 AND id = $2`,
+        [empresaId, id, actorId, reason],
+      );
+      return failedJobDetail(client, empresaId, id);
     });
   }
 

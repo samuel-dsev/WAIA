@@ -100,6 +100,8 @@ Comprovantes são baixados pelo worker com a credencial Meta do tenant, aceitos 
 
 No atendimento humano, o operador precisa assumir uma conversa antes de responder. O painel envia a mutação com CSRF e UUID de idempotência; API, mensagem, outbox e auditoria compartilham a mesma transação PostgreSQL. O worker recebe somente IDs pelo Redis, resolve o número e a credencial do tenant, envia pela Meta e mantém os estados `enfileirada`, `processando`, `enviada`, `entregue`, `lida` ou `falhou`.
 
+Administradores da empresa também possuem uma área própria para `jobs_falhos`. A listagem e o detalhe expõem somente campos sanitizados. Reenfileirar encerra o incidente original e cria um novo outbox job com outro ID; marcar como resolvido apenas encerra o alerta, sem alterar o estado final da mensagem. As duas decisões exigem motivo, CSRF, autorização por tenant e auditoria na mesma transação.
+
 Endpoints esperados:
 
 - `https://api.suaplataforma.com/webhook`
@@ -182,13 +184,14 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 158 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `npm test`: 164 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
-- Migrações e seed executados em PostgreSQL 16 real; 12 migrações descobertas.
+- Migrações e seed executados em PostgreSQL 16 real; 13 migrações descobertas.
 - Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
 - Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
 - Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
+- Teste real comprovou gestão do dead-letter: consulta sanitizada, novo outbox job no retry, resolução sem falso sucesso da mensagem e auditoria transacional.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

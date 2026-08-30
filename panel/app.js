@@ -145,6 +145,19 @@ const VIEW_DEFINITIONS = {
       ["eventCode", "Evento"], ["summary", "Resumo"], ["correlationId", "Correlação"],
     ],
   },
+  failedJobs: {
+    title: "Jobs falhos",
+    eyebrow: "Recuperação operacional",
+    description: "Falhas finais sanitizadas, com retentativa segura ou resolução administrativa auditada.",
+    resource: "failed-jobs",
+    permission: "logs",
+    defaultFilters: { status: "open" },
+    statusOptions: [["open", "Em aberto"], ["resolved", "Resolvidos"], ["all", "Todos"]],
+    columns: [
+      ["jobType", "Tipo"], ["attempts", "Tentativas"], ["errorCode", "Código"],
+      ["error", "Erro sanitizado"], ["lastFailureAt", "Última falha"], ["status", "Estado"],
+    ],
+  },
   audit: {
     title: "Auditoria",
     eyebrow: "Segurança",
@@ -340,6 +353,20 @@ function renderNavigation() {
   }
 }
 
+function resetViewFilters(definition) {
+  const statusSelect = elements.filterForm.elements.status;
+  const options = definition.statusOptions || [
+    ["", "Todos"], ["active", "Ativo"], ["pending", "Pendente"],
+    ["failed", "Falhou"], ["suspended", "Suspenso"],
+  ];
+  statusSelect.replaceChildren(...options.map(([value, label]) => new Option(label, value)));
+  elements.filterForm.reset();
+  state.filters = { ...(definition.defaultFilters || {}) };
+  for (const [name, value] of Object.entries(state.filters)) {
+    if (elements.filterForm.elements[name]) elements.filterForm.elements[name].value = value;
+  }
+}
+
 function endpointFor(definition, suffix = "") {
   if (definition.resource === "tenants") return `/tenants${suffix}`;
   if (!state.selectedEmpresaId) {
@@ -399,7 +426,7 @@ async function navigate(view, { updateHash = true } = {}) {
   }
   state.currentView = next;
   state.page = 1;
-  state.filters = {};
+  resetViewFilters(definition);
   if (updateHash) history.replaceState(null, "", `#${next}`);
   elements.viewEyebrow.textContent = definition.eyebrow;
   elements.viewTitle.textContent = definition.title;
@@ -548,6 +575,8 @@ function rowActions(view, item) {
   const id = item.id || item.empresaId;
   if (view === "conversations") {
     group.append(button("Abrir", () => openConversation(id), "button button-secondary button-small"));
+  } else if (view === "failedJobs") {
+    group.append(button("Analisar", () => openFailedJob(id), "button button-secondary button-small"));
   } else {
     group.append(button("Detalhes", () => openRecord(view, item), "button button-secondary button-small"));
   }
@@ -559,6 +588,80 @@ function rowActions(view, item) {
     group.append(button("Rotacionar credencial", () => openCredentialRotation(id), "button button-quiet button-small"));
   }
   return group;
+}
+
+async function openFailedJob(id) {
+  const base = endpointFor(VIEW_DEFINITIONS.failedJobs);
+  if (!base) return;
+  elements.detailTitle.textContent = "Job falho";
+  elements.detailContent.replaceChildren(paragraph("Carregando incidente…"));
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  try {
+    const job = await apiFetch(`${base}/${encodeURIComponent(id)}`);
+    const details = node("dl", "detail-list");
+    for (const [label, key] of [
+      ["Tipo", "jobType"], ["Estado", "status"], ["Tentativas", "attempts"],
+      ["Máximo de tentativas", "maxAttempts"], ["Código do erro", "errorCode"],
+      ["Erro sanitizado", "error"], ["Conversa", "conversationId"], ["Mensagem", "messageId"],
+      ["Correlação", "correlationId"], ["Job original", "originalJobId"],
+      ["Estado original", "originalJobStatus"], ["Primeira falha", "firstFailureAt"],
+      ["Última falha", "lastFailureAt"], ["Resolução", "resolutionKind"],
+      ["Motivo", "resolutionNote"], ["Novo job", "retryJobId"], ["Estado do novo job", "retryJobStatus"],
+    ]) details.append(nodeWithText("dt", label), valueNode(job[key], key));
+    const content = [details];
+    if (!job.resolvedAt) content.push(failedJobActions(id));
+    elements.detailContent.replaceChildren(...content);
+  } catch (error) {
+    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    elements.detailContent.replaceChildren(paragraph(error.message || "Não foi possível abrir o job falho."));
+  }
+}
+
+function failedJobActions(id) {
+  const section = node("section", "failed-job-actions");
+  section.append(
+    nodeWithText("h3", "Decisão operacional"),
+    paragraph("Reenfileirar cria um novo job; resolver apenas encerra o alerta e não altera o resultado da mensagem."),
+  );
+  const label = nodeWithText("label", "Motivo da decisão");
+  const reason = document.createElement("textarea");
+  reason.id = `failed-job-reason-${id}`;
+  reason.rows = 3;
+  reason.maxLength = 1000;
+  reason.required = true;
+  label.htmlFor = reason.id;
+  const actions = node("div", "dialog-actions");
+  const retry = button("Reenfileirar com segurança", () => performFailedJobAction(id, "retry", reason), "button button-primary");
+  const resolve = button("Marcar como resolvido", () => performFailedJobAction(id, "resolve", reason), "button button-secondary");
+  actions.append(retry, resolve);
+  section.append(label, reason, actions);
+  return section;
+}
+
+async function performFailedJobAction(id, action, reasonInput) {
+  const reason = reasonInput.value.trim();
+  reasonInput.setCustomValidity(reason ? "" : "Informe o motivo da decisão.");
+  if (!reasonInput.reportValidity()) return;
+  const retrying = action === "retry";
+  const confirmed = await confirmAction(
+    retrying
+      ? "Um novo job será criado e processado pelo worker. Deseja continuar?"
+      : "O alerta será encerrado sem alterar o estado final da mensagem. Deseja continuar?",
+    retrying ? "Confirmar retentativa" : "Confirmar resolução",
+  );
+  if (!confirmed) return;
+  try {
+    await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/failed-jobs/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      body: { reason },
+    });
+    toast(retrying ? "Novo job criado para processamento." : "Job falho marcado como resolvido.");
+    elements.detailDialog.close();
+    await loadCurrentView();
+  } catch (error) {
+    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    toast(error.message || "Não foi possível concluir a decisão operacional.");
+  }
 }
 
 function renderPagination(meta) {
@@ -1083,7 +1186,7 @@ function formatDate(value) {
 
 function badgeClass(value) {
   const status = String(value || "").toLocaleLowerCase("pt-BR");
-  if (/healthy|active|ativa|ativo|sent|delivered|read|success|humano|operator/iu.test(status)) return "badge-success";
+  if (/healthy|active|ativa|ativo|sent|delivered|read|success|humano|operator|resolved|resolvido|reenfileirado/iu.test(status)) return "badge-success";
   if (/fail|error|unavailable|suspend|revoked|bloque/iu.test(status)) return "badge-danger";
   if (/pending|pendente|not_configured|not_checked|queued|processing|bot|warning/iu.test(status)) return "badge-warning";
   return "";
@@ -1191,8 +1294,7 @@ elements.filterForm.addEventListener("submit", (event) => {
 });
 
 elements.clearFilters.addEventListener("click", () => {
-  elements.filterForm.reset();
-  state.filters = {};
+  resetViewFilters(VIEW_DEFINITIONS[state.currentView]);
   state.page = 1;
   loadCurrentView();
 });

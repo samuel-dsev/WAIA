@@ -13,7 +13,7 @@ test("painel oferece superfícies administrativas reais e responsivas", async ()
     readFile(new URL("../panel/styles.css", import.meta.url), "utf8"),
     readFile(new URL("../panel/app.js", import.meta.url), "utf8"),
   ]);
-  for (const label of ["Empresas", "Contatos", "Conversas", "Pedidos", "Agendamentos", "Consumo", "Logs", "Usuários", "Diagnósticos"]) assert.match(html, new RegExp(label, "u"));
+  for (const label of ["Empresas", "Contatos", "Conversas", "Pedidos", "Agendamentos", "Consumo", "Logs", "Jobs falhos", "Usuários", "Diagnósticos"]) assert.match(html, new RegExp(label, "u"));
   assert.match(css, /@media \(max-width:/u);
   assert.match(js, /credentials:\s*"include"/u);
   assert.match(js, /x-csrf-token/iu);
@@ -24,6 +24,8 @@ test("painel oferece superfícies administrativas reais e responsivas", async ()
   assert.match(js, /humanMessageComposer/u);
   assert.match(js, /idempotencyKey = crypto\.randomUUID/u);
   assert.match(js, /conversations\/\$\{encodeURIComponent\(conversationId\)\}\/messages/u);
+  assert.match(js, /failed-jobs\/\$\{encodeURIComponent\(id\)\}\/\$\{action\}/u);
+  assert.match(js, /Reenfileirar com segurança/u);
   assert.match(html, /img-src 'self' data: blob:/u);
   assert.doesNotMatch(js, /\/numbers\/\$\{encodeURIComponent\(numberId\)\}\/credentials\/rotate/u);
   assert.doesNotMatch(`${html}${js}`, /sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,}/u);

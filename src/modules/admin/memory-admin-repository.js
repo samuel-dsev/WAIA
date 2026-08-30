@@ -1,3 +1,5 @@
+import { AdminValidationError } from "./errors.js";
+
 const clone = (value) => value == null ? value : structuredClone(value);
 
 function cloneMap(source) {
@@ -72,6 +74,61 @@ export class MemoryAdminRepository {
   async create({ resource, empresaId, id, data }) { const item = { id, empresaId, ...clone(data), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; this.#resource(resource).set(id, item); return clone(item); }
   async update({ resource, empresaId, id, changes }) { const item = this.#resource(resource).get(id); if (!item || item.empresaId !== empresaId) return null; Object.assign(item, clone(changes), { updatedAt: new Date().toISOString() }); return clone(item); }
   async remove({ resource, empresaId, id }) { const item = this.#resource(resource).get(id); return item?.empresaId === empresaId ? this.#resource(resource).delete(id) : false; }
+  async listFailedJobs({ empresaId, limit = 25, page = 1, filters = {} }) {
+    const all = [...this.#resource("failed-jobs").values()].filter((item) => {
+      if (item.empresaId !== empresaId) return false;
+      if (filters.status === "open" && item.resolvedAt) return false;
+      if (filters.status === "resolved" && !item.resolvedAt) return false;
+      return !filters.jobType || item.jobType === filters.jobType;
+    });
+    const items = all.slice((page - 1) * limit, page * limit).map(clone);
+    return { items, pagination: { total: all.length, page, pageSize: limit } };
+  }
+  async getFailedJob({ empresaId, id }) {
+    const item = this.#resource("failed-jobs").get(id);
+    return item?.empresaId === empresaId ? clone(item) : null;
+  }
+  async retryFailedJob({ empresaId, id, retryJobId, actorId, reason, correlationId }) {
+    const item = this.#resource("failed-jobs").get(id);
+    if (!item || item.empresaId !== empresaId) return null;
+    if (item.resolvedAt) throw new AdminValidationError("Este job falho já foi encerrado.");
+    const now = new Date().toISOString();
+    Object.assign(item, {
+      resolvedAt: now,
+      resolvedByUserId: actorId,
+      resolutionKind: "reenfileirado",
+      resolutionNote: reason,
+      retryJobId,
+      retryJobStatus: "pendente",
+      status: "resolved",
+      updatedAt: now,
+    });
+    this.#resource("outbox-jobs").set(retryJobId, {
+      id: retryJobId,
+      empresaId,
+      jobType: item.jobType,
+      conversationId: item.conversationId,
+      messageId: item.messageId,
+      correlationId,
+      status: "pendente",
+    });
+    return clone(item);
+  }
+  async resolveFailedJob({ empresaId, id, actorId, reason }) {
+    const item = this.#resource("failed-jobs").get(id);
+    if (!item || item.empresaId !== empresaId) return null;
+    if (item.resolvedAt) throw new AdminValidationError("Este job falho já foi encerrado.");
+    const now = new Date().toISOString();
+    Object.assign(item, {
+      resolvedAt: now,
+      resolvedByUserId: actorId,
+      resolutionKind: "resolvido",
+      resolutionNote: reason,
+      status: "resolved",
+      updatedAt: now,
+    });
+    return clone(item);
+  }
   async userHasOtherMemberships() { return false; }
   async diagnostics({ empresaId }) { return { empresaId, ...clone(this.health) }; }
   async writeAudit(event, _options = {}) { this.audit.push(clone(event)); }

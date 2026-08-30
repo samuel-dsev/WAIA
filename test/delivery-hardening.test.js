@@ -79,6 +79,36 @@ test("rota de resposta humana exige CSRF e devolve aceitação assíncrona", asy
   assert.equal(captured.correlationId, "00000000-0000-4000-8000-000000000044");
 });
 
+test("rotas operacionais de jobs falhos exigem CSRF e distinguem retry de resolução", async () => {
+  const calls = [];
+  let csrfChecks = 0;
+  const app = express();
+  app.use(express.json());
+  app.use((request, _response, next) => { request.context = { correlationId: "00000000-0000-4000-8000-000000000081" }; next(); });
+  app.use("/api/admin", createAdminRouter({
+    adminService: {
+      async retryFailedJob(input) { calls.push(["retry", input]); return { retryJobId: "job-new" }; },
+      async resolveFailedJob(input) { calls.push(["resolve", input]); return { resolutionKind: "resolvido" }; },
+    },
+    authenticate(request, _response, next) { request.auth = { user: { id: "admin-a" } }; next(); },
+    csrf(request, _response, next) { csrfChecks += Number(request.get("x-csrf-token") === "csrf-test"); next(); },
+  }));
+  const options = {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-csrf-token": "csrf-test" },
+    body: JSON.stringify({ reason: "Incidente analisado." }),
+  };
+  const retried = await request(app, "/api/admin/tenants/tenant-a/failed-jobs/failed-1/retry", options);
+  const resolved = await request(app, "/api/admin/tenants/tenant-a/failed-jobs/failed-2/resolve", options);
+  assert.equal(retried.status, 202);
+  assert.equal(resolved.status, 200);
+  assert.equal(csrfChecks, 2);
+  assert.deepEqual(calls.map(([action, input]) => [action, input.failedJobId, input.empresaId]), [
+    ["retry", "failed-1", "tenant-a"],
+    ["resolve", "failed-2", "tenant-a"],
+  ]);
+});
+
 test("comprovante privado exige autenticação, tenant e retorna headers seguros", async () => {
   const repository = new MemoryAdminRepository({ tenants: [{ id: "tenant-a", name: "Tenant A", status: "active" }], environment: "test" });
   repository.getPrivateMedia = async ({ empresaId, messageId }) => empresaId === "tenant-a" && messageId === "message-1"

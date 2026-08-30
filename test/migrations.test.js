@@ -49,3 +49,12 @@ test("resposta humana possui idempotência persistente por tenant", async () => 
   assert.match(migration, /origem_resposta = 'operador'/u);
   assert.match(migration, /operador_usuario_id IS NOT NULL/u);
 });
+
+test("jobs falhos preservam origem, decisão e novo job de retentativa", async () => {
+  const migration = await readFile(new URL("../db/migrations/013_failed_jobs_operations.sql", import.meta.url), "utf8");
+  assert.match(migration, /outbox_job_id uuid/u);
+  assert.match(migration, /resolved_by_usuario_id uuid/u);
+  assert.match(migration, /resolution_kind = 'reenfileirado'/u);
+  assert.match(migration, /retry_job_id IS NOT NULL/u);
+  assert.match(migration, /jobs_falhos_retry_job_fkey/u);
+});

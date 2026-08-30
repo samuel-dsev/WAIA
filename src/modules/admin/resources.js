@@ -156,6 +156,13 @@ const definitions = {
     filters: ["severity", "category", "service", "correlationId", "conversationId", "messageId", "from", "to"],
     sorts: ["occurredAt", "severity", "createdAt"],
   },
+  "failed-jobs": {
+    read: "admin",
+    write: "admin",
+    fields: {},
+    filters: ["status", "search", "jobType", "errorCode", "conversationId", "messageId", "from", "to"],
+    sorts: ["lastFailureAt", "createdAt", "attempts"],
+  },
   audit: {
     read: "admin",
     write: "none",

@@ -264,6 +264,10 @@ dialog::backdrop { background: rgba(12, 27, 33, 0.7); }
 .human-composer-form label { font-weight: 750; }
 .human-composer-form textarea { width: 100%; min-height: 110px; padding: 11px 12px; resize: vertical; color: var(--ink); background: var(--surface); border: 1px solid #b9c6cb; border-radius: 9px; }
 .human-composer-form .button { justify-self: end; }
+.failed-job-actions { display: grid; gap: 10px; margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.failed-job-actions h3, .failed-job-actions p { margin: 0; }
+.failed-job-actions label { font-weight: 750; }
+.failed-job-actions textarea { width: 100%; min-height: 90px; padding: 11px 12px; resize: vertical; color: var(--ink); background: var(--surface); border: 1px solid #b9c6cb; border-radius: 9px; }
 .receipt-preview { display: block; width: 100%; min-height: 55vh; margin: 18px 0 10px; border: 1px solid var(--line); border-radius: 10px; object-fit: contain; background: #f7f9fa; }
 
 .toast-region { position: fixed; right: 18px; bottom: 18px; z-index: 90; display: grid; gap: 8px; }

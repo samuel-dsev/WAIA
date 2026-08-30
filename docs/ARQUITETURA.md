@@ -34,6 +34,8 @@ O worker recebe apenas referências por ID. Segredos não entram em Redis. Um lo
 
 Respostas humanas seguem o mesmo contrato assíncrono: o operador autenticado assume a conversa, e a API persiste mensagem de saída, chave de idempotência, outbox e auditoria na mesma transação. O worker resolve telefone, número e credencial dentro do tenant e registra o ID Meta antes de concluir o job. Estados de entrega e leitura continuam chegando pelo webhook assinado.
 
+Falhas finais permanecem em `jobs_falhos` como incidentes imutáveis quanto ao erro original. A API administrativa expõe somente campos explicitamente selecionados, nunca o payload bruto. Um retry manual encerra o incidente e cria outra outbox com novo ID, evitando colisão com o job falho retido no BullMQ; uma resolução simples encerra apenas o alerta. Motivo, ator, tipo de resolução e vínculo com o novo job ficam persistidos e a auditoria participa da mesma transação.
+
 ## Isolamento
 
 As tabelas operacionais possuem `empresa_id` direto ou uma relação composta que o valida. Repositórios sempre filtram explicitamente pelo tenant. PostgreSQL aplica `ENABLE/FORCE ROW LEVEL SECURITY`, com contexto definido somente por `SET LOCAL` dentro de transação. Consultas globais exigem papel de administrador da plataforma.

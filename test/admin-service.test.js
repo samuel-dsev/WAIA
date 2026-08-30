@@ -198,3 +198,105 @@ test("tentativa de responder conversa atribuída a outro operador é auditada", 
   assert.equal(repository.audit.at(-1).action, "conversation.message.send");
   assert.equal(repository.audit.at(-1).result, "denied");
 });
+
+test("somente administrador consulta detalhes sanitizados de jobs falhos", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "active" }],
+    records: {
+      "failed-jobs": [{
+        id: "failed-1",
+        empresaId: "tenant-a",
+        jobType: "send_human_message",
+        errorCode: "META_REQUEST_FAILED",
+        error: "Falha sanitizada.",
+        accessToken: "nao-pode-vazar",
+        status: "open",
+        resolvedAt: null,
+      }],
+    },
+  });
+  const service = new AdminService({ repository });
+
+  await assert.rejects(
+    service.listFailedJobs({ auth: operator, empresaId: "tenant-a" }),
+    (error) => error.status === 403,
+  );
+  const listed = await service.listFailedJobs({ auth: tenantAdmin, empresaId: "tenant-a" });
+  const detail = await service.getFailedJob({ auth: tenantAdmin, empresaId: "tenant-a", failedJobId: "failed-1" });
+  assert.equal(listed.items.length, 1);
+  assert.doesNotMatch(JSON.stringify({ listed, detail }), /nao-pode-vazar/u);
+});
+
+test("administrador reenfileira job falho com novo ID e auditoria transacional", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "active" }],
+    records: {
+      "failed-jobs": [{
+        id: "failed-1", empresaId: "tenant-a", jobType: "send_human_message",
+        conversationId: "conversation-1", messageId: "message-1", status: "open", resolvedAt: null,
+      }],
+    },
+  });
+  const generated = ["00000000-0000-4000-8000-000000000071", "00000000-0000-4000-8000-000000000072"];
+  const service = new AdminService({ repository, idGenerator: () => generated.shift() });
+  const result = await service.retryFailedJob({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    failedJobId: "failed-1",
+    body: { reason: "Credencial corrigida e validada." },
+    correlationId: "00000000-0000-4000-8000-000000000073",
+  });
+
+  assert.equal(result.resolutionKind, "reenfileirado");
+  assert.equal(result.retryJobId, "00000000-0000-4000-8000-000000000071");
+  assert.equal((await repository.get({ resource: "outbox-jobs", empresaId: "tenant-a", id: result.retryJobId })).status, "pendente");
+  assert.equal(repository.audit.at(-1).action, "failed_jobs.retry");
+  assert.equal(repository.audit.at(-1).resourceId, "failed-1");
+});
+
+test("falha de auditoria reverte retentativa de job falho", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "active" }],
+    records: { "failed-jobs": [{ id: "failed-rollback", empresaId: "tenant-a", jobType: "x", status: "open", resolvedAt: null }] },
+  });
+  repository.writeAudit = async () => { throw new Error("auditoria indisponível"); };
+  const service = new AdminService({ repository, idGenerator: () => "00000000-0000-4000-8000-000000000074" });
+
+  await assert.rejects(service.retryFailedJob({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    failedJobId: "failed-rollback",
+    body: { reason: "Retentar após correção." },
+  }), /auditoria indisponível/u);
+  assert.equal((await repository.getFailedJob({ empresaId: "tenant-a", id: "failed-rollback" })).resolvedAt, null);
+  assert.equal((await repository.list({ resource: "outbox-jobs", empresaId: "tenant-a" })).items.length, 0);
+});
+
+test("resolução administrativa encerra alerta sem criar novo job", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "active" }],
+    records: { "failed-jobs": [{ id: "failed-resolve", empresaId: "tenant-a", jobType: "x", status: "open", resolvedAt: null }] },
+  });
+  const service = new AdminService({ repository });
+  const resolved = await service.resolveFailedJob({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    failedJobId: "failed-resolve",
+    body: { reason: "Incidente analisado; nenhuma ação externa necessária." },
+  });
+
+  assert.equal(resolved.resolutionKind, "resolvido");
+  assert.equal(resolved.retryJobId, undefined);
+  assert.equal((await repository.list({ resource: "outbox-jobs", empresaId: "tenant-a" })).items.length, 0);
+  assert.equal(repository.audit.at(-1).action, "failed_jobs.resolve");
+  await assert.rejects(service.resolveFailedJob({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    failedJobId: "failed-resolve",
+    body: { reason: "Duplicada." },
+  }), (error) => error instanceof AdminValidationError);
+});

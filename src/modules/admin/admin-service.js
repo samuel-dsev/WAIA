@@ -56,6 +56,14 @@ function requiredHumanMessage(value) {
   return text;
 }
 
+function requiredResolutionReason(value) {
+  const reason = String(value || "").replace(/\r\n?/gu, "\n").trim();
+  if (!reason || reason.length > 1_000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(reason)) {
+    throw new AdminValidationError("O motivo deve ter entre 1 e 1000 caracteres.", { field: "reason" });
+  }
+  return reason;
+}
+
 function requiredIdempotencyKey(value) {
   const key = String(value || "").trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(key)) {
@@ -588,6 +596,105 @@ export class AdminService {
       }
       throw error;
     }
+  }
+
+  async listFailedJobs({ auth, empresaId, query = {} }) {
+    const definition = ADMIN_RESOURCES["failed-jobs"];
+    await this.#tenant(auth, empresaId, definition, { action: "failed_jobs.list", resource: "failed-jobs" });
+    if (typeof this.repository.listFailedJobs !== "function") throw new TypeError("adminRepository.listFailedJobs é obrigatório.");
+    const status = query.status == null || query.status === "" ? "open" : String(query.status);
+    if (!["all", "open", "resolved"].includes(status)) {
+      throw new AdminValidationError("status deve ser all, open ou resolved.", { field: "status" });
+    }
+    const options = pagination(definition, { ...query, status });
+    return sanitizedAdminView(await this.repository.listFailedJobs({ empresaId, ...options }));
+  }
+
+  async getFailedJob({ auth, empresaId, failedJobId }) {
+    const definition = ADMIN_RESOURCES["failed-jobs"];
+    await this.#tenant(auth, empresaId, definition, { action: "failed_jobs.read", resource: "failed-jobs" });
+    if (typeof this.repository.getFailedJob !== "function") throw new TypeError("adminRepository.getFailedJob é obrigatório.");
+    const id = requiredText(failedJobId, "failedJobId");
+    const record = await this.repository.getFailedJob({ empresaId, id });
+    if (!record) throw new AdminNotFoundError();
+    return sanitizedAdminView(record);
+  }
+
+  async retryFailedJob({ auth, empresaId, failedJobId, body, correlationId }) {
+    const definition = ADMIN_RESOURCES["failed-jobs"];
+    await this.#tenant(auth, empresaId, definition, {
+      write: true,
+      action: "failed_jobs.retry",
+      resource: "failed-jobs",
+    });
+    if (typeof this.repository.retryFailedJob !== "function") throw new TypeError("adminRepository.retryFailedJob é obrigatório.");
+    assertTenantBody(empresaId, body);
+    const identity = normalizedAdminAuth(auth);
+    const id = requiredText(failedJobId, "failedJobId");
+    const reason = requiredResolutionReason(body?.reason);
+    const requestCorrelationId = safeCorrelationId(correlationId, this.idGenerator);
+    const retryJobId = this.idGenerator();
+    return sanitizedAdminView(await this.#auditedMutation({
+      auth,
+      empresaId,
+      mutate: async (transaction) => {
+        const record = await this.repository.retryFailedJob({
+          empresaId,
+          id,
+          retryJobId,
+          actorId: identity.actorId,
+          reason,
+          correlationId: requestCorrelationId,
+          transaction,
+        });
+        if (!record) throw new AdminNotFoundError();
+        return record;
+      },
+      audit: {
+        action: "failed_jobs.retry",
+        resource: "failed-jobs",
+        resourceId: id,
+        fields: ["resolutionKind", "resolutionNote", "retryJobId"],
+        correlationId: requestCorrelationId,
+      },
+    }));
+  }
+
+  async resolveFailedJob({ auth, empresaId, failedJobId, body, correlationId }) {
+    const definition = ADMIN_RESOURCES["failed-jobs"];
+    await this.#tenant(auth, empresaId, definition, {
+      write: true,
+      action: "failed_jobs.resolve",
+      resource: "failed-jobs",
+    });
+    if (typeof this.repository.resolveFailedJob !== "function") throw new TypeError("adminRepository.resolveFailedJob é obrigatório.");
+    assertTenantBody(empresaId, body);
+    const identity = normalizedAdminAuth(auth);
+    const id = requiredText(failedJobId, "failedJobId");
+    const reason = requiredResolutionReason(body?.reason);
+    const requestCorrelationId = safeCorrelationId(correlationId, this.idGenerator);
+    return sanitizedAdminView(await this.#auditedMutation({
+      auth,
+      empresaId,
+      mutate: async (transaction) => {
+        const record = await this.repository.resolveFailedJob({
+          empresaId,
+          id,
+          actorId: identity.actorId,
+          reason,
+          transaction,
+        });
+        if (!record) throw new AdminNotFoundError();
+        return record;
+      },
+      audit: {
+        action: "failed_jobs.resolve",
+        resource: "failed-jobs",
+        resourceId: id,
+        fields: ["resolutionKind", "resolutionNote"],
+        correlationId: requestCorrelationId,
+      },
+    }));
   }
 
   async diagnostics({ auth, empresaId = null }) {

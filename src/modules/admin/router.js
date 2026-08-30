@@ -37,6 +37,30 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
     body: request.body,
     correlationId: request.context?.correlationId,
   }))));
+  router.get("/tenants/:empresaId/failed-jobs", asyncRoute(async (request, response) => response.json(await adminService.listFailedJobs({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    query: { ...request.query, limit: request.query.pageSize },
+  }))));
+  router.get("/tenants/:empresaId/failed-jobs/:id", asyncRoute(async (request, response) => response.json(await adminService.getFailedJob({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    failedJobId: request.params.id,
+  }))));
+  router.post("/tenants/:empresaId/failed-jobs/:id/retry", asyncRoute(async (request, response) => response.status(202).json(await adminService.retryFailedJob({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    failedJobId: request.params.id,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/failed-jobs/:id/resolve", asyncRoute(async (request, response) => response.json(await adminService.resolveFailedJob({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    failedJobId: request.params.id,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
   router.get("/tenants/:empresaId/messages/:id/media", asyncRoute(async (request, response) => {
     const media = await adminService.getMessageMedia({ auth: request.auth, empresaId: request.params.empresaId, messageId: request.params.id });
     const extension = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" })[media.mimeType] || "bin";

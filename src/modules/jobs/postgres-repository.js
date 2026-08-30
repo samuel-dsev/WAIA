@@ -187,11 +187,12 @@ export class PostgresJobRepository {
       }
       await client.query(
         `INSERT INTO jobs_falhos (
-           empresa_id, queue_job_id, job_type, conversa_id, mensagem_id,
+           empresa_id, queue_job_id, outbox_job_id, job_type, conversa_id, mensagem_id,
            tentativas, max_tentativas, first_failure_at, last_failure_at,
            error_code, error_sanitized, payload_sanitized, correlation_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now(),$8,$9,$10::jsonb,$11)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),now(),$9,$10,$11::jsonb,$12)
          ON CONFLICT (queue_job_id) DO UPDATE SET
+           outbox_job_id = EXCLUDED.outbox_job_id,
            tentativas = EXCLUDED.tentativas,
            max_tentativas = EXCLUDED.max_tentativas,
            last_failure_at = now(),
@@ -200,6 +201,7 @@ export class PostgresJobRepository {
         [
           reference.empresaId,
           `${reference.empresaId}:${reference.jobId}`,
+          reference.jobId,
           reference.type,
           reference.conversationId,
           reference.messageId,

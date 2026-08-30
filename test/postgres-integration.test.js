@@ -421,6 +421,93 @@ test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { 
       [empresaId, failedMessage.id],
     )).rows[0];
     assert.deepEqual(failedState, { status: "falhou", job_status: "falhou", dead_letters: 1 });
+
+    await owner.query(
+      "UPDATE usuarios_empresas SET papel = 'administrador' WHERE empresa_id = $1 AND usuario_id = $2",
+      [empresaId, operatorId],
+    );
+    const adminAuth = {
+      user: { id: operatorId },
+      memberships: [{ empresaId, role: "tenant_admin", permissions: [] }],
+    };
+    const deadLetterId = (await owner.query(
+      "SELECT id FROM jobs_falhos WHERE empresa_id = $1 AND outbox_job_id = $2",
+      [empresaId, failedJob.id],
+    )).rows[0].id;
+    const listedFailures = await service.listFailedJobs({ auth: adminAuth, empresaId, query: { status: "open" } });
+    assert.equal(listedFailures.items.some((item) => item.id === deadLetterId), true);
+    assert.equal(Object.hasOwn(listedFailures.items.find((item) => item.id === deadLetterId), "payloadSanitized"), false);
+
+    const retried = await service.retryFailedJob({
+      auth: adminAuth,
+      empresaId,
+      failedJobId: deadLetterId,
+      body: { reason: "Falha sintética corrigida antes da retentativa." },
+      correlationId: randomUUID(),
+    });
+    assert.notEqual(retried.retryJobId, failedJob.id);
+    const retryState = (await owner.query(
+      `SELECT f.resolution_kind, f.resolution_note, f.resolved_by_usuario_id,
+              o.status AS retry_status, o.tentativas AS retry_attempts,
+              m.status AS message_status,
+              (SELECT count(*)::int FROM logs_auditoria a
+                WHERE a.empresa_id = $1 AND a.acao = 'failed_jobs.retry'
+                  AND a.recurso_id = f.id::text) AS audits
+         FROM jobs_falhos f
+         JOIN outbox_jobs o ON o.empresa_id = f.empresa_id AND o.id = f.retry_job_id
+         JOIN mensagens m ON m.empresa_id = f.empresa_id AND m.id = f.mensagem_id
+        WHERE f.empresa_id = $1 AND f.id = $2`,
+      [empresaId, deadLetterId],
+    )).rows[0];
+    assert.deepEqual(retryState, {
+      resolution_kind: "reenfileirado",
+      resolution_note: "Falha sintética corrigida antes da retentativa.",
+      resolved_by_usuario_id: operatorId,
+      retry_status: "pendente",
+      retry_attempts: 0,
+      message_status: "enfileirada",
+      audits: 1,
+    });
+
+    const retryJob = (await owner.query(
+      `UPDATE outbox_jobs SET status = 'publicado', published_at = now()
+        WHERE empresa_id = $1 AND id = $2
+      RETURNING id, conversa_id, mensagem_id, job_type, correlation_id`,
+      [empresaId, retried.retryJobId],
+    )).rows[0];
+    const retryReference = {
+      jobId: retryJob.id,
+      empresaId,
+      conversationId: retryJob.conversa_id,
+      messageId: retryJob.mensagem_id,
+      statusEventId: null,
+      type: retryJob.job_type,
+      correlationId: retryJob.correlation_id,
+      payloadVersion: 1,
+    };
+    assert.equal((await jobRepository.claim(retryReference, { attempt: 1 })).outcome, "claimed");
+    await jobRepository.fail(retryReference, {
+      attempt: 1,
+      maxAttempts: 1,
+      error: { code: "META_STILL_UNAVAILABLE", message: "Falha sintética após retentativa." },
+    });
+    const retryDeadLetterId = (await owner.query(
+      "SELECT id FROM jobs_falhos WHERE empresa_id = $1 AND outbox_job_id = $2",
+      [empresaId, retryJob.id],
+    )).rows[0].id;
+    const resolved = await service.resolveFailedJob({
+      auth: adminAuth,
+      empresaId,
+      failedJobId: retryDeadLetterId,
+      body: { reason: "Incidente encerrado sem novo envio." },
+      correlationId: randomUUID(),
+    });
+    assert.equal(resolved.resolutionKind, "resolvido");
+    assert.equal(resolved.retryJobId, null);
+    assert.equal((await owner.query(
+      "SELECT status FROM mensagens WHERE empresa_id = $1 AND id = $2",
+      [empresaId, failedMessage.id],
+    )).rows[0].status, "falhou");
   } finally {
     await owner.query("ROLLBACK").catch(() => {});
     if (empresaId) {
