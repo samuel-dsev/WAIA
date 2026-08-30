@@ -32,6 +32,8 @@ O webhook normaliza eventos de mensagem e status com `phoneNumberId`. A ingestã
 
 O worker recebe apenas referências por ID. Segredos não entram em Redis. Um lock por conversa e a sequência persistida garantem ordem; a confirmação no banco torna reentregas no-op. Retry usa backoff com jitter e dead-letter sanitizada.
 
+Opções interativas mantêm um único contrato interno de IDs. Até três opções são serializadas como botões; de quatro a dez, como lista da Meta. Acima disso, o runtime pagina oito itens por vez e usa até duas linhas reservadas para navegação. Menu, eventos, compra, serviços e horários usam escopos internos distintos; o prefixo de navegação não pode ser criado pela configuração de um tenant. O webhook normaliza `button_reply` e `list_reply` para o mesmo roteador, e o gateway rejeita qualquer conjunto acima de dez em vez de truncá-lo.
+
 Respostas humanas seguem o mesmo contrato assíncrono: o operador autenticado assume a conversa, e a API persiste mensagem de saída, chave de idempotência, outbox e auditoria na mesma transação. O worker resolve telefone, número e credencial dentro do tenant e registra o ID Meta antes de concluir o job. Estados de entrega e leitura continuam chegando pelo webhook assinado.
 
 Falhas finais permanecem em `jobs_falhos` como incidentes imutáveis quanto ao erro original. A API administrativa expõe somente campos explicitamente selecionados, nunca o payload bruto. Um retry manual encerra o incidente e cria outra outbox com novo ID, evitando colisão com o job falho retido no BullMQ; uma resolução simples encerra apenas o alerta. Motivo, ator, tipo de resolução e vínculo com o novo job ficam persistidos e a auditoria participa da mesma transação.

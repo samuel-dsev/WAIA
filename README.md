@@ -22,6 +22,8 @@ Fluxo principal:
 4. O worker publica o outbox no Redis, processa jobs com lock por conversa e envia a resposta pelo número correto.
 5. Conversas, mensagens, pedidos, agendamentos, consumo de IA, logs e auditoria ficam isolados por `empresa_id`.
 
+Respostas com até três opções usam botões de resposta rápida. Entre quatro e dez opções, o gateway usa uma mensagem de lista da Cloud API. Menus, eventos, serviços e horários com mais de dez opções são divididos em páginas de oito itens, reservando linhas para navegação anterior/próxima. O runtime reconhece respostas `button_reply` e `list_reply` pelo mesmo ID determinístico; nenhuma opção excedente é descartada silenciosamente.
+
 PostgreSQL é a fonte de verdade. Redis é usado para fila, concorrência, locks e rate limiting. Segredos recuperáveis ficam criptografados em repouso com AES-256-GCM e chave mestra fora do banco.
 
 ## Desenvolvimento local
@@ -188,7 +190,7 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 167 testes aprovados; 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `npm test`: 177 testes descobertos; 172 aprovados, com 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
 - Migrações e seed executados em PostgreSQL 16 real; 13 migrações descobertas.
@@ -197,6 +199,7 @@ Comandos executados nesta continuidade:
 - Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
 - Teste real comprovou gestão do dead-letter: consulta sanitizada, novo outbox job no retry, resolução sem falso sucesso da mensagem e auditoria transacional.
 - Endpoint Prometheus real recusou coleta sem token com HTTP 401 e retornou HTTP 200 com Bearer sintético, gauges PostgreSQL/BullMQ e heartbeat do worker; Redis real acumulou contadores e durações compartilhados.
+- Runtime, worker, parser e gateway interativo passaram em 36 testes dentro da imagem Docker; API e worker reconstruídos permaneceram saudáveis e a prontidão retornou HTTP 200.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

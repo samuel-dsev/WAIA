@@ -153,6 +153,55 @@ test("worker handler processa mensagem persistida por referencia e registra resp
   assert.equal(recorded[0].origin, "deterministic_flow");
 });
 
+test("worker preserva todas as opções interativas ao preparar e enviar a resposta", async () => {
+  const buttons = [];
+  const definition = structuredClone(tenantDefinition);
+  definition.runtime.menu.options = Array.from({ length: 4 }, (_, index) => ({
+    id: `produtos-${index + 1}`,
+    label: `Produtos ${index + 1}`,
+    module: "catalog",
+    action: "catalog.list",
+  }));
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-list", empresaId: "tenant-a", conversationId: "conversation-list", contactId: "contact-1",
+          numeroWhatsappId: "number-1", type: "text", text: "oi", mediaId: null,
+          externalMessageId: "wamid.list.in", correlationId: "00000000-0000-4000-8000-000000000099",
+          senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+      async preparedReply() { return null; },
+      async prepareReply({ reply }) {
+        buttons.push(...structuredClone(reply.buttons));
+        return { id: "reply-list", text: reply.text, buttons: structuredClone(reply.buttons), status: "processando" };
+      },
+      async markReplySent() {},
+    },
+    conversationService: {
+      async getConversation() { return { mode: "bot" }; },
+      async getState() { return { flowKey: "idle", stage: "idle", data: {}, version: 1 }; },
+      async saveState() {},
+      async recordMessage() {},
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { return definition; } },
+    metaGateway: {
+      async markRead() {},
+      async sendReply(_context, payload) {
+        assert.deepEqual(payload.buttons, buttons);
+        return { messages: [{ id: "wamid.list.out" }] };
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-list" });
+  assert.deepEqual(buttons.map(({ id }) => id), ["produtos-1", "produtos-2", "produtos-3", "produtos-4"]);
+});
+
 test("worker armazena comprovante privado antes de continuar uma resposta preparada", async () => {
   const events = [];
   const stored = { storageKey: "tenant-a/message-media", mimeType: "image/jpeg", sizeBytes: 4, sha256: "a".repeat(64) };

@@ -57,6 +57,33 @@ test("normaliza mensagens de duas empresas preservando phone_number_id", () => {
   assert.equal(events[1].interactiveSelection.type, "button_reply");
 });
 
+test("normaliza seleção de mensagem de lista para o mesmo contrato interativo", () => {
+  const payload = {
+    object: "whatsapp_business_account",
+    entry: [{
+      id: "waba-a",
+      changes: [change("phone-a", { messages: [{
+        id: "wamid.list",
+        from: "551100000001",
+        timestamp: "1787800000",
+        type: "interactive",
+        interactive: {
+          type: "list_reply",
+          list_reply: { id: "_waia_page:menu:2", title: "Próxima página" },
+        },
+      }] })],
+    }],
+  };
+
+  const [message] = parseWhatsAppWebhook(payload);
+  assert.equal(message.text, "_waia_page:menu:2");
+  assert.deepEqual(message.interactiveSelection, {
+    type: "list_reply",
+    id: "_waia_page:menu:2",
+    title: "Próxima página",
+  });
+});
+
 test("normaliza imagem e status Meta sem reter detalhes excessivos do erro", () => {
   const payload = {
     entry: [{

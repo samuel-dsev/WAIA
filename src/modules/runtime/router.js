@@ -1,5 +1,6 @@
 import { createCanonicalModuleDefinitions } from "../business/handlers.js";
 import { createModuleRegistry } from "./module-registry.js";
+import { paginateInteractiveOptions, parsePageSelection, withPageIndicator } from "./interactive-pagination.js";
 import { parseTenantRuntimeConfig } from "./tenant-runtime-config.js";
 
 function requireMethod(target, method, name) {
@@ -10,16 +11,27 @@ function normalized(value) {
   return String(value || "").trim().toLocaleLowerCase("pt-BR");
 }
 
-function menuReply(config) {
+function menuReply(config, page = 1) {
+  const pagination = paginateInteractiveOptions(config.menu.options, {
+    page,
+    scope: "menu",
+    toButton: ({ id, label }) => ({ id, label }),
+  });
   return {
     source: "deterministic",
     module: null,
-    text: config.menu.text || config.identity.welcomeMessage || `Olá! Você está falando com ${config.identity.name}. Como podemos ajudar?`,
-    buttons: config.menu.options.map(({ id, label }) => ({ id, label })),
+    text: withPageIndicator(
+      config.menu.text || config.identity.welcomeMessage || `Olá! Você está falando com ${config.identity.name}. Como podemos ajudar?`,
+      pagination,
+    ),
+    buttons: pagination.buttons,
   };
 }
 
 function resolveCommand({ config, input, state, registry }) {
+  const selectedRaw = String(input.selectionId || input.text || "").trim();
+  const selected = normalized(selectedRaw);
+  const navigation = parsePageSelection(selectedRaw);
   if (state?.module === "orders" && ["awaiting_receipt", "awaiting_name"].includes(state.step)) {
     return { module: registry.get("orders"), action: "orders.continue", payload: {} };
   }
@@ -27,8 +39,13 @@ function resolveCommand({ config, input, state, registry }) {
     return { module: registry.get("appointments"), action: "appointments.continue", payload: {} };
   }
   if (state?.module === "appointments" && state.step === "awaiting_slot") {
-    const selectedRaw = String(input.selectionId || input.text || "").trim();
-    const selected = normalized(selectedRaw);
+    if (navigation?.scope === "appointment-slots") {
+      return {
+        module: registry.get("appointments"),
+        action: "appointments.select_service",
+        payload: { serviceId: state.data.serviceId, page: navigation.page },
+      };
+    }
     if (selected.startsWith("slot:")) {
       const service = config.appointments.services.find((item) => item.id === state.data.serviceId);
       const selectedId = selected.slice(5);
@@ -41,8 +58,18 @@ function resolveCommand({ config, input, state, registry }) {
   const action = String(input.action || "").trim();
   if (action) return { module: registry.resolveAction(action), action, payload: input.payload || {} };
 
-  const selectedRaw = String(input.selectionId || input.text || "").trim();
-  const selected = normalized(selectedRaw);
+  if (navigation) {
+    if (navigation.scope === "menu") return { menuPage: navigation.page };
+    if (navigation.scope === "events") {
+      return { module: registry.get("events"), action: "events.list", payload: { page: navigation.page } };
+    }
+    if (navigation.scope === "orders") {
+      return { module: registry.get("orders"), action: "orders.start", payload: { page: navigation.page } };
+    }
+    if (navigation.scope === "appointment-services") {
+      return { module: registry.get("appointments"), action: "appointments.start", payload: { page: navigation.page } };
+    }
+  }
   const menuOption = config.menu.options.find((option) => normalized(option.id) === selected || normalized(option.label) === selected);
   if (menuOption) return { module: registry.get(menuOption.module), action: menuOption.action, payload: menuOption.payload };
 
@@ -91,6 +118,7 @@ export function createTenantRuntimeRouter({
       };
     }
     const command = resolveCommand({ config, input, state, registry: moduleRegistry });
+    if (command?.menuPage) return menuReply(config, command.menuPage);
     if (!command?.module) return menuReply(config);
     if (!enabled.has(command.module.key)) {
       return {

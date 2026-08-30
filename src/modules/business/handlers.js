@@ -1,11 +1,13 @@
+import { paginateInteractiveOptions, withPageIndicator } from "../runtime/interactive-pagination.js";
+
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 function reply(text, buttons = []) {
   return { text, buttons };
 }
 
-function menuButton(id, label) {
-  return { id, label };
+function menuButton(id, label, description) {
+  return { id, label, ...(description ? { description } : {}) };
 }
 
 function active(items) {
@@ -37,12 +39,20 @@ function eventsHandler() {
   return {
     key: "events",
     actions: ["events.list"],
-    async handle({ config }) {
+    async handle({ config, payload }) {
       const events = active(config.events.items);
       if (events.length === 0) return { reply: reply("Não há eventos disponíveis no momento.") };
-      const lines = events.map((event) => `• ${event.name} — ${event.startsAt} — ${MONEY.format(event.price)}`);
-      const buttons = events.map((event) => menuButton(`event:${event.id}`, `Comprar: ${event.name}`));
-      return { reply: reply(lines.join("\n"), buttons) };
+      const pagination = paginateInteractiveOptions(events, {
+        page: payload?.page,
+        scope: "events",
+        toButton: (event) => menuButton(
+          `event:${event.id}`,
+          `Comprar: ${event.name}`,
+          `${event.startsAt} — ${MONEY.format(event.price)}`,
+        ),
+      });
+      const lines = pagination.items.map((event) => `• ${event.name} — ${event.startsAt} — ${MONEY.format(event.price)}`);
+      return { reply: reply(withPageIndicator(lines.join("\n"), pagination), pagination.buttons) };
     },
   };
 }
@@ -56,10 +66,15 @@ function orderHandler({ orderRepository, logger }) {
       if (action === "orders.start") {
         const events = active(config.events.items);
         if (events.length === 0) return { reply: reply("Não há itens disponíveis para compra no momento.") };
+        const pagination = paginateInteractiveOptions(events, {
+          page: context.payload?.page,
+          scope: "orders",
+          toButton: (event) => menuButton(`event:${event.id}`, event.name, `${event.startsAt} — ${MONEY.format(event.price)}`),
+        });
         return {
           reply: reply(
-            "Escolha o evento:",
-            events.map((event) => menuButton(`event:${event.id}`, event.name)),
+            withPageIndicator("Escolha o evento:", pagination),
+            pagination.buttons,
           ),
         };
       }
@@ -147,16 +162,26 @@ function appointmentsHandler({ appointmentRepository, logger }) {
       const services = active(config.appointments.services);
       if (action === "appointments.start") {
         if (services.length === 0) return { reply: reply("Não há serviços disponíveis para agendamento.") };
-        return { reply: reply("Escolha o serviço:", services.map((service) => menuButton(`appointment:${service.id}`, service.name))) };
+        const pagination = paginateInteractiveOptions(services, {
+          page: payload?.page,
+          scope: "appointment-services",
+          toButton: (service) => menuButton(`appointment:${service.id}`, service.name, service.description),
+        });
+        return { reply: reply(withPageIndicator("Escolha o serviço:", pagination), pagination.buttons) };
       }
       if (action === "appointments.select_service") {
         const service = services.find((item) => item.id === payload.serviceId);
         if (!service) return { reply: reply("O serviço selecionado não está disponível.") };
         const slots = service.slots.filter((slot) => slot.available);
         if (slots.length === 0) return { reply: reply("Não há horários disponíveis para esse serviço.") };
+        const pagination = paginateInteractiveOptions(slots, {
+          page: payload?.page,
+          scope: "appointment-slots",
+          toButton: (slot) => menuButton(`slot:${slot.id}`, slot.label),
+        });
         return {
           state: { module: "appointments", step: "awaiting_slot", data: { serviceId: service.id } },
-          reply: reply("Escolha o horário:", slots.map((slot) => menuButton(`slot:${slot.id}`, slot.label))),
+          reply: reply(withPageIndicator("Escolha o horário:", pagination), pagination.buttons),
         };
       }
       if (action === "appointments.select_slot" || state.step === "awaiting_slot") {

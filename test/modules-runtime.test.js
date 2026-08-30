@@ -258,3 +258,82 @@ test("handoff pausa a automação e registra solicitação com escopo da empresa
   assert.equal(paused.code, "AUTOMATION_PAUSED");
   assert.doesNotMatch(paused.text, /Porção da casa/);
 });
+
+test("menu e eventos extensos são paginados sem descartar opções", async () => {
+  const menuOptions = Array.from({ length: 12 }, (_, index) => ({
+    id: `catalogo-${index + 1}`,
+    label: `Catálogo ${index + 1}`,
+    module: "catalog",
+    action: "catalog.list",
+  }));
+  const events = Array.from({ length: 12 }, (_, index) => ({
+    id: `evento-${index + 1}`,
+    name: `Evento ${index + 1}`,
+    startsAt: `2026-09-${String(index + 1).padStart(2, "0")}T20:00:00-03:00`,
+    price: 20 + index,
+  }));
+  const router = runtime({
+    ...barConfig,
+    menu: { text: "Escolha:", options: menuOptions },
+    catalog: { items: [{ id: "produto", name: "Produto paginado", price: 10 }] },
+    events: { items: events },
+  });
+  const input = { conversationId: "conversa-paginada", contactId: "contato" };
+
+  const firstMenu = await router.handle({ ...input, text: "oi" });
+  assert.equal(firstMenu.buttons.length, 9);
+  assert.deepEqual(firstMenu.buttons.slice(0, 2).map(({ id }) => id), ["catalogo-1", "catalogo-2"]);
+  assert.equal(firstMenu.buttons.at(-1).id, "_waia_page:menu:2");
+  assert.match(firstMenu.text, /Página 1 de 2/u);
+
+  const secondMenu = await router.handle({ ...input, selectionId: "_waia_page:menu:2" });
+  assert.deepEqual(secondMenu.buttons.map(({ id }) => id), [
+    "_waia_page:menu:1", "catalogo-9", "catalogo-10", "catalogo-11", "catalogo-12",
+  ]);
+  assert.match((await router.handle({ ...input, selectionId: "catalogo-12" })).text, /Produto paginado/u);
+
+  const firstEvents = await router.handle({ ...input, action: "events.list" });
+  assert.equal(firstEvents.buttons.length, 9);
+  assert.equal(firstEvents.buttons.at(-1).id, "_waia_page:events:2");
+  assert.doesNotMatch(firstEvents.text, /Evento 9\b/u);
+  const secondEvents = await router.handle({ ...input, selectionId: "_waia_page:events:2" });
+  assert.deepEqual(secondEvents.buttons.map(({ id }) => id), [
+    "_waia_page:events:1", "event:evento-9", "event:evento-10", "event:evento-11", "event:evento-12",
+  ]);
+  const selected = await router.handle({ ...input, selectionId: "event:evento-12" });
+  assert.match(selected.text, /Evento 12/u);
+  assert.match(selected.text, /PIX: pix-sintetico/u);
+});
+
+test("serviços e horários extensos preservam estado ao navegar entre páginas", async () => {
+  const slots = Array.from({ length: 11 }, (_, index) => ({
+    id: `horario-${index + 1}`,
+    label: `Horário ${index + 1}`,
+    startsAt: `2026-10-01T${String(index + 8).padStart(2, "0")}:00:00-03:00`,
+  }));
+  const services = Array.from({ length: 11 }, (_, index) => ({
+    id: `servico-${index + 1}`,
+    name: `Serviço ${index + 1}`,
+    slots: index === 10 ? slots : [{ id: `unico-${index + 1}`, label: "Único" }],
+  }));
+  const stateRepository = memoryStateRepository();
+  const router = runtime({
+    ...clinicConfig,
+    appointments: { services },
+  }, { stateRepository, appointmentRepository: { async createPending() {} } });
+  const input = { conversationId: "conversa-agenda-paginada", contactId: "paciente" };
+
+  const servicesFirstPage = await router.handle({ ...input, selectionId: "agendar" });
+  assert.equal(servicesFirstPage.buttons.at(-1).id, "_waia_page:appointment-services:2");
+  const servicesSecondPage = await router.handle({ ...input, selectionId: "_waia_page:appointment-services:2" });
+  assert.equal(servicesSecondPage.buttons.at(-1).id, "appointment:servico-11");
+
+  const slotsFirstPage = await router.handle({ ...input, selectionId: "appointment:servico-11" });
+  assert.equal(slotsFirstPage.buttons.at(-1).id, "_waia_page:appointment-slots:2");
+  const slotsSecondPage = await router.handle({ ...input, selectionId: "_waia_page:appointment-slots:2" });
+  assert.deepEqual(slotsSecondPage.buttons.map(({ id }) => id), [
+    "_waia_page:appointment-slots:1", "slot:horario-9", "slot:horario-10", "slot:horario-11",
+  ]);
+  assert.equal(stateRepository.inspect("empresa-clinica", input.conversationId).data.serviceId, "servico-11");
+  assert.match((await router.handle({ ...input, selectionId: "slot:horario-11" })).text, /nome completo/i);
+});

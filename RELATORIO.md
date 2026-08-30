@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 30 de agosto de 2026 após implementar e comprovar em infraestrutura real a coleta protegida de métricas operacionais.
+Atualizado em 30 de agosto de 2026 após implementar e comprovar a paginação das opções interativas e o envio por mensagens de lista da Meta.
 
 ## Diagnóstico executivo
 
@@ -25,6 +25,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Atendimento humano no painel com assunção da conversa, CSRF, autorização, idempotência, mensagem/outbox/auditoria transacionais e envio assíncrono pelo número do tenant.
 - Gestão de jobs falhos no painel, restrita a administradores, com consulta sanitizada, retry por novo job, resolução explícita e auditoria transacional.
 - Métricas Prometheus protegidas por Bearer dedicado, com contadores/durações compartilhados entre API e worker no Redis e gauges reais do PostgreSQL, BullMQ e heartbeats.
+- Menus, eventos, compras, serviços e horários paginados sem perda de opções; o gateway usa botões até três escolhas e mensagens de lista entre quatro e dez.
 
 ## Correções desta auditoria
 
@@ -71,11 +72,16 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - API e worker escrevem no mesmo namespace Redis; o endpoint `/metrics` agrega esses eventos com filas BullMQ, workers ativos e estados duráveis de mensagens, outbox, dead-letter, tenants e uso de IA.
 - A coleta exige `METRICS_BEARER_TOKEN` com pelo menos 32 caracteres em produção, compara o token em tempo constante e responde com `no-store` e formato Prometheus.
 - Nenhuma métrica possui label ou valor de tenant, usuário, conversa, mensagem, telefone, correlação ou conteúdo.
+- Removido o corte silencioso das opções após o terceiro botão; conjuntos acima de dez são paginados em blocos de oito com navegação anterior/próxima.
+- IDs internos de paginação usam um prefixo impossível na configuração do tenant, evitando colisão ou imitação por item administrativo.
+- O mesmo payload interativo completo atravessa runtime, persistência da resposta e worker; o gateway escolhe botão ou lista somente no limite do transporte.
+- Títulos, descrições e corpo interativo são ajustados aos limites do WhatsApp sem alterar os IDs determinísticos, e o envio falha explicitamente se receber mais de dez linhas não paginadas.
+- Respostas `list_reply` do webhook passam pelo mesmo parser e roteador das respostas de botão, inclusive nas páginas de eventos e horários com estado persistido.
 
 ## Validação executada
 
-- `npm test`: 172 testes descobertos; 167 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
-- `node --check`: 134 arquivos JavaScript válidos.
+- `npm test`: 177 testes descobertos; 172 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `node --check`: 136 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
@@ -93,6 +99,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Redis real acumulou contador e resumo de duração compartilhados; o endpoint real recusou acesso sem Bearer com HTTP 401 e retornou HTTP 200 apenas com token sintético.
 - O scrape real exibiu `waia_metrics_collector_up 1`, um heartbeat de worker e gauges atuais de outbox/BullMQ sem labels de alta cardinalidade.
 - API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
+- A imagem Docker reconstruída aprovou 36 testes direcionados de runtime, persistência/worker, gateway e parser interativo; API e worker permaneceram saudáveis e `/health/ready` retornou 200.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 
@@ -110,7 +117,6 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 - O envio Meta é `at-least-once`: uma queda depois de a Meta aceitar a mensagem e antes do checkpoint no banco pode duplicar a resposta.
 - Um webhook muito grande é processado sequencialmente, com uma transação por evento, podendo pressionar o tempo de ACK.
-- Respostas interativas usam até três botões e descartam opções excedentes; catálogos/eventos maiores precisam de paginação ou mensagens de lista.
 - A validação administrativa ainda depende de algumas constraints do banco para domínios e limites; o erro agora é seguro, mas a UX deve validar antes da escrita.
 - Cabeçalhos HTTP estão razoáveis com Helmet, mas CSP do app está desabilitada e a política do proxy ainda precisa de hardening para produção.
 - O arquivo `codex-session-01a044fd-4841-73b3-b456-d9d028928dee.md` tem cerca de 2,7 MB e permanece na raiz. Não foi removido por pertencer ao histórico do usuário.
@@ -123,24 +129,23 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Fase 1 — fechar o núcleo operacional
 
-1. Paginar menus/eventos e usar mensagens de lista quando houver mais de três opções.
-2. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
+1. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
 
 ### Fase 2 — segurança e recuperação
 
-3. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
-4. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
-5. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS, agenda, jobs falhos e métricas, para concorrência de webhook e pedidos.
-6. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
-7. Retirar o artefato de sessão da raiz somente após autorização do usuário.
+2. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
+3. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
+4. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS, agenda, jobs falhos e métricas, para concorrência de webhook e pedidos.
+5. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
+6. Retirar o artefato de sessão da raiz somente após autorização do usuário.
 
 ### Fase 3 — homologação e produção
 
-8. Subir uma homologação isolada com domínio, TLS, volumes, monitoramento e credenciais exclusivas de teste.
-9. Cadastrar duas empresas completas e provar isolamento de números, credenciais, mensagens, limites, painel e integrações.
-10. Homologar Meta, OpenAI e Google com dados sintéticos; testar retries, indisponibilidade e limites reais.
-11. Executar teste ponta a ponta: webhook assinado → persistência/outbox → worker → resposta Meta → status de entrega/leitura.
-12. Fazer revisão LGPD/retenção, runbook de incidentes e checklist de go-live antes de qualquer tráfego real.
+7. Subir uma homologação isolada com domínio, TLS, volumes, monitoramento e credenciais exclusivas de teste.
+8. Cadastrar duas empresas completas e provar isolamento de números, credenciais, mensagens, limites, painel e integrações.
+9. Homologar Meta, OpenAI e Google com dados sintéticos; testar retries, indisponibilidade e limites reais.
+10. Executar teste ponta a ponta: webhook assinado → persistência/outbox → worker → resposta Meta → status de entrega/leitura.
+11. Fazer revisão LGPD/retenção, runbook de incidentes e checklist de go-live antes de qualquer tráfego real.
 
 ## Decisões que ainda dependem do usuário/produto
 

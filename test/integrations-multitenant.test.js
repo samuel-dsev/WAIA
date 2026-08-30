@@ -87,6 +87,42 @@ test("Meta resolve número e token corretos por tenant para texto, botões e rea
   });
 });
 
+test("Meta usa lista para quatro a dez opções e nunca trunca escolhas", async () => {
+  const calls = [];
+  const gateway = createMetaGateway({
+    credentialResolver: { async resolveMeta() { return { accessToken: "token-sintetico", phoneNumberId: "phone-a" }; } },
+    fetchImpl: async (_url, options) => {
+      calls.push(JSON.parse(options.body));
+      return response(200, { messages: [{ id: "message-list" }] });
+    },
+  });
+  const buttons = Array.from({ length: 10 }, (_, index) => ({
+    id: `opcao-${index + 1}`,
+    label: `Opção muito descritiva número ${index + 1}`,
+    description: `Descrição sintética da opção ${index + 1}`,
+  }));
+  await gateway.sendReply(
+    { empresaId: "tenant-a", numeroWhatsappId: "number-a" },
+    { to: "551100000001", text: "Escolha uma opção", buttons },
+  );
+
+  const interactive = calls[0].interactive;
+  assert.equal(interactive.type, "list");
+  assert.equal(interactive.action.sections[0].rows.length, 10);
+  assert.deepEqual(interactive.action.sections[0].rows.map(({ id }) => id), buttons.map(({ id }) => id));
+  assert.ok(interactive.action.sections[0].rows.every(({ title }) => [...title].length <= 24));
+  assert.equal(calls.length, 1);
+
+  await assert.rejects(
+    () => gateway.sendReply(
+      { empresaId: "tenant-a", numeroWhatsappId: "number-a" },
+      { to: "551100000001", text: "Escolha", buttons: [...buttons, { id: "opcao-11", label: "Opção 11" }] },
+    ),
+    /pagine antes do envio/i,
+  );
+  assert.equal(calls.length, 1);
+});
+
 test("Meta aplica timeout e nunca registra token nem corpo de erro do provedor", async () => {
   const logs = [];
   const token = "token-que-nao-pode-aparecer";

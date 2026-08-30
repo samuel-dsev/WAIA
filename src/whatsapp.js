@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { createWhatsAppReplyPayload } from "./modules/whatsapp/outbound.js";
 
 function requireWhatsAppCredentials() {
   const { accessToken, phoneNumberId } = config.legacyCapitaoMorWhatsapp;
@@ -60,22 +61,7 @@ export async function sendWhatsAppReply(to, reply) {
 
   return graphRequest(`${phoneNumberId}/messages`, {
     method: "POST",
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        body: { text: reply.text },
-        action: {
-          buttons: reply.buttons.slice(0, 3).map((button) => ({
-            type: "reply",
-            reply: { id: button.id, title: button.title },
-          })),
-        },
-      },
-    }),
+    body: JSON.stringify(createWhatsAppReplyPayload({ to, text: reply.text, buttons: reply.buttons })),
   });
 }
 

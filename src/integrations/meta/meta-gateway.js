@@ -4,6 +4,7 @@ import {
   requireTenantContext,
   safeIntegrationLog,
 } from "../common.js";
+import { createWhatsAppReplyPayload } from "../../modules/whatsapp/outbound.js";
 
 function requiredText(value, field, max = 4096) {
   const text = String(value || "").trim();
@@ -146,31 +147,7 @@ export function createMetaGateway({
     const scoped = await resolve(context);
     const { credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
-    const body = requiredText(text, "text");
-    const recipient = requiredText(to, "to", 32);
-    const normalizedButtons = Array.isArray(buttons) ? buttons.slice(0, 3).map((button, index) => ({
-      id: requiredText(button.id, `buttons[${index}].id`, 256),
-      title: requiredText(button.title || button.label, `buttons[${index}].title`, 20),
-    })) : [];
-    const message = normalizedButtons.length === 0
-      ? {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: recipient,
-        type: "text",
-        text: { preview_url: false, body },
-      }
-      : {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: recipient,
-        type: "interactive",
-        interactive: {
-          type: "button",
-          body: { text: body },
-          action: { buttons: normalizedButtons.map((button) => ({ type: "reply", reply: button })) },
-        },
-      };
+    const message = createWhatsAppReplyPayload({ to, text, buttons });
     return request(context, `${credentials.phoneNumberId}/messages`, {
       method: "POST",
       body: JSON.stringify(message),

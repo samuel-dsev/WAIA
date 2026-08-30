@@ -4,6 +4,7 @@ import {
   createTenantRuntimeRouter,
   parseTenantRuntimeConfig,
 } from "../modules/runtime/index.js";
+import { paginateInteractiveOptions, withPageIndicator } from "../modules/runtime/interactive-pagination.js";
 
 const ACTION_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
@@ -92,7 +93,19 @@ function withConfiguredHandlers(baseDefinitions, { publicReplies, eventPresentat
           if (events.length === 0) {
             return { reply: { text: eventPresentation.emptyMessage, buttons: [] } };
           }
-          const lines = events.map((event) => {
+          const pagination = paginateInteractiveOptions(events, {
+            page: context.payload?.page,
+            scope: "events",
+            toButton: (event) => ({
+              id: `event:${event.id}`,
+              label: `Comprar: ${event.name}`,
+              description: `${event.startsAt} — ${new Intl.NumberFormat("pt-BR", {
+                style: "currency",
+                currency: "BRL",
+              }).format(event.price)}`,
+            }),
+          });
+          const lines = pagination.items.map((event) => {
             const description = eventPresentation.includeDescription && event.description
               ? `\n${event.description}`
               : "";
@@ -103,8 +116,8 @@ function withConfiguredHandlers(baseDefinitions, { publicReplies, eventPresentat
           });
           return {
             reply: {
-              text: [eventPresentation.intro, ...lines].filter(Boolean).join("\n"),
-              buttons: events.map((event) => ({ id: `event:${event.id}`, label: `Comprar: ${event.name}` })),
+              text: withPageIndicator([eventPresentation.intro, ...lines].filter(Boolean).join("\n"), pagination),
+              buttons: pagination.buttons,
             },
           };
         }
@@ -177,4 +190,3 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
 
   return Object.freeze({ config, registry, handle });
 }
-
