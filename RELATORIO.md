@@ -82,10 +82,12 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O worker executa sincronização por tenant a cada 120 segundos por padrão e exporta pedidos por outbox contendo apenas IDs, com checkpoint idempotente e isolamento RLS.
 - O painel recebeu configuração dedicada do Google Sheets, rotação do JSON da conta de serviço e sincronização imediata auditada.
 - Adicionado `docs/CONFIGURACAO_INTEGRACOES.md` com o fluxo de configuração Meta, OpenAI, Google Sheets e segredos de infraestrutura.
+- Corrigido o mapeamento do usuário ao reabrir uma sessão PostgreSQL: a consulta retorna `user_id_value`, e o repositório agora preserva esse ID nas requisições administrativas posteriores ao login.
+- Foram removidas, com autorização explícita, 24 empresas `Tenant A`/`Tenant B` e 24 contatos com slugs exclusivos `priv-a-*`/`priv-b-*`, resíduos dos testes de isolamento; nenhum outro dado foi atingido.
 
 ## Validação executada
 
-- `npm test`: 182 testes descobertos; 176 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `npm test`: 183 testes descobertos; 177 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
 - `node --check`: 139 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
@@ -107,6 +109,8 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - A imagem Docker reconstruída aprovou 36 testes direcionados de runtime, persistência/worker, gateway e parser interativo; API e worker permaneceram saudáveis e `/health/ready` retornou 200.
 - Cinco integrações PostgreSQL reais passaram na imagem reconstruída, incluindo sincronização sintética da agenda Google com RLS e desativação de evento removido.
 - A nova tabela `integracao_operacoes` foi comprovada com privilégios DML do papel restrito e `ENABLE/FORCE ROW LEVEL SECURITY`; API retornou `/health/ready` 200 e worker permaneceu saudável sem credencial Google real.
+- O teste de regressão do repositório PostgreSQL confirmou que a sessão reconstruída mantém o ID do usuário.
+- Após reconstruir a API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 em `/api/admin/auth/session`, `/api/admin/tenants` e `/api/admin/dashboard`.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 
@@ -160,5 +164,6 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 - Qual provedor/estratégia será adotado para reduzir duplicidade no envio Meta?
 - Quais domínio, VPS, RPO/RTO, política de retenção e orçamento por tenant serão usados?
 - O artefato de sessão da raiz pode ser removido?
+- Existem dois administradores de plataforma ativos; confirmar se a conta adicional criada para teste deve ser removida.
 
 Nenhuma credencial real foi lida, exposta ou usada nesta auditoria.

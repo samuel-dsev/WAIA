@@ -59,7 +59,7 @@ export class PostgresAuthRepository {
       const memberships = (await client.query("SELECT * FROM usuarios_empresas WHERE usuario_id = $1", [row.usuario_id])).rows.map(mapMembership);
       return {
         session: mapSession(row),
-        user: mapUser({ ...row, id: row.usuario_id_value, status: row.user_status }),
+        user: mapUser({ ...row, id: row.user_id_value, status: row.user_status }),
         memberships,
       };
     });
