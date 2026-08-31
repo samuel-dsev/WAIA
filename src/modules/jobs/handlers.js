@@ -116,7 +116,7 @@ export class PostgresJobHandlerRepository {
   statusEvent({ empresaId, statusEventId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const result = await client.query(
-        `SELECT id, external_message_id, status, provider_timestamp, error_code
+        `SELECT id, mensagem_id, external_message_id, status, provider_timestamp, error_code
            FROM whatsapp_status_events
           WHERE empresa_id = $1 AND id = $2
           LIMIT 1`,
@@ -125,6 +125,7 @@ export class PostgresJobHandlerRepository {
       const row = result.rows[0];
       return row && {
         id: row.id,
+        messageId: row.mensagem_id || null,
         externalMessageId: row.external_message_id,
         status: row.status,
         occurredAt: row.provider_timestamp,
@@ -369,7 +370,19 @@ export function createWorkerHandlers({
                 messageId: message.id,
                 correlationId: message.correlationId,
                 message: input.text,
-                context: config,
+                context: {
+                  identity: config.identity,
+                  menu: {
+                    text: config.menu.text,
+                    options: config.menu.options.map(({ label }) => ({ label })),
+                  },
+                  events: config.events,
+                  catalog: config.catalog,
+                  services: config.appointments?.services || [],
+                  knowledgeBase: (definition.publicReplies || [])
+                    .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
+                    .map(({ module, action, text }) => ({ module, action, text })),
+                },
               }),
             })
             : null,
@@ -380,6 +393,7 @@ export function createWorkerHandlers({
           contactId: message.contactId,
           type: message.type,
           text: message.text,
+          selectionId: message.type === "interactive" ? message.text : undefined,
           mediaId: message.mediaId,
         });
       }
@@ -425,6 +439,7 @@ export function createWorkerHandlers({
     const status = await repository.statusEvent(reference);
     if (!status) throw permanent("Evento de status nao encontrado.", "STATUS_EVENT_NOT_FOUND");
     if (status.status === "unknown") return { skipped: true, reason: "unknown_status" };
+    if (!status.messageId) return { skipped: true, reason: "message_not_found" };
     await conversationService.applyMetaStatus({
       empresaId: reference.empresaId,
       externalMessageId: status.externalMessageId,

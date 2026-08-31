@@ -16,6 +16,73 @@ function normalized(value) {
     .toLocaleLowerCase("pt-BR");
 }
 
+function normalizedWords(value) {
+  return ` ${normalized(value).replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+
+function matchesAlias(text, terms) {
+  const words = normalizedWords(text);
+  return terms.some((term) => {
+    const normalizedTerm = normalized(term);
+    return normalizedTerm === text || words.includes(normalizedWords(normalizedTerm));
+  });
+}
+
+const WEEKDAY_TERMS = Object.freeze([
+  ["domingo"],
+  ["segunda", "segunda feira"],
+  ["terca", "terca feira"],
+  ["quarta", "quarta feira"],
+  ["quinta", "quinta feira"],
+  ["sexta", "sexta feira"],
+  ["sabado"],
+]);
+
+function eventLocalParts(event) {
+  const date = new Date(event.startsAt);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("pt-BR", {
+    timeZone: event.timezone || "America/Sao_Paulo",
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+  }).formatToParts(date).map(({ type, value }) => [type, value]));
+  return {
+    weekday: normalized(parts.weekday).replace(/-feira$/u, "").trim(),
+    date: `${parts.day}/${parts.month}`,
+  };
+}
+
+function eventIntent(text, config) {
+  if (!config.enabledModules.includes("orders")) return null;
+  const words = normalizedWords(text);
+  const hasEventLanguage = /\b(?:agenda|programacao|evento|show|atracao|atracoes|noite|convite|sexta|sabado|domingo|segunda|terca|quarta|quinta)\b/u.test(words);
+  if (!hasEventLanguage) return null;
+  const matching = config.events.items.filter((event) => {
+    if (event.active === false) return false;
+    const local = eventLocalParts(event);
+    const searchable = normalizedWords(`${event.name} ${event.attractions || ""} ${event.startsAt || ""}`);
+    if (local && (words.includes(` ${local.weekday} `) || words.includes(normalizedWords(local.date)))) return true;
+    const weekday = WEEKDAY_TERMS.flat().find((term) => searchable.includes(` ${term} `));
+    if (weekday && words.includes(` ${weekday} `)) return true;
+    const normalizedName = normalizedWords(event.name).trim();
+    return normalizedName.length > 3 && words.includes(` ${normalizedName} `);
+  });
+  return matching.length === 1 ? matching[0] : null;
+}
+
+function paymentCompletionIntent(text) {
+  return /^(?:paguei|pago|ja\s+(?:fiz|paguei)|(?:fiz|paguei).{0,24}(?:pix|pagamento))\b/u.test(normalized(text));
+}
+
+function withFollowUpQuestion(outcome, question) {
+  if (!question || !outcome?.reply?.text || /\?\s*$/u.test(outcome.reply.text)) return outcome;
+  return {
+    ...outcome,
+    reply: { ...outcome.reply, text: `${outcome.reply.text.trim()}\n\n${question}` },
+  };
+}
+
 function requiredText(value, path, max = 1_000) {
   const text = String(value || "").trim();
   if (!text || text.length > max) throw new TypeError(`${path} deve ter entre 1 e ${max} caracteres.`);
@@ -152,6 +219,9 @@ export function loadConfiguredTenant(definition) {
 
 export function createConfiguredTenantRuntime({ definition, stateRepository, ...dependencies } = {}) {
   const config = loadConfiguredTenant(definition);
+  const followUpQuestion = definition.ai?.followUpQuestion == null
+    ? null
+    : requiredText(definition.ai.followUpQuestion, "ai.followUpQuestion", 300);
   const defaultAiHandler = async () => ({
     reply: {
       text: requiredText(
@@ -161,9 +231,14 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
       buttons: [],
     },
   });
+  const selectedAiHandler = dependencies.aiHandler || defaultAiHandler;
+  const contextualAiHandler = async (context) => withFollowUpQuestion(
+    await selectedAiHandler(context),
+    followUpQuestion,
+  );
   const baseDefinitions = createCanonicalModuleDefinitions({
     ...dependencies,
-    aiHandler: dependencies.aiHandler || defaultAiHandler,
+    aiHandler: contextualAiHandler,
   });
   const extensions = parseExtensions(definition, config, baseDefinitions);
   const registry = createModuleRegistry(withConfiguredHandlers(baseDefinitions, {
@@ -181,10 +256,22 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     const hasExplicitCommand = Boolean(String(input?.action || input?.selectionId || "").trim());
     if (hasExplicitCommand) return router.handle(input);
     const text = normalized(input?.text);
-    if (!text || extensions.greetings.has(text)) return router.handle(input);
-    const alias = extensions.aliases.find((candidate) => candidate.terms.includes(text));
+    if (!text) return router.handle(input);
+    if (extensions.greetings.has(text)) return router.handle({ ...input, resetToMenu: true });
+    if (paymentCompletionIntent(text)) return router.handle({ ...input, preferContinuation: true });
+    const selectedEvent = eventIntent(text, config);
+    if (selectedEvent) {
+      return router.handle({
+        ...input,
+        action: "orders.select_event",
+        payload: { eventId: selectedEvent.id },
+      });
+    }
+    const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
     if (alias) return router.handle({ ...input, action: alias.action });
-    if (extensions.fallbackAction) return router.handle({ ...input, action: extensions.fallbackAction });
+    if (extensions.fallbackAction) {
+      return router.handle({ ...input, action: extensions.fallbackAction, actionSource: "fallback" });
+    }
     return router.handle(input);
   }
 

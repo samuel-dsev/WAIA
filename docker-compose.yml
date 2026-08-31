@@ -21,7 +21,9 @@ x-runtime-environment: &runtime-environment
   WORKER_HEARTBEAT_TTL_MS: ${WORKER_HEARTBEAT_TTL_MS:-30000}
   MEDIA_STORAGE_ROOT: /app/.data/media
   MEDIA_MAX_BYTES: ${MEDIA_MAX_BYTES:-10485760}
-  MASTER_KEYRING: ${MASTER_KEYRING:-}
+  # O valor é JSON e termina em `}}`; mantê-lo como escalar YAML citado evita
+  # que versões recentes do Compose descartem a última chave ao criar o container.
+  MASTER_KEYRING: "${MASTER_KEYRING:-}"
   SESSION_PEPPER: ${SESSION_PEPPER:-}
   SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}

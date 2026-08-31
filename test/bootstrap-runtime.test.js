@@ -153,6 +153,135 @@ test("worker handler processa mensagem persistida por referencia e registra resp
   assert.equal(recorded[0].origin, "deterministic_flow");
 });
 
+test("worker preserva o ID do botão interativo e não o encaminha à IA", async () => {
+  const sent = [];
+  const interactiveDefinition = {
+    runtime: {
+      ...tenantDefinition.runtime,
+      enabledModules: ["catalog", "ai_freeform"],
+      menu: {
+        text: "Menu da Empresa A",
+        options: [{ id: "catalog.list", label: "Produtos", module: "catalog", action: "catalog.list" }],
+      },
+    },
+    routing: { greetings: ["oi"], aliases: [], fallbackAction: "ai_freeform.reply" },
+  };
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-interactive", empresaId: "tenant-a", conversationId: "conversation-interactive",
+          contactId: "contact-1", numeroWhatsappId: "number-1", type: "interactive", text: "catalog.list",
+          mediaId: null, externalMessageId: "wamid.interactive", correlationId: "00000000-0000-4000-8000-000000000099",
+          senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+    },
+    conversationService: {
+      async getConversation() { return { mode: "bot" }; },
+      async getState() { return { flowKey: "idle", stage: "idle", data: {}, version: 1 }; },
+      async saveState() {},
+      async getHistory() { return []; },
+      async recordMessage() {},
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { return interactiveDefinition; } },
+    metaGateway: {
+      async markRead() {},
+      async sendReply(_context, payload) { sent.push(payload); return { messages: [{ id: "wamid.out" }] }; },
+    },
+    aiService: { async reply() { assert.fail("clique de botão não deve chamar a IA"); } },
+  });
+
+  await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-interactive" });
+  assert.match(sent[0].text, /Item A/u);
+});
+
+test("worker envia somente a base pública à IA e acrescenta pergunta de continuidade", async () => {
+  const sent = [];
+  const requests = [];
+  const definition = structuredClone(tenantDefinition);
+  definition.runtime.enabledModules = ["catalog", "ai_freeform"];
+  definition.runtime.payments = {
+    pix: { key: "pix-privado-nao-enviar", recipient: "favorecida-privada" },
+  };
+  definition.publicReplies = [{
+    module: "catalog",
+    action: "catalog.address",
+    text: "Endereço público: Rua de Teste, 100.",
+  }];
+  definition.routing.fallbackAction = "ai_freeform.reply";
+  definition.ai = { followUpQuestion: "Quer saber mais alguma coisa?" };
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() {
+        return {
+          id: "message-ai", empresaId: "tenant-a", conversationId: "conversation-ai",
+          contactId: "contact-1", numeroWhatsappId: "number-1", type: "text", text: "Tem estacionamento?",
+          mediaId: null, externalMessageId: "wamid.ai", correlationId: "00000000-0000-4000-8000-000000000099",
+          senderPhone: "5511999999999",
+        };
+      },
+      async statusEvent() { return null; },
+    },
+    conversationService: {
+      async getConversation() { return { mode: "bot" }; },
+      async getState() { return { flowKey: "idle", stage: "idle", data: {}, version: 1 }; },
+      async saveState() {},
+      async getHistory() { return []; },
+      async recordMessage() {},
+      async applyMetaStatus() {},
+    },
+    tenantDefinitionRepository: { async load() { return definition; } },
+    metaGateway: {
+      async markRead() {},
+      async sendReply(_context, payload) { sent.push(payload); return { messages: [{ id: "wamid.ai.out" }] }; },
+    },
+    aiService: {
+      async reply(input) {
+        requests.push(structuredClone(input));
+        return { text: "Há informações públicas disponíveis.", source: "ai" };
+      },
+    },
+  });
+
+  await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-ai" });
+  assert.match(sent[0].text, /Quer saber mais alguma coisa\?$/u);
+  assert.match(JSON.stringify(requests[0].context), /Endereço público/u);
+  assert.doesNotMatch(JSON.stringify(requests[0].context), /pix-privado-nao-enviar|favorecida-privada/u);
+});
+
+test("worker ignora recibo Meta de mensagem que não pertence ao banco", async () => {
+  const handlers = createWorkerHandlers({
+    repository: {
+      async inboundMessage() { return null; },
+      async statusEvent() {
+        return {
+          id: "status-external",
+          messageId: null,
+          externalMessageId: "wamid.external",
+          status: "read",
+          occurredAt: new Date("2026-08-31T19:09:08.000Z"),
+          errorCode: null,
+        };
+      },
+    },
+    conversationService: {
+      async getConversation() { assert.fail("recibo não carrega conversa"); },
+      async recordMessage() { assert.fail("recibo não registra mensagem"); },
+      async applyMetaStatus() { assert.fail("recibo externo não altera mensagens locais"); },
+    },
+    tenantDefinitionRepository: { async load() { assert.fail("recibo não carrega runtime"); } },
+    metaGateway: { async sendReply() { assert.fail("recibo não envia resposta"); } },
+  });
+
+  assert.deepEqual(
+    await handlers.apply_whatsapp_status({ empresaId: "tenant-a", statusEventId: "status-external" }),
+    { skipped: true, reason: "message_not_found" },
+  );
+});
+
 test("worker preserva todas as opções interativas ao preparar e enviar a resposta", async () => {
   const buttons = [];
   const definition = structuredClone(tenantDefinition);

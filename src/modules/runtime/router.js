@@ -32,31 +32,14 @@ function resolveCommand({ config, input, state, registry }) {
   const selectedRaw = String(input.selectionId || input.text || "").trim();
   const selected = normalized(selectedRaw);
   const navigation = parsePageSelection(selectedRaw);
-  if (state?.module === "orders" && ["awaiting_receipt", "awaiting_name"].includes(state.step)) {
-    return { module: registry.get("orders"), action: "orders.continue", payload: {} };
-  }
-  if (state?.module === "appointments" && state.step === "awaiting_name") {
-    return { module: registry.get("appointments"), action: "appointments.continue", payload: {} };
-  }
-  if (state?.module === "appointments" && state.step === "awaiting_slot") {
-    if (navigation?.scope === "appointment-slots") {
-      return {
-        module: registry.get("appointments"),
-        action: "appointments.select_service",
-        payload: { serviceId: state.data.serviceId, page: navigation.page },
-      };
-    }
-    if (selected.startsWith("slot:")) {
-      const service = config.appointments.services.find((item) => item.id === state.data.serviceId);
-      const selectedId = selected.slice(5);
-      const slotId = service?.slots.find((slot) => normalized(slot.id) === selectedId)?.id || selectedRaw.slice(5);
-      return { module: registry.get("appointments"), action: "appointments.select_slot", payload: { slotId } };
-    }
-    return { module: registry.get("appointments"), action: "appointments.continue", payload: {} };
-  }
-
   const action = String(input.action || "").trim();
-  if (action) return { module: registry.resolveAction(action), action, payload: input.payload || {} };
+  const fallbackMustContinueState = input.actionSource === "fallback" && (
+    (state?.module === "orders" && state.step === "awaiting_name")
+    || (state?.module === "appointments" && ["awaiting_slot", "awaiting_name"].includes(state.step))
+  );
+  if (action && !input.preferContinuation && !fallbackMustContinueState) {
+    return { module: registry.resolveAction(action), action, payload: input.payload || {} };
+  }
 
   if (navigation) {
     if (navigation.scope === "menu") return { menuPage: navigation.page };
@@ -83,6 +66,33 @@ function resolveCommand({ config, input, state, registry }) {
     const serviceId = config.appointments.services.find((service) => normalized(service.id) === selectedId)?.id || selectedRaw.slice(12);
     return { module: registry.get("appointments"), action: "appointments.select_service", payload: { serviceId } };
   }
+
+  // Etapas transacionais só capturam a mensagem quando nenhuma nova intenção
+  // explícita foi reconhecida. Assim, o usuário pode trocar de evento, abrir o
+  // cardápio ou voltar ao menu sem ficar preso à ordem da conversa.
+  if (state?.module === "orders" && ["awaiting_receipt", "awaiting_name"].includes(state.step)) {
+    return { module: registry.get("orders"), action: "orders.continue", payload: {} };
+  }
+  if (state?.module === "appointments" && state.step === "awaiting_name") {
+    return { module: registry.get("appointments"), action: "appointments.continue", payload: {} };
+  }
+  if (state?.module === "appointments" && state.step === "awaiting_slot") {
+    if (navigation?.scope === "appointment-slots") {
+      return {
+        module: registry.get("appointments"),
+        action: "appointments.select_service",
+        payload: { serviceId: state.data.serviceId, page: navigation.page },
+      };
+    }
+    if (selected.startsWith("slot:")) {
+      const service = config.appointments.services.find((item) => item.id === state.data.serviceId);
+      const selectedId = selected.slice(5);
+      const slotId = service?.slots.find((slot) => normalized(slot.id) === selectedId)?.id || selectedRaw.slice(5);
+      return { module: registry.get("appointments"), action: "appointments.select_slot", payload: { slotId } };
+    }
+    return { module: registry.get("appointments"), action: "appointments.continue", payload: {} };
+  }
+  if (action) return { module: registry.resolveAction(action), action, payload: input.payload || {} };
   return null;
 }
 
@@ -117,6 +127,10 @@ export function createTenantRuntimeRouter({
         buttons: [],
       };
     }
+    if (input.resetToMenu === true) {
+      if (state.module || state.step) await stateRepository.save(stateContext, null);
+      return menuReply(config);
+    }
     const command = resolveCommand({ config, input, state, registry: moduleRegistry });
     if (command?.menuPage) return menuReply(config, command.menuPage);
     if (!command?.module) return menuReply(config);
@@ -139,6 +153,8 @@ export function createTenantRuntimeRouter({
     });
     if (Object.hasOwn(outcome, "state")) {
       await stateRepository.save(stateContext, outcome.state);
+    } else if (state.module && command.action !== `${state.module}.continue`) {
+      await stateRepository.save(stateContext, null);
     }
     return {
       source: "deterministic",

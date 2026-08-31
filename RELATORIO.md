@@ -91,10 +91,16 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Corrigido o salvamento dos módulos no painel: os checkboxes agora são capturados antes da confirmação assíncrona, evitando o uso de `event.currentTarget` já invalidado e garantindo o envio do `PUT`.
 - A tela de módulos e configurações agora oferece **Adicionar Google Sheets** quando a integração ainda não existe, cria o registro inicial e abre diretamente o formulário seguro da planilha.
 - O cofre administrativo agora aceita segredos multilinha, como o JSON formatado de contas de serviço Google, preservando limite de tamanho e rejeição de caracteres de controle inseguros na criação e rotação.
+- Recibos Meta referentes a mensagens externas ou anteriores ao banco local agora são registrados e concluídos como ignorados, sem retries nem incidentes falsos; mensagens realmente enviadas pelo WAIA continuam recebendo os estados `sent`, `delivered` e `read` normalmente.
+- O menu real do Capitão Mor foi restaurado com três ações canônicas e roteamento determinístico/IA; a saudação inicial volta a sair como botões e textos livres deixam de repetir indefinidamente a mensagem de boas-vindas.
+- O carregador PostgreSQL do runtime deixou de executar `Promise.all` sobre um único client transacional, eliminando a concorrência não suportada e o aviso de depreciação observado no primeiro teste real.
+- O worker agora preserva o `selectionId` de respostas interativas; botões deixam de cair no fallback da IA. O roteamento também reconhece aliases dentro de frases naturais e o Capitão Mor ganhou cópia direta para cardápio, seleção da noite, evento, PIX, comprovante e contingência.
+- Os fluxos conversacionais passaram a aceitar novas intenções antes da etapa pendente: trocar sexta por sábado substitui o evento, perguntas naturais com dia abrem a programação correspondente e `oi` reinicia o menu. Respostas livres da IA recebem apenas a base pública do tenant, sem PIX/credenciais, usam o histórico e terminam com uma pergunta configurável.
+- `MASTER_KEYRING` passou a ser interpolado como escalar YAML citado no Compose; isso preserva as duas chaves finais do JSON em versões recentes do Docker Compose e evita o ciclo de reinício da API/worker observado após uma recriação.
 
 ## Validação executada
 
-- `npm test`: 191 testes descobertos; 185 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `npm test`: 198 testes descobertos; 192 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
 - `node --check`: 139 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.

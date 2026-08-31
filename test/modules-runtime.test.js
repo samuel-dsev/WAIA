@@ -51,10 +51,18 @@ const barConfig = {
   },
   catalog: { items: [{ id: "porcao", name: "Porção da casa", price: 32 }] },
   events: {
-    items: [{ id: "rock-sexta", name: "Rock de Sexta", startsAt: "sexta, 22h", price: 25 }],
+    items: [{
+      id: "rock-sexta", name: "Rock de Sexta", startsAt: "2026-09-05T01:00:00.000Z",
+      timezone: "America/Sao_Paulo", attractions: "Banda A | DJ B", vipRule: "Mulher VIP até 23h30",
+      birthdayRule: "Aniversariante do mês entra VIP.", location: "Rua de Teste, 100", price: 25,
+    }],
   },
   payments: { pix: { key: "pix-sintetico", recipient: "Bar da Praça", instructions: "Envie o comprovante." } },
-  orders: { pendingStatus: "Aguardando conferência" },
+  orders: {
+    pendingStatus: "Aguardando conferência",
+    selectionPrompt: "Escolha a noite para consultar a programação e comprar seu convite:",
+    paymentPrompt: "Após o pagamento, envie aqui o comprovante e o nome completo.",
+  },
   humanHandoff: { message: "A automação foi pausada para atendimento humano." },
 };
 
@@ -136,9 +144,18 @@ test("bar com eventos e convites executa comprovante, nome e pedido sempre pende
   assert.match(agenda.text, /Rock de Sexta/);
   assert.deepEqual(agenda.buttons.map(({ id }) => id), ["event:rock-sexta"]);
 
+  const choices = await router.handle({ ...input, selectionId: "convites" });
+  assert.match(choices.text, /Escolha a noite/u);
+  assert.equal(choices.buttons[0].label, "Sexta 04/09");
+
   const payment = await router.handle({ ...input, selectionId: "event:rock-sexta" });
   assert.match(payment.text, /PIX: pix-sintetico/);
   assert.match(payment.text, /R\$\s*25,00/);
+  assert.match(payment.text, /🌒 SEXTA-FEIRA 04\/09 • 22:00/u);
+  assert.match(payment.text, /Banda A\nDJ B/u);
+  assert.match(payment.text, /Mulher VIP até 23h30/u);
+  assert.match(payment.text, /Aniversariante do mês entra VIP/u);
+  assert.match(payment.text, /Rua de Teste, 100/u);
 
   const receipt = await router.handle({ ...input, type: "image", mediaId: "media-sintetica" });
   assert.match(receipt.text, /nome completo/i);
@@ -164,6 +181,31 @@ test("bar com eventos e convites executa comprovante, nome e pedido sempre pende
     status: "Aguardando conferência",
     idempotencyKey: "order:conversa-bar:media-sintetica",
   }]);
+});
+
+test("seleção explícita interrompe uma etapa transacional anterior", async () => {
+  const stateRepository = memoryStateRepository();
+  const secondEvent = {
+    ...barConfig.events.items[0],
+    id: "rock-sabado",
+    name: "Rock de Sábado",
+    startsAt: "2026-09-05T23:00:00.000Z",
+    attractions: "Banda C | DJ D",
+  };
+  const router = runtime({
+    ...barConfig,
+    events: { items: [...barConfig.events.items, secondEvent] },
+  }, { stateRepository });
+  const input = { conversationId: "conversa-interrompida", contactId: "contato" };
+
+  await router.handle({ ...input, selectionId: "event:rock-sexta" });
+  const switched = await router.handle({ ...input, selectionId: "event:rock-sabado" });
+  assert.match(switched.text, /Banda C/u);
+  assert.equal(stateRepository.inspect("empresa-bar", input.conversationId).data.eventId, "rock-sabado");
+
+  const catalog = await router.handle({ ...input, selectionId: "agenda" });
+  assert.match(catalog.text, /Rock de Sexta/u);
+  assert.equal(stateRepository.inspect("empresa-bar", input.conversationId), null);
 });
 
 test("clínica agenda serviço apenas pela configuração do tenant", async () => {

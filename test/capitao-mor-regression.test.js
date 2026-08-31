@@ -66,6 +66,9 @@ test("menu, agenda completa, endereço, cardápio e aniversariante vêm da confi
   assert.match(agenda.text, /Sábado Acústico Demo/);
   assert.deepEqual(agenda.buttons.map(({ id }) => id), ["event:evento-demo-sexta", "event:evento-demo-sabado"]);
 
+  const naturalAgenda = await runtime.handle({ ...conversationInput, text: "Gostaria de saber a programação deste final de semana" });
+  assert.match(naturalAgenda.text, /Agenda demonstrativa/u);
+
   assert.match((await runtime.handle({ ...conversationInput, selectionId: "endereco" })).text, /Rua Demonstração, 100/);
   assert.match((await runtime.handle({ ...conversationInput, text: "cardápio" })).text, /example\.invalid\/capitao-mor\/cardapio/u);
   const birthday = await runtime.handle({ ...conversationInput, text: "aniversariante" });
@@ -111,6 +114,66 @@ test("convite preserva seleção, PIX sintético, comprovante e nome completo", 
     status: "Aguardando conferência",
     idempotencyKey: "order:conversa-demonstracao:media-demo-1",
   }]);
+});
+
+test("nova intenção troca a noite e não fica presa à etapa do comprovante", async () => {
+  const stateRepository = memoryStateRepository();
+  const runtime = capitaoRuntime({ stateRepository });
+
+  await runtime.handle({ ...conversationInput, selectionId: "event:evento-demo-sexta" });
+  const saturdayButton = await runtime.handle({ ...conversationInput, selectionId: "event:evento-demo-sabado" });
+  assert.match(saturdayButton.text, /Sábado Acústico Demo/u);
+  assert.equal(
+    stateRepository.inspect(loadCapitaoMorTenantConfig().empresaId, conversationInput.conversationId).data.eventId,
+    "evento-demo-sabado",
+  );
+
+  await runtime.handle({ ...conversationInput, selectionId: "event:evento-demo-sexta" });
+  const saturdayText = await runtime.handle({ ...conversationInput, text: "Me envie a programação de sábado" });
+  assert.match(saturdayText.text, /Sábado Acústico Demo/u);
+  assert.equal(
+    stateRepository.inspect(loadCapitaoMorTenantConfig().empresaId, conversationInput.conversationId).data.eventId,
+    "evento-demo-sabado",
+  );
+
+  const paymentDone = await runtime.handle({ ...conversationInput, text: "Já fiz o PIX" });
+  assert.match(paymentDone.text, /comprovante/i);
+  assert.equal(
+    stateRepository.inspect(loadCapitaoMorTenantConfig().empresaId, conversationInput.conversationId).step,
+    "awaiting_receipt",
+  );
+
+  const restarted = await runtime.handle({ ...conversationInput, text: "oi" });
+  assert.deepEqual(restarted.buttons.map(({ label }) => label), ["Comprar convites", "Endereço", "Cardápio"]);
+  assert.equal(stateRepository.inspect(loadCapitaoMorTenantConfig().empresaId, conversationInput.conversationId), null);
+});
+
+test("resposta livre da IA termina com pergunta configurada", async () => {
+  const runtime = capitaoRuntime({
+    aiHandler: async () => ({ reply: { text: "Temos uma noite especial para você.", buttons: [] } }),
+  });
+  const answer = await runtime.handle({ ...conversationInput, text: "Quero comemorar com meus amigos" });
+  assert.match(answer.text, /Temos uma noite especial para você\./u);
+  assert.match(answer.text, /O que mais você gostaria de saber\?$/u);
+});
+
+test("pergunta livre interrompe o comprovante e entra na IA com naturalidade", async () => {
+  let aiCalls = 0;
+  const stateRepository = memoryStateRepository();
+  const runtime = capitaoRuntime({
+    stateRepository,
+    aiHandler: async () => {
+      aiCalls += 1;
+      return { reply: { text: "Não tenho uma confirmação sobre estacionamento.", buttons: [] } };
+    },
+  });
+  await runtime.handle({ ...conversationInput, selectionId: "event:evento-demo-sexta" });
+
+  const answer = await runtime.handle({ ...conversationInput, text: "Tem estacionamento?" });
+  assert.equal(aiCalls, 1);
+  assert.match(answer.text, /Não tenho uma confirmação sobre estacionamento\./u);
+  assert.match(answer.text, /O que mais você gostaria de saber\?$/u);
+  assert.equal(stateRepository.inspect(loadCapitaoMorTenantConfig().empresaId, conversationInput.conversationId), null);
 });
 
 test("falha ao gravar pedido não confirma pagamento e preserva estado para retry", async () => {
@@ -203,4 +266,3 @@ test("seed complementar é idempotente, tipado e contém apenas placeholders sin
   assert.match(seed, /sint[eé]tic/iu);
   assert.doesNotMatch(seed, /Antonio Monteiro|goomer\.app|5512\d{8,}|BEGIN (?:RSA |EC )?PRIVATE KEY|EAA[A-Za-z0-9]+/iu);
 });
-

@@ -113,6 +113,7 @@ export const capitaoMorDemoDefinition = Object.freeze({
   },
   ai: {
     fallbackMessage: "No momento consigo ajudar apenas com informações validadas do Bar Capitão Mor. Quer ver a agenda, os convites ou falar com a equipe?",
+    followUpQuestion: "O que mais você gostaria de saber?",
   },
 });
 
@@ -132,4 +133,3 @@ export function createCapitaoMorRuntime({ empresaId = CAPITAO_MOR_DEMO_TENANT_ID
     },
   });
 }
-

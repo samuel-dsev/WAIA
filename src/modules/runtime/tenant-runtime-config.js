@@ -82,7 +82,12 @@ function parseEvent(value, path) {
     id: stringId(value.id, `${path}.id`),
     name: requiredText(value.name, `${path}.name`, { max: 160 }),
     startsAt: requiredText(value.startsAt, `${path}.startsAt`, { max: 80 }),
+    timezone: optionalText(value.timezone, `${path}.timezone`, { max: 80 }),
+    attractions: optionalText(value.attractions, `${path}.attractions`, { max: 1000 }),
     description: optionalText(value.description, `${path}.description`, { max: 500 }),
+    vipRule: optionalText(value.vipRule, `${path}.vipRule`, { max: 1000 }),
+    birthdayRule: optionalText(value.birthdayRule, `${path}.birthdayRule`, { max: 1000 }),
+    location: optionalText(value.location, `${path}.location`, { max: 500 }),
     price: finiteAmount(value.price, `${path}.price`),
     active: value.active !== false,
   };
@@ -175,6 +180,8 @@ export function parseTenantRuntimeConfig(input) {
     },
     orders: {
       pendingStatus: optionalText(input.orders?.pendingStatus, "orders.pendingStatus", { max: 80 }) || "Aguardando conferência",
+      selectionPrompt: optionalText(input.orders?.selectionPrompt, "orders.selectionPrompt", { max: 500 }),
+      paymentPrompt: optionalText(input.orders?.paymentPrompt, "orders.paymentPrompt", { max: 500 }),
       receiptPrompt: optionalText(input.orders?.receiptPrompt, "orders.receiptPrompt", { max: 500 }),
       namePrompt: optionalText(input.orders?.namePrompt, "orders.namePrompt", { max: 500 }),
       successMessage: optionalText(input.orders?.successMessage, "orders.successMessage", { max: 1000 }),

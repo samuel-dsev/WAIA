@@ -32,7 +32,7 @@ export class PostgresAiConfigResolver {
         maxHistoryMessages: row.max_historico_mensagens,
         maxOutputTokens: row.max_output_tokens,
         contingencyMessage: row.mensagem_contingencia,
-        allowedContextKeys: ["identity", "events", "catalog", "services", "hours", "address"],
+        allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address"],
         version: Number(row.version),
       };
     });

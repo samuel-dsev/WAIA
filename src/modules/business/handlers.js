@@ -14,6 +14,60 @@ function active(items) {
   return items.filter((item) => item.active !== false);
 }
 
+function eventDateParts(event) {
+  const instant = new Date(event.startsAt);
+  if (Number.isNaN(instant.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: event.timezone || "America/Sao_Paulo",
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  if (!["weekday", "day", "month", "hour", "minute"].every((type) => value(type))) return null;
+  return { weekday: value("weekday"), day: value("day"), month: value("month"), hour: value("hour"), minute: value("minute") };
+}
+
+function eventChoiceLabel(event) {
+  const date = eventDateParts(event);
+  if (!date) return event.name;
+  const weekday = date.weekday.replace(/-feira$/u, "");
+  return `${weekday.charAt(0).toLocaleUpperCase("pt-BR")}${weekday.slice(1)} ${date.day}/${date.month}`;
+}
+
+function detailedOrderReply(event, pix, orders) {
+  const hasPublicDetails = Boolean(event.attractions || event.vipRule || event.birthdayRule || event.location);
+  if (!hasPublicDetails) {
+    return `${event.name} — ${MONEY.format(event.price)}.\nPIX: ${pix.key}\nFavorecido: ${pix.recipient}\n${pix.instructions || orders.receiptPrompt || "Envie o comprovante por aqui."}`;
+  }
+  const date = eventDateParts(event);
+  const heading = date
+    ? `🌒 ${date.weekday.toLocaleUpperCase("pt-BR")} ${date.day}/${date.month} • ${date.hour}:${date.minute}`
+    : `🌒 ${event.startsAt}`;
+  const attractions = String(event.attractions || event.name)
+    .split(/\s*\|\s*/u)
+    .filter(Boolean)
+    .join("\n");
+  return [
+    heading,
+    attractions,
+    event.description,
+    "",
+    `Convite unissex: ${MONEY.format(event.price)}`,
+    event.vipRule,
+    "",
+    `💳 PIX: ${pix.key}`,
+    `Favorecida: ${pix.recipient}`,
+    "",
+    orders.paymentPrompt || "Após o pagamento, envie aqui o comprovante e o nome completo.",
+    event.birthdayRule ? `\n🎂 ${event.birthdayRule}` : null,
+    event.location ? `\n📍 ${event.location}` : null,
+  ].filter((line) => line != null).join("\n").replace(/\n{3,}/gu, "\n\n");
+}
+
 function requireRepositoryMethod(repository, method, name) {
   if (typeof repository?.[method] !== "function") throw new TypeError(`${name}.${method} é obrigatório para esta operação.`);
 }
@@ -69,11 +123,11 @@ function orderHandler({ orderRepository, logger }) {
         const pagination = paginateInteractiveOptions(events, {
           page: context.payload?.page,
           scope: "orders",
-          toButton: (event) => menuButton(`event:${event.id}`, event.name, `${event.startsAt} — ${MONEY.format(event.price)}`),
+          toButton: (event) => menuButton(`event:${event.id}`, eventChoiceLabel(event), event.attractions || event.name),
         });
         return {
           reply: reply(
-            withPageIndicator("Escolha o evento:", pagination),
+            withPageIndicator(config.orders.selectionPrompt || "Escolha o evento:", pagination),
             pagination.buttons,
           ),
         };
@@ -86,9 +140,7 @@ function orderHandler({ orderRepository, logger }) {
         if (!pix) return { reply: reply("O pagamento ainda não está configurado. Fale com a equipe.") };
         return {
           state: { module: "orders", step: "awaiting_receipt", data: { eventId: event.id } },
-          reply: reply(
-            `${event.name} — ${MONEY.format(event.price)}.\nPIX: ${pix.key}\nFavorecido: ${pix.recipient}\n${pix.instructions || config.orders.receiptPrompt || "Envie o comprovante por aqui."}`,
-          ),
+          reply: reply(detailedOrderReply(event, pix, config.orders)),
         };
       }
 

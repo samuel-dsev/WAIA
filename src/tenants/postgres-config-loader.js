@@ -10,24 +10,27 @@ export class PostgresTenantDefinitionRepository {
 
   load(empresaId) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const [companyResult, settingsResult, modulesResult, menuResult, productsResult, eventsResult, servicesResult] = await Promise.all([
-        client.query("SELECT * FROM empresas WHERE id = $1 AND deleted_at IS NULL", [empresaId]),
-        client.query("SELECT * FROM configuracoes_empresa WHERE empresa_id = $1", [empresaId]),
-        client.query("SELECT module_key FROM modulos_empresa WHERE empresa_id = $1 AND habilitado", [empresaId]),
-        client.query(
+      // Uma transação usa um único client do pg. As consultas precisam ser
+      // sequenciais; executar Promise.all no mesmo client causa concorrência
+      // não suportada e pode trocar resultados entre etapas no pg >= 9.
+      const companyResult = await client.query("SELECT * FROM empresas WHERE id = $1 AND deleted_at IS NULL", [empresaId]);
+      const settingsResult = await client.query("SELECT * FROM configuracoes_empresa WHERE empresa_id = $1", [empresaId]);
+      const modulesResult = await client.query("SELECT module_key, configuracao FROM modulos_empresa WHERE empresa_id = $1 AND habilitado", [empresaId]);
+      const menuResult = await client.query(
           `SELECT m.mensagem, i.action_key, i.titulo, i.posicao
              FROM menus m JOIN menu_itens i ON i.empresa_id = m.empresa_id AND i.menu_id = m.id
             WHERE m.empresa_id = $1 AND m.ativo AND i.ativo
             ORDER BY m.version DESC, i.posicao ASC`,
           [empresaId],
-        ),
-        client.query(
+        );
+      const productsResult = await client.query(
           `SELECT id, sku, nome, descricao, preco, ativo FROM produtos_servicos
             WHERE empresa_id = $1 AND tipo IN ('produto','convite') AND deleted_at IS NULL ORDER BY nome, id`,
           [empresaId],
-        ),
-        client.query(
-          `SELECT e.id, e.external_id, e.nome, e.atracoes, e.inicio_at, e.observacoes, price.preco
+        );
+      const eventsResult = await client.query(
+          `SELECT e.id, e.external_id, e.nome, e.atracoes, e.inicio_at, e.timezone,
+                  e.local, e.regra_vip, e.observacoes, price.preco
              FROM eventos e LEFT JOIN LATERAL (
                SELECT p.preco FROM eventos_produtos ep JOIN produtos_servicos p
                  ON p.empresa_id = ep.empresa_id AND p.id = ep.produto_servico_id
@@ -36,8 +39,8 @@ export class PostgresTenantDefinitionRepository {
             WHERE e.empresa_id = $1 AND e.status = 'publicado' AND e.deleted_at IS NULL
             ORDER BY e.inicio_at, e.id`,
           [empresaId],
-        ),
-        client.query(
+        );
+      const servicesResult = await client.query(
           `SELECT p.id, p.sku, p.nome, p.descricao, p.ativo,
                   COALESCE(jsonb_agg(jsonb_build_object(
                     'id', d.id, 'label', to_char(d.inicio_at AT TIME ZONE e.timezone, 'DD/MM/YYYY HH24:MI'),
@@ -49,20 +52,25 @@ export class PostgresTenantDefinitionRepository {
             WHERE p.empresa_id = $1 AND p.tipo = 'servico' AND p.deleted_at IS NULL
             GROUP BY p.id, p.sku, p.nome, p.descricao, p.ativo ORDER BY p.nome, p.id`,
           [empresaId],
-        ),
-      ]);
+        );
       const company = companyResult.rows[0];
       if (!company) return null;
       const settings = settingsResult.rows[0] || {};
       const enabledModules = modulesResult.rows.map((row) => row.module_key);
+      const moduleConfigurations = new Map(modulesResult.rows.map((row) => [row.module_key, row.configuracao || {}]));
+      const orderConfig = moduleConfigurations.get("orders") || {};
       const payment = enabledModules.includes("payments") && this.paymentResolver
         ? await this.paymentResolver.resolve({ empresaId, type: "pix" })
         : null;
       const menuRows = menuResult.rows;
       const configuredReplies = Array.isArray(settings.respostas_publicas) ? settings.respostas_publicas : [];
       const dynamicReplies = [
-        settings.endereco && { module: "catalog", action: "catalog.address", text: `Endereço: ${settings.endereco}` },
-        settings.link_cardapio && { module: "catalog", action: "catalog.menu", text: `Cardápio: ${settings.link_cardapio}` },
+        settings.endereco && { module: "catalog", action: "catalog.address", text: `📍 ${settings.endereco}` },
+        settings.link_cardapio && {
+          module: "catalog",
+          action: "catalog.menu",
+          text: `Veja o cardápio do ${company.nome_exibicao} aqui:\n${settings.link_cardapio}\nOs itens e a disponibilidade podem mudar sem aviso.`,
+        },
         settings.regra_aniversariante && { module: "events", action: "events.birthday_rule", text: settings.regra_aniversariante },
       ].filter(Boolean);
       const dynamicActions = new Set(dynamicReplies.map((reply) => reply.action));
@@ -77,15 +85,37 @@ export class PostgresTenantDefinitionRepository {
             options: menuRows.map((row) => ({ id: row.action_key, label: row.titulo, module: actionModule(row.action_key), action: row.action_key })),
           },
           catalog: { items: productsResult.rows.map((row) => ({ id: row.sku || row.id, name: row.nome, description: row.descricao, price: Number(row.preco), active: row.ativo })) },
-          events: { items: eventsResult.rows.map((row) => ({ id: row.external_id || row.id, name: row.nome, description: [row.atracoes, row.observacoes].filter(Boolean).join(" — "), startsAt: row.inicio_at.toISOString(), price: Number(row.preco || 0), active: true })) },
+          events: { items: eventsResult.rows.map((row) => ({
+            id: row.external_id || row.id,
+            name: row.nome,
+            attractions: row.atracoes,
+            description: row.observacoes || undefined,
+            startsAt: row.inicio_at.toISOString(),
+            timezone: row.timezone || company.timezone || "America/Sao_Paulo",
+            vipRule: row.regra_vip || undefined,
+            birthdayRule: settings.regra_aniversariante || undefined,
+            location: row.local || settings.endereco || undefined,
+            price: Number(row.preco || 0),
+            active: true,
+          })) },
           payments: { pix: payment ? { key: payment.value, recipient: payment.recipient, instructions: payment.instructions } : undefined },
-          orders: { pendingStatus: "Aguardando conferência" },
+          orders: {
+            pendingStatus: orderConfig.pendingStatus || "Aguardando conferência",
+            selectionPrompt: orderConfig.selectionPrompt,
+            paymentPrompt: orderConfig.paymentPrompt,
+            receiptPrompt: orderConfig.receiptPrompt,
+            namePrompt: orderConfig.namePrompt,
+            successMessage: orderConfig.successMessage,
+          },
           appointments: { services: servicesResult.rows.map((row) => ({ id: row.sku || row.id, name: row.nome, description: row.descricao, active: row.ativo, slots: row.slots })) },
           humanHandoff: { message: "A automação foi pausada. A equipe continuará o atendimento por esta conversa." },
         },
         publicReplies: [...configuredReplies.filter((reply) => !dynamicActions.has(reply?.action)), ...dynamicReplies],
         routing: settings.roteamento || {},
-        ai: { fallbackMessage: settings.mensagem_fallback },
+        ai: {
+          fallbackMessage: settings.mensagem_fallback,
+          followUpQuestion: settings.roteamento?.aiFollowUpQuestion || null,
+        },
       };
     });
   }
