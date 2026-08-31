@@ -34,7 +34,7 @@ test("dispatcher publica somente IDs e confirma a outbox", async () => {
   assert.deepEqual(marked, ["job-1", "job-2"]);
   assert.deepEqual(Object.keys(published[0]).sort(), [
     "conversationId", "correlationId", "empresaId", "jobId", "messageId",
-    "payloadVersion", "statusEventId", "type",
+    "orderId", "payloadVersion", "statusEventId", "type",
   ]);
   assert.equal(metrics.snapshot().counters.waia_outbox_jobs_published_total, 2);
   assert.equal(metrics.snapshot().summaries.waia_outbox_dispatch_duration_seconds.count, 1);

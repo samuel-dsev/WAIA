@@ -113,6 +113,9 @@ export function createGoogleSheetsIntegration({
       return { health: "healthy", snapshot: detached(snapshot), stale: false };
     } catch (error) {
       const tenant = scoped?.tenant || requireTenantContext(context);
+      if (scoped?.config && typeof cacheRepository.markFailure === "function") {
+        await cacheRepository.markFailure(cacheScope(tenant, scoped.config), error?.code || "GOOGLE_SYNC_FAILED").catch(() => {});
+      }
       safeIntegrationLog(logger, "warn", "google_sheets_sync_failed", tenant, {
         integration: "google_sheets",
         operation: "sync",

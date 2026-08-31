@@ -1,6 +1,6 @@
 # WAIA - Plataforma multiempresa de atendimento WhatsApp
 
-Este repositório evolui a demonstração do chatbot do Capitão Mor para uma plataforma SaaS multiempresa. A base continua em Node.js com ES Modules, Express, WhatsApp Cloud API e OpenAI Responses API, com API central, worker, painel administrativo, PostgreSQL e Redis. O adaptador multiempresa de Google Sheets existe e é testado isoladamente, mas sua ligação ao runtime oficial ainda está pendente.
+Este repositório evolui a demonstração do chatbot do Capitão Mor para uma plataforma SaaS multiempresa. A base continua em Node.js com ES Modules, Express, WhatsApp Cloud API e OpenAI Responses API, com API central, worker, painel administrativo, PostgreSQL e Redis. O Google Sheets está ligado ao runtime oficial por tenant para importar agenda/configurações públicas e exportar pedidos, mantendo PostgreSQL como fonte de verdade.
 
 O `src/server.js` permanece como entrada legada da demonstração. A operação oficial usa:
 
@@ -46,7 +46,7 @@ Teste de carga sintético, sem rede e sem banco real:
 npm run load:test
 ```
 
-Para a API/worker oficiais é necessário PostgreSQL e Redis. Sem credenciais externas reais, a plataforma ainda inicia desde que a infraestrutura e segredos internos estejam configurados. Meta e OpenAI falham de forma isolada quando não configuradas; Google Sheets ainda precisa ser ligado ao runtime oficial.
+Para a API/worker oficiais é necessário PostgreSQL e Redis. Sem credenciais externas reais, a plataforma ainda inicia desde que a infraestrutura e segredos internos estejam configurados. Meta, OpenAI e Google Sheets falham de forma isolada quando não configurados.
 
 ## Variáveis
 
@@ -65,6 +65,7 @@ Principais variáveis:
 - `WHATSAPP_VERIFY_TOKEN`
 - `META_APP_SECRET`
 - `OPENAI_API_KEY`, se usar chave OpenAI compartilhada
+- `GOOGLE_SHEETS_SYNC_INTERVAL_MS`, intervalo do worker; planilha e JSON da conta de serviço são configurados no painel por empresa
 - `API_DOMAIN` e `PANEL_DOMAIN`
 - `POSTGRES_PASSWORD`
 - `MEDIA_STORAGE_ROOT`: diretório absoluto privado ao executar fora do Compose
@@ -77,6 +78,8 @@ Principais variáveis:
 ```
 
 Não coloque tokens Meta, chaves OpenAI, senhas, PIX real ou arquivos de service account em seeds, logs, documentação ou código.
+
+O passo a passo por provedor está em `docs/CONFIGURACAO_INTEGRACOES.md`.
 
 ## Docker Compose
 
@@ -190,10 +193,10 @@ Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar
 
 Comandos executados nesta continuidade:
 
-- `npm test`: 177 testes descobertos; 172 aprovados, com 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
+- `npm test`: 182 testes descobertos; 176 aprovados, com 5 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
 - `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
 - `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
-- Migrações e seed executados em PostgreSQL 16 real; 13 migrações descobertas.
+- Migrações e seed executados em PostgreSQL 16 real; 14 migrações descobertas.
 - Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
 - Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
 - Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
@@ -201,5 +204,6 @@ Comandos executados nesta continuidade:
 - Endpoint Prometheus real recusou coleta sem token com HTTP 401 e retornou HTTP 200 com Bearer sintético, gauges PostgreSQL/BullMQ e heartbeat do worker; Redis real acumulou contadores e durações compartilhados.
 - Runtime, worker, parser e gateway interativo passaram em 36 testes dentro da imagem Docker; API e worker reconstruídos permaneceram saudáveis e a prontidão retornou HTTP 200.
 - API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
+- Cinco integrações PostgreSQL reais passaram na imagem, incluindo sincronização sintética da agenda Google com RLS e desativação de eventos removidos.
 
 As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.

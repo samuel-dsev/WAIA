@@ -59,6 +59,13 @@ export class PostgresTenantDefinitionRepository {
         ? await this.paymentResolver.resolve({ empresaId, type: "pix" })
         : null;
       const menuRows = menuResult.rows;
+      const configuredReplies = Array.isArray(settings.respostas_publicas) ? settings.respostas_publicas : [];
+      const dynamicReplies = [
+        settings.endereco && { module: "catalog", action: "catalog.address", text: `Endereço: ${settings.endereco}` },
+        settings.link_cardapio && { module: "catalog", action: "catalog.menu", text: `Cardápio: ${settings.link_cardapio}` },
+        settings.regra_aniversariante && { module: "events", action: "events.birthday_rule", text: settings.regra_aniversariante },
+      ].filter(Boolean);
+      const dynamicActions = new Set(dynamicReplies.map((reply) => reply.action));
       return {
         runtime: {
           empresaId,
@@ -76,7 +83,7 @@ export class PostgresTenantDefinitionRepository {
           appointments: { services: servicesResult.rows.map((row) => ({ id: row.sku || row.id, name: row.nome, description: row.descricao, active: row.ativo, slots: row.slots })) },
           humanHandoff: { message: "A automação foi pausada. A equipe continuará o atendimento por esta conversa." },
         },
-        publicReplies: settings.respostas_publicas || [],
+        publicReplies: [...configuredReplies.filter((reply) => !dynamicActions.has(reply?.action)), ...dynamicReplies],
         routing: settings.roteamento || {},
         ai: { fallbackMessage: settings.mensagem_fallback },
       };

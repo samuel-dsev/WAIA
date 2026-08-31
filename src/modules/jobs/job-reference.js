@@ -6,6 +6,7 @@ const ALLOWED_FIELDS = new Set([
   "conversationId",
   "messageId",
   "statusEventId",
+  "orderId",
   "type",
   "correlationId",
   "payloadVersion",
@@ -42,6 +43,7 @@ export function normalizeJobReference(input) {
     conversationId: optionalString(input.conversationId, "conversationId"),
     messageId: optionalString(input.messageId, "messageId"),
     statusEventId: optionalString(input.statusEventId, "statusEventId"),
+    orderId: optionalString(input.orderId, "orderId"),
     type: requiredString(input.type, "type"),
     correlationId: requiredString(input.correlationId, "correlationId"),
     payloadVersion,
@@ -52,6 +54,9 @@ export function normalizeJobReference(input) {
   }
   if (normalized.type === "apply_whatsapp_status" && !normalized.statusEventId) {
     throw new TypeError("Job de status exige statusEventId.");
+  }
+  if (normalized.type === "export_google_sheets_order" && !normalized.orderId) {
+    throw new TypeError("Job de exportação Google Sheets exige orderId.");
   }
   return Object.freeze(normalized);
 }

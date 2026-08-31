@@ -96,6 +96,23 @@ export class PostgresOrderRepository {
           conversation.rows[0].correlation_id || randomUUID(),
         ],
       );
+      const googleSheets = (await client.query(
+        `SELECT id FROM integracoes
+          WHERE empresa_id = $1 AND tipo = 'google_sheets' AND habilitada
+            AND deleted_at IS NULL AND NULLIF(configuracao #>> '{exports,orders}', '') IS NOT NULL
+          ORDER BY created_at, id LIMIT 1`,
+        [input.empresaId],
+      )).rows[0];
+      if (googleSheets) {
+        await client.query("UPDATE pedidos SET integracao_status = 'pendente' WHERE empresa_id = $1 AND id = $2", [input.empresaId, order.rows[0].id]);
+        await client.query(
+          `INSERT INTO outbox_jobs (empresa_id, conversa_id, job_type, dedup_key, payload, correlation_id)
+           VALUES ($1,$2,'export_google_sheets_order',$3,$4::jsonb,$5)
+           ON CONFLICT (empresa_id, dedup_key) DO NOTHING`,
+          [input.empresaId, input.conversationId, `export_google_sheets_order:${order.rows[0].id}`,
+            JSON.stringify({ orderId: order.rows[0].id, payloadVersion: 1 }), conversation.rows[0].correlation_id || randomUUID()],
+        );
+      }
       await client.query(
         `INSERT INTO itens_pedido (
            empresa_id, pedido_id, evento_id, descricao_snapshot, quantidade, preco_unitario, total

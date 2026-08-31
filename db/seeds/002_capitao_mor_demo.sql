@@ -146,6 +146,6 @@ VALUES (
   false,
   true,
   'nao_configurada',
-  '{"mode":"demo","source":"synthetic"}'::jsonb
+  '{"imports":{"agenda":"Agenda!A2:I","settings":"Configurações!A2:C"},"exports":{"orders":"Pedidos!A:G"},"healthRange":"Agenda!A2:I","version":1}'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;

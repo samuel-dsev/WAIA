@@ -27,6 +27,7 @@ export const config = {
     retentionBatchSize: numberFromEnv("RETENTION_BATCH_SIZE", 500),
     heartbeatIntervalMs: numberFromEnv("WORKER_HEARTBEAT_INTERVAL_MS", 10_000),
     heartbeatTtlMs: numberFromEnv("WORKER_HEARTBEAT_TTL_MS", 30_000),
+    googleSheetsSyncIntervalMs: numberFromEnv("GOOGLE_SHEETS_SYNC_INTERVAL_MS", 120_000),
   },
   media: {
     storageRoot: process.env.MEDIA_STORAGE_ROOT || "",

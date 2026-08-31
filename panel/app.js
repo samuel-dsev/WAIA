@@ -743,6 +743,13 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   const integrationList = node("dl", "detail-list");
   for (const integration of listFrom(integrationPayload)) {
     integrationList.append(nodeWithText("dt", integration.name || integration.provider || "Integração"), valueNode(integration.health || integration.status, "status"));
+    if (integration.type === "google_sheets") {
+      integrationList.append(nodeWithText("dt", "Configuração"), button(
+        "Configurar Google Sheets",
+        () => openGoogleSheetsConfig(integration, listFrom(credentialPayload)),
+        "button button-secondary button-small",
+      ));
+    }
   }
   if (!integrationList.children.length) integrationList.append(nodeWithText("dt", "Estado"), valueNode("not_configured", "status"));
   integrationsCard.append(integrationList);
@@ -752,7 +759,7 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   for (const credential of listFrom(credentialPayload)) {
     const row = node("div", "check-row");
     row.append(
-      nodeWithText("span", `${credential.provider} · ${credential.purpose} · ${credential.maskedSecret || "mascarada"}`),
+      nodeWithText("span", `${credential.provider} · ${credential.purpose} · ${credential.maskedSecret || "mascarada"} · ID ${credential.id}`),
       button("Rotacionar", () => openCredentialUpdate(credential.id), "button button-quiet button-small"),
     );
     credentialsCard.append(row);
@@ -817,6 +824,57 @@ function openPaymentCredential() {
       method: "POST", body: { provider: "payment", purpose: values.purpose, secret: values.secret },
       success: "Dado cadastrado no cofre. O valor não será exibido novamente.",
     });
+  });
+}
+
+function openGoogleSheetsConfig(integration, credentials) {
+  const configuration = integration.configuration || {};
+  const purpose = `google_sheets:${integration.id}`;
+  const credential = credentials.find((item) => item.provider === "google" && [purpose, "google_sheets"].includes(item.purpose));
+  openFormDialog("Configurar Google Sheets", [
+    ["spreadsheetId", "ID da planilha", "text", true],
+    ["agendaRange", "Range da agenda", "text", true],
+    ["settingsRange", "Range das configurações", "text", true],
+    ["ordersRange", "Range de pedidos", "text", true],
+    ["serviceAccountJson", credential ? "Novo JSON da conta de serviço (opcional)" : "JSON da conta de serviço", "textarea", !credential],
+  ], async (values) => {
+    if (values.serviceAccountJson) {
+      let parsed;
+      try { parsed = JSON.parse(values.serviceAccountJson); } catch { throw new Error("O JSON da conta de serviço é inválido."); }
+      if (parsed.type !== "service_account" || !parsed.client_email || !parsed.private_key) throw new Error("O JSON precisa ser de uma conta de serviço Google válida.");
+      if (credential) {
+        await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credential.id)}/rotate`, {
+          method: "POST", body: { secret: values.serviceAccountJson },
+        });
+      } else {
+        await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials`, {
+          method: "POST", body: { provider: "google", purpose, secret: values.serviceAccountJson },
+        });
+      }
+    }
+    const version = Number(configuration.version || 0) + 1;
+    await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations/${encodeURIComponent(integration.id)}`, {
+      method: "PATCH",
+      body: {
+        enabled: true,
+        status: "nao_configurada",
+        configuration: {
+          spreadsheetId: values.spreadsheetId.trim(),
+          imports: { agenda: values.agendaRange.trim(), settings: values.settingsRange.trim() },
+          exports: { orders: values.ordersRange.trim() },
+          healthRange: values.agendaRange.trim(),
+          version,
+        },
+      },
+    });
+    const sync = await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations/google-sheets/sync`, { method: "POST", body: {} });
+    toast(sync.health === "healthy" ? `${sync.eventsImported} evento(s) importado(s) do Google Sheets.` : "Configuração salva, mas o Google Sheets ainda não respondeu.");
+    await loadCurrentView();
+  }, {
+    spreadsheetId: configuration.spreadsheetId || "",
+    agendaRange: configuration.imports?.agenda || "Agenda!A2:I",
+    settingsRange: configuration.imports?.settings || "Configurações!A2:C",
+    ordersRange: configuration.exports?.orders || "Pedidos!A:G",
   });
 }
 
@@ -1070,11 +1128,12 @@ function openFormDialog(title, fields, onSubmit, initialValues = {}) {
     const labelNode = nodeWithText("label", label);
     labelNode.htmlFor = id;
     const options = fields.find((item) => item[0] === name)?.[4];
-    const input = type === "select" ? document.createElement("select") : document.createElement("input");
+    const input = type === "select" ? document.createElement("select") : type === "textarea" ? document.createElement("textarea") : document.createElement("input");
     if (type === "select") {
       for (const [value, text] of options || []) input.append(new Option(text, value));
       Object.assign(input, { id, name, required });
-    } else Object.assign(input, { id, name, type, required, maxLength: 500 });
+    } else if (type === "textarea") Object.assign(input, { id, name, required, maxLength: 20_000, rows: 8 });
+    else Object.assign(input, { id, name, type, required, maxLength: 500 });
     if (initialValues[name] != null) input.value = String(initialValues[name]);
     if (type === "password") input.autocomplete = "new-password";
     wrapper.append(labelNode, input);

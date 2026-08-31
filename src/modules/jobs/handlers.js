@@ -211,6 +211,43 @@ export class PostgresJobHandlerRepository {
       return row;
     });
   }
+
+  googleSheetsOrder({ empresaId, orderId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT p.id, p.nome_comprador, p.status, p.created_at,
+                c.telefone_normalizado, m.media_external_id,
+                COALESCE(i.descricao_snapshot, e.nome, '') AS evento
+           FROM pedidos p
+           JOIN contatos c ON c.empresa_id = p.empresa_id AND c.id = p.contato_id
+           LEFT JOIN mensagens m ON m.empresa_id = p.empresa_id AND m.id = p.comprovante_mensagem_id
+           LEFT JOIN LATERAL (
+             SELECT descricao_snapshot, evento_id FROM itens_pedido
+              WHERE empresa_id = p.empresa_id AND pedido_id = p.id ORDER BY id LIMIT 1
+           ) i ON true
+           LEFT JOIN eventos e ON e.empresa_id = p.empresa_id AND e.id = i.evento_id
+          WHERE p.empresa_id = $1 AND p.id = $2 AND p.deleted_at IS NULL LIMIT 1`,
+        [empresaId, orderId],
+      )).rows[0];
+      return row && {
+        id: row.id,
+        customerName: row.nome_comprador,
+        customerPhone: row.telefone_normalizado,
+        eventName: row.evento,
+        receiptId: row.media_external_id,
+        status: "Aguardando conferência",
+        createdAt: row.created_at?.toISOString?.() || row.created_at,
+      };
+    });
+  }
+
+  markGoogleSheetsOrder({ empresaId, orderId, status }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
+      `UPDATE pedidos SET integracao_status = $3, updated_at = now()
+        WHERE empresa_id = $1 AND id = $2 AND deleted_at IS NULL`,
+      [empresaId, orderId, status],
+    ));
+  }
 }
 
 export function createWorkerHandlers({
@@ -223,6 +260,7 @@ export function createWorkerHandlers({
   appointmentRepository,
   handoffRepository,
   mediaStore,
+  googleSheetsIntegration,
   logger = console,
   firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
 } = {}) {
@@ -429,9 +467,27 @@ export function createWorkerHandlers({
     return { sent: true };
   }
 
+  async function exportGoogleSheetsOrder(reference) {
+    if (typeof repository.googleSheetsOrder !== "function" || typeof repository.markGoogleSheetsOrder !== "function"
+        || typeof googleSheetsIntegration?.exportOrder !== "function") {
+      throw permanent("Exportação Google Sheets não configurada no worker.", "GOOGLE_ORDER_HANDLER_NOT_CONFIGURED");
+    }
+    const order = await repository.googleSheetsOrder(reference);
+    if (!order) throw permanent("Pedido não encontrado.", "ORDER_NOT_FOUND");
+    try {
+      const result = await googleSheetsIntegration.exportOrder({ empresaId: reference.empresaId }, order, { idempotencyKey: order.id });
+      await repository.markGoogleSheetsOrder({ empresaId: reference.empresaId, orderId: order.id, status: "sincronizada" });
+      return { exported: true, duplicate: Boolean(result?.duplicate) };
+    } catch (error) {
+      await repository.markGoogleSheetsOrder({ empresaId: reference.empresaId, orderId: order.id, status: "falhou" }).catch(() => {});
+      throw error;
+    }
+  }
+
   return Object.freeze({
     process_inbound_message: processInboundMessage,
     apply_whatsapp_status: applyWhatsappStatus,
     send_human_message: sendHumanMessage,
+    export_google_sheets_order: exportGoogleSheetsOrder,
   });
 }

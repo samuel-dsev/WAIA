@@ -196,13 +196,14 @@ function sanitizedAdminView(value) {
 }
 
 export class AdminService {
-  constructor({ repository, credentialVault, conversationService, healthService, mediaStore, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
     this.credentialVault = credentialVault;
     this.conversationService = conversationService;
     this.healthService = healthService;
     this.mediaStore = mediaStore;
+    this.googleSheetsIntegration = googleSheetsIntegration;
     this.clock = clock;
     this.idGenerator = idGenerator;
   }
@@ -517,6 +518,19 @@ export class AdminService {
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     }));
+  }
+
+  async syncGoogleSheets({ auth, empresaId, correlationId }) {
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { write: true, action: "google_sheets.sync", resource: "integrations" });
+    if (typeof this.googleSheetsIntegration?.syncTenant !== "function") throw new AdminValidationError("Google Sheets não configurado no runtime.");
+    const result = await this.googleSheetsIntegration.syncTenant({ empresaId });
+    await this.#audit({ auth, empresaId, action: "google_sheets.sync", resource: "integrations", result: result.health === "healthy" ? "success" : "failure", correlationId });
+    return {
+      health: result.health,
+      stale: Boolean(result.stale),
+      errorCode: result.errorCode || null,
+      eventsImported: Array.isArray(result.snapshot?.events) ? result.snapshot.events.length : 0,
+    };
   }
 
   async setConversationMode({ auth, empresaId, conversationId, mode, operatorId }) {

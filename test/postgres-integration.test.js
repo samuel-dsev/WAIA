@@ -6,6 +6,7 @@ import { PrivateMediaStore } from "../src/infra/media/private-media-store.js";
 import { AdminService, PostgresAdminRepository } from "../src/modules/admin/index.js";
 import { PostgresJobHandlerRepository, createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 import { PostgresJobRepository } from "../src/modules/jobs/postgres-repository.js";
+import { PostgresGoogleSheetsSnapshotMapper } from "../src/integrations/google-sheets/postgres-adapters.js";
 
 const enabled = process.env.RUN_POSTGRES_INTEGRATION === "true";
 
@@ -522,6 +523,66 @@ test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { 
       await owner.query("DELETE FROM empresas WHERE id = $1", [empresaId]).catch(() => {});
     }
     if (operatorId) await owner.query("DELETE FROM usuarios WHERE id = $1", [operatorId]).catch(() => {});
+    owner.release();
+    await appPool.end();
+    await ownerPool.end();
+  }
+});
+
+test("PostgreSQL sincroniza agenda Google Sheets com RLS e desativa evento removido", { skip: !enabled }, async () => {
+  const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = await ownerPool.connect();
+  const suffix = randomUUID();
+  let empresaId;
+  try {
+    empresaId = (await owner.query(
+      "INSERT INTO empresas (slug, nome, nome_exibicao, status) VALUES ($1, 'Sheets integração', 'Sheets integração', 'ativa') RETURNING id",
+      [`sheets-${suffix}`],
+    )).rows[0].id;
+    await owner.query(
+      `INSERT INTO configuracoes_empresa (empresa_id, saudacao, mensagem_fallback, endereco)
+       VALUES ($1, 'Olá', 'Contingência', 'Endereço anterior')`,
+      [empresaId],
+    );
+    const mapper = new PostgresGoogleSheetsSnapshotMapper(appPool, { clock: () => new Date("2026-08-30T12:00:00-03:00") });
+    const first = await mapper.map({
+      agenda: [["evento-a", "2026-09-05", "Sábado", "20:00", "Banda A", "35,00", "VIP", "Observação", "Ativo"]],
+      settings: [["endereco", "Rua Nova, 10"], ["chave_pix", "não importar"]],
+    }, {}, { empresaId });
+    assert.equal(first.events.length, 1);
+    const persisted = (await owner.query(
+      `SELECT e.external_id, e.status, e.local, p.preco::text, p.ativo
+         FROM eventos e JOIN eventos_produtos ep ON ep.empresa_id = e.empresa_id AND ep.evento_id = e.id
+         JOIN produtos_servicos p ON p.empresa_id = ep.empresa_id AND p.id = ep.produto_servico_id
+        WHERE e.empresa_id = $1 AND e.origem_externa = 'google_sheets'`,
+      [empresaId],
+    )).rows[0];
+    assert.deepEqual(persisted, { external_id: "evento-a", status: "publicado", local: "Rua Nova, 10", preco: "35.00", ativo: true });
+
+    await mapper.map({
+      agenda: [["evento-b", "2026-09-06", "Domingo", "18:00", "Banda B", "20", "", "", "Ativo"]],
+      settings: [["endereco", "Rua Nova, 10"]],
+    }, {}, { empresaId });
+    const states = (await owner.query(
+      `SELECT e.external_id, e.status, p.ativo
+         FROM eventos e JOIN eventos_produtos ep ON ep.empresa_id = e.empresa_id AND ep.evento_id = e.id
+         JOIN produtos_servicos p ON p.empresa_id = ep.empresa_id AND p.id = ep.produto_servico_id
+        WHERE e.empresa_id = $1 AND e.origem_externa = 'google_sheets' ORDER BY e.external_id`,
+      [empresaId],
+    )).rows;
+    assert.deepEqual(states, [
+      { external_id: "evento-a", status: "cancelado", ativo: false },
+      { external_id: "evento-b", status: "publicado", ativo: true },
+    ]);
+  } finally {
+    if (empresaId) {
+      await owner.query("DELETE FROM eventos_produtos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM eventos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM produtos_servicos WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM configuracoes_empresa WHERE empresa_id = $1", [empresaId]).catch(() => {});
+      await owner.query("DELETE FROM empresas WHERE id = $1", [empresaId]).catch(() => {});
+    }
     owner.release();
     await appPool.end();
     await ownerPool.end();

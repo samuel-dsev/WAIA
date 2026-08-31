@@ -12,7 +12,7 @@ test("migrações cobrem o domínio mínimo, isolamento e status Meta", async ()
     "configuracoes_ia", "contatos", "conversas", "mensagens", "estados_conversa",
     "modulos_empresa", "menus", "produtos_servicos", "eventos", "pedidos", "itens_pedido",
     "agendamentos", "integracoes", "uso_ia", "jobs_falhos", "logs_operacionais", "logs_auditoria",
-    "outbox_jobs", "whatsapp_status_events", "credenciais_empresa",
+    "outbox_jobs", "whatsapp_status_events", "credenciais_empresa", "integracao_operacoes",
   ];
   for (const table of requiredTables) assert.match(sql, new RegExp(`CREATE TABLE ${table}\\b`, "u"));
   assert.match(sql, /FORCE ROW LEVEL SECURITY/u);

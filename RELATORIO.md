@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 30 de agosto de 2026 após implementar e comprovar a paginação das opções interativas e o envio por mensagens de lista da Meta.
+Atualizado em 30 de agosto de 2026 após integrar o Google Sheets do Capitão Mor ao runtime SaaS oficial.
 
 ## Diagnóstico executivo
 
@@ -12,7 +12,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
 - Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com treze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- PostgreSQL como fonte de verdade, com quatorze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
 - Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
 - Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
 - Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.
@@ -20,7 +20,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Cofre de credenciais AES-256-GCM com AAD, versionamento, rotação, revogação, máscara e auditoria atômica.
 - Tenant demonstrativo do Capitão Mor em seed sintético, sem credenciais, PIX ou dados pessoais reais.
 - OpenAI Responses API com isolamento por tenant, limites, contingência, defesa contra prompt injection e contabilização de custo.
-- Adaptador Google Sheets multiempresa e simuladores testados isoladamente.
+- Google Sheets multiempresa ligado ao runtime oficial: configuração e JSON por tenant no cofre, importação periódica de agenda/configurações públicas, último cache válido e exportação assíncrona de pedidos.
 - Comprovantes privados em JPEG, PNG, WEBP ou PDF até 10 MB, com download Meta autenticado por tenant, SHA-256, retenção e visualização auditada no painel.
 - Atendimento humano no painel com assunção da conversa, CSRF, autorização, idempotência, mensagem/outbox/auditoria transacionais e envio assíncrono pelo número do tenant.
 - Gestão de jobs falhos no painel, restrita a administradores, com consulta sanitizada, retry por novo job, resolução explícita e auditoria transacional.
@@ -77,16 +77,21 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O mesmo payload interativo completo atravessa runtime, persistência da resposta e worker; o gateway escolhe botão ou lista somente no limite do transporte.
 - Títulos, descrições e corpo interativo são ajustados aos limites do WhatsApp sem alterar os IDs determinísticos, e o envio falha explicitamente se receber mais de dez linhas não paginadas.
 - Respostas `list_reply` do webhook passam pelo mesmo parser e roteador das respostas de botão, inclusive nas páginas de eventos e horários com estado persistido.
+- O Capitão Mor preserva os contratos `Agenda!A2:I`, `Configurações!A2:C` e `Pedidos!A:G`; PIX/favorecida não são importados da planilha e permanecem no cofre.
+- A sincronização cria/atualiza eventos e convites no PostgreSQL, cancela/desativa itens removidos e ignora eventos inativos ou passados.
+- O worker executa sincronização por tenant a cada 120 segundos por padrão e exporta pedidos por outbox contendo apenas IDs, com checkpoint idempotente e isolamento RLS.
+- O painel recebeu configuração dedicada do Google Sheets, rotação do JSON da conta de serviço e sincronização imediata auditada.
+- Adicionado `docs/CONFIGURACAO_INTEGRACOES.md` com o fluxo de configuração Meta, OpenAI, Google Sheets e segredos de infraestrutura.
 
 ## Validação executada
 
-- `npm test`: 177 testes descobertos; 172 aprovados, 4 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
-- `node --check`: 136 arquivos JavaScript válidos.
+- `npm test`: 182 testes descobertos; 176 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `node --check`: 139 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
 - PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
-- Migração incremental concluída; treze migrações descobertas e a migração de gestão de jobs falhos foi aplicada uma vez.
+- Migração incremental concluída; quatorze migrações descobertas e `014_google_sheets_runtime.sql` aplicada uma vez.
 - Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
 - API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
 - `GET /health/ready` retornou HTTP 200.
@@ -100,6 +105,8 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O scrape real exibiu `waia_metrics_collector_up 1`, um heartbeat de worker e gauges atuais de outbox/BullMQ sem labels de alta cardinalidade.
 - API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
 - A imagem Docker reconstruída aprovou 36 testes direcionados de runtime, persistência/worker, gateway e parser interativo; API e worker permaneceram saudáveis e `/health/ready` retornou 200.
+- Cinco integrações PostgreSQL reais passaram na imagem reconstruída, incluindo sincronização sintética da agenda Google com RLS e desativação de evento removido.
+- A nova tabela `integracao_operacoes` foi comprovada com privilégios DML do papel restrito e `ENABLE/FORCE ROW LEVEL SECURITY`; API retornou `/health/ready` 200 e worker permaneceu saudável sem credencial Google real.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 
@@ -107,10 +114,9 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Bloqueiam produção
 
-- Google Sheets não está ligado ao `createPostgresRuntime` nem aos handlers oficiais. O adaptador existe, mas habilitar o módulo hoje não executa sincronização/exportação real.
+- Meta, OpenAI e Google ainda precisam de credenciais exclusivas de homologação e teste externo real nesta base SaaS; nenhuma credencial antiga foi copiada automaticamente.
 - 2FA/MFA possui colunas no banco, mas não tem fluxo de cadastro, desafio ou recuperação.
 - Backup e, principalmente, restauração ainda não foram exercitados em uma cópia descartável do ambiente alvo.
-- Meta, OpenAI e Google não foram homologados com credenciais reais nesta base SaaS.
 - O download de mídia foi validado com provedor simulado e armazenamento real, mas ainda precisa de homologação com um número Meta exclusivo de teste.
 
 ### Riscos técnicos relevantes
@@ -129,7 +135,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ### Fase 1 — fechar o núcleo operacional
 
-1. Ligar Google Sheets ao runtime oficial somente se ele for requisito da primeira empresa, mantendo PostgreSQL como fonte de verdade.
+1. Configurar no painel a planilha e as credenciais exclusivas do Capitão Mor e executar a homologação externa controlada.
 
 ### Fase 2 — segurança e recuperação
 
@@ -149,7 +155,7 @@ O teste de carga continua sendo uma regressão em memória; ele não mede capaci
 
 ## Decisões que ainda dependem do usuário/produto
 
-- Google Sheets será fonte complementar, exportação ou ambos?
+- Confirmar a planilha real do Capitão Mor e manter o desenho implementado: importação complementar de agenda/configurações públicas e exportação de pedidos, com PostgreSQL como verdade operacional.
 - O painel WAIA já cobre o atendimento humano mínimo; ainda deve ser decidido se haverá integração futura com uma caixa externa.
 - Qual provedor/estratégia será adotado para reduzir duplicidade no envio Meta?
 - Quais domínio, VPS, RPO/RTO, política de retenção e orçamento por tenant serão usados?

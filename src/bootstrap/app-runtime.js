@@ -62,7 +62,19 @@ import {
   createWebhookIngestionService,
   createWebhookVerificationHandler,
 } from "../modules/webhook/index.js";
-import { createMetaGateway } from "../integrations/index.js";
+import {
+  GoogleSheetsCredentialResolver,
+  PostgresGoogleSheetsCacheRepository,
+  PostgresGoogleSheetsConfigurationResolver,
+  PostgresGoogleSheetsSnapshotMapper,
+  PostgresIntegrationOperationRepository,
+  createGoogleSheetsIntegration,
+  createGoogleSheetsSyncRunner,
+  createMetaGateway,
+  legacyCapitaoMorOrderRow,
+  startGoogleSheetsSyncScheduler,
+} from "../integrations/index.js";
+import { GoogleSheetsClient } from "../google-sheets.js";
 import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
@@ -151,6 +163,18 @@ export function createPostgresRuntime({
       }, { transaction }) },
     })
     : null;
+  const googleSheetsConfigurationResolver = new PostgresGoogleSheetsConfigurationResolver(pool);
+  const googleSheetsSnapshotMapper = new PostgresGoogleSheetsSnapshotMapper(pool);
+  const googleSheetsIntegration = createGoogleSheetsIntegration({
+    configurationResolver: googleSheetsConfigurationResolver,
+    credentialResolver: new GoogleSheetsCredentialResolver(pool, credentialVault),
+    clientFactory: ({ spreadsheetId, credentials }) => new GoogleSheetsClient({ spreadsheetId, ...credentials }),
+    cacheRepository: new PostgresGoogleSheetsCacheRepository(pool),
+    idempotencyRepository: new PostgresIntegrationOperationRepository(pool),
+    snapshotMapper: googleSheetsSnapshotMapper.map.bind(googleSheetsSnapshotMapper),
+    orderRowMapper: legacyCapitaoMorOrderRow,
+    logger: runtimeLogger,
+  });
   const authRepository = new PostgresAuthRepository(pool);
   const tokenCodec = createSessionTokenCodec({
     pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
@@ -178,6 +202,7 @@ export function createPostgresRuntime({
     conversationService,
     healthService: health,
     mediaStore,
+    googleSheetsIntegration,
   });
   const aiService = new MultiTenantAiService({
     configResolver: new PostgresAiConfigResolver(pool),
@@ -222,6 +247,8 @@ export function createPostgresRuntime({
     queue,
     health,
     metrics,
+    googleSheetsIntegration,
+    googleSheetsConfigurationResolver,
   });
 }
 
@@ -428,6 +455,7 @@ export function createWorkerRuntime({
       appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
       handoffRepository: new ConversationHandoffRepository(runtime.conversationService),
       mediaStore: runtime.mediaStore,
+      googleSheetsIntegration: runtime.googleSheetsIntegration,
       logger,
       firstMetaMessageId,
     }),
@@ -459,6 +487,11 @@ export function createWorkerRuntime({
     batchSize: config.maintenance.retentionBatchSize,
     logger,
   }), { intervalMs: config.maintenance.retentionIntervalMs, logger });
+  const googleSheets = startGoogleSheetsSyncScheduler(createGoogleSheetsSyncRunner({
+    configurationResolver: runtime.googleSheetsConfigurationResolver,
+    integration: runtime.googleSheetsIntegration,
+    logger,
+  }), { intervalMs: config.maintenance.googleSheetsSyncIntervalMs, logger });
   const heartbeat = startWorkerHeartbeat(runtime.redis, {
     intervalMs: config.maintenance.heartbeatIntervalMs,
     ttlMs: config.maintenance.heartbeatTtlMs,
@@ -469,10 +502,12 @@ export function createWorkerRuntime({
     worker,
     dispatcher,
     retention,
+    googleSheets,
     heartbeat,
     async close() {
       await dispatcher.close();
       await retention.close();
+      await googleSheets.close();
       await heartbeat.close();
       await worker.close();
       await runtime.queue.close();
