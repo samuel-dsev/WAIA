@@ -43,6 +43,46 @@ test("configuração operacional consulta somente datas existentes na tabela", a
   assert.doesNotMatch(select, /r\.created_at/u);
 });
 
+test("configuração de IA informa o estado da credencial própria", async () => {
+  const { calls, pool } = fakePool();
+  const repository = new PostgresAdminRepository(pool);
+
+  await repository.list({ resource: "ai-config", empresaId: TENANT_ID, limit: 1, page: 1, sort: "updatedAt", direction: "desc", filters: {} });
+
+  const select = calls.find(({ sql }) => /AS "credentialStatus".*FROM configuracoes_ia r/u.test(sql))?.sql;
+  assert.ok(select);
+  assert.match(select, /SELECT c\.status FROM credenciais_empresa c/u);
+  assert.match(select, /c\.id = r\.credencial_propria_id/u);
+});
+
+test("ativação do número exige token Meta e troca o principal atomicamente", async () => {
+  const calls = [];
+  let hasCredential = false;
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT status, principal FROM numeros_whatsapp/u.test(sql)) return { rows: [{ status: "pendente", principal: false }], rowCount: 1 };
+      if (/FROM credenciais_empresa/u.test(sql)) return { rows: hasCredential ? [{ "?column?": 1 }] : [], rowCount: hasCredential ? 1 : 0 };
+      if (/UPDATE numeros_whatsapp SET status/u.test(sql)) return { rows: [{ id: "number-1" }], rowCount: 1 };
+      if (/AS "id".*FROM numeros_whatsapp r/u.test(sql)) return { rows: [{ id: "number-1", empresaId: TENANT_ID, status: "ativo", principal: true }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const repository = new PostgresAdminRepository({ async connect() { return client; } });
+
+  await assert.rejects(
+    repository.update({ resource: "numbers", empresaId: TENANT_ID, id: "number-1", changes: { status: "ativo", principal: true } }),
+    /token Meta/u,
+  );
+
+  hasCredential = true;
+  const result = await repository.update({ resource: "numbers", empresaId: TENANT_ID, id: "number-1", changes: { status: "ativo", principal: true } });
+  assert.equal(result.principal, true);
+  assert.equal(calls.some(({ sql }) => /id <> \$2 AND principal = true/u.test(sql)), true);
+  assert.equal(calls.some(({ params }) => params.includes("whatsapp:number-1")), true);
+});
+
 test("unidade administrativa usa uma transação e faz rollback se a auditoria falhar", async () => {
   const { calls, pool } = fakePool();
   const repository = new PostgresAdminRepository(pool);

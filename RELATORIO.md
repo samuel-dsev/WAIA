@@ -85,10 +85,16 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Corrigido o mapeamento do usuário ao reabrir uma sessão PostgreSQL: a consulta retorna `user_id_value`, e o repositório agora preserva esse ID nas requisições administrativas posteriores ao login.
 - Foram removidas, com autorização explícita, 24 empresas `Tenant A`/`Tenant B` e 24 contatos com slugs exclusivos `priv-a-*`/`priv-b-*`, resíduos dos testes de isolamento; nenhum outro dado foi atingido.
 - Corrigida a leitura da configuração operacional: o descritor PostgreSQL de `configuracoes_empresa` não consulta mais a coluna inexistente `created_at`, preservando somente `updated_at` como definido pela migração.
+- Corrigida a ação de estado das empresas no painel: tenant em `draft` agora oferece **Ativar**, tenant ativo oferece **Suspender** e tenant suspenso oferece **Ativar**.
+- O painel de números passou a permitir completar E.164/WABA/nome, ativar e definir o principal; o backend exige token Meta ativo antes da ativação, mascara o número e troca o principal na mesma transação auditada.
+- A configuração de IA agora devolve o estado real da credencial própria vinculada; o painel deixa de exibir `not_configured` quando a chave OpenAI está ativa no cofre.
+- Corrigido o salvamento dos módulos no painel: os checkboxes agora são capturados antes da confirmação assíncrona, evitando o uso de `event.currentTarget` já invalidado e garantindo o envio do `PUT`.
+- A tela de módulos e configurações agora oferece **Adicionar Google Sheets** quando a integração ainda não existe, cria o registro inicial e abre diretamente o formulário seguro da planilha.
+- O cofre administrativo agora aceita segredos multilinha, como o JSON formatado de contas de serviço Google, preservando limite de tamanho e rejeição de caracteres de controle inseguros na criação e rotação.
 
 ## Validação executada
 
-- `npm test`: 184 testes descobertos; 178 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `npm test`: 191 testes descobertos; 185 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
 - `node --check`: 139 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.

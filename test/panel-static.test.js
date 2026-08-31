@@ -35,3 +35,29 @@ test("JavaScript do painel possui sintaxe válida", async () => {
   const panelScript = fileURLToPath(new URL("../panel/app.js", import.meta.url));
   await assert.doesNotReject(execFileAsync(process.execPath, ["--check", panelScript]));
 });
+
+test("empresa em rascunho oferece ativação em vez de suspensão", async () => {
+  const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
+  assert.match(js, /draft:\s*Object\.freeze\(\{ label: "Ativar", status: "active", className: "button-primary" \}\)/u);
+  assert.match(js, /active:\s*Object\.freeze\(\{ label: "Suspender", status: "suspended", className: "button-danger" \}\)/u);
+});
+
+test("painel permite completar e ativar o vínculo do número WhatsApp", async () => {
+  const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
+  assert.match(js, /button\("Configurar", \(\) => openNumberSettings\(item\)/u);
+  assert.match(js, /method: "PATCH", body, success: "Número WhatsApp atualizado\."/u);
+  assert.match(js, /\["principal", "Número principal"/u);
+});
+
+test("painel captura módulos antes de aguardar a confirmação", async () => {
+  const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
+  const handler = js.slice(js.indexOf("async function saveModules"), js.indexOf("async function openConversation"));
+  assert.ok(handler.indexOf("const enabledModules") < handler.indexOf("await confirmAction"));
+});
+
+test("configurações permitem criar a integração Google Sheets ausente", async () => {
+  const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
+  assert.match(js, /button\("Adicionar Google Sheets", \(\) => createGoogleSheetsIntegration/u);
+  assert.match(js, /type: "google_sheets",\s*name: "Google Sheets",\s*enabled: false/u);
+  assert.match(js, /openGoogleSheetsConfig\(integration, credentials\)/u);
+});

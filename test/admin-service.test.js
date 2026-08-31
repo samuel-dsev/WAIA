@@ -41,6 +41,26 @@ test("configurações variáveis rejeitam segredos aninhados", async () => {
   );
 });
 
+test("cofre aceita JSON de conta de serviço com múltiplas linhas", async () => {
+  const repository = new MemoryAdminRepository({ environment: "test", tenants: [{ id: "tenant-a", name: "A", status: "active" }] });
+  const received = [];
+  const credentialVault = {
+    async createCredential(input) { received.push(input.secret); return { id: input.credentialId, maskedSecret: "••••json", status: "active" }; },
+    async rotateCredential(input) { received.push(input.newSecret); return { id: input.credentialId, maskedSecret: "••••json", status: "active" }; },
+  };
+  const service = new AdminService({ repository, credentialVault, idGenerator: () => "credential-google" });
+  const secret = "{\n\t\"type\": \"service_account\",\n\t\"private_key\": \"linha-1\\nlinha-2\"\n}";
+
+  await service.createCredential({ auth: tenantAdmin, empresaId: "tenant-a", body: { provider: "google", purpose: "google_sheets:integration-a", secret } });
+  await service.rotateCredential({ auth: tenantAdmin, empresaId: "tenant-a", credentialId: "credential-google", body: { secret } });
+
+  assert.deepEqual(received, [secret, secret]);
+  await assert.rejects(
+    service.createCredential({ auth: tenantAdmin, empresaId: "tenant-a", body: { provider: "google", purpose: "google_sheets:integration-a", secret: "valor\u0000invalido" } }),
+    /secret inválido/u,
+  );
+});
+
 test("middleware administrativo devolve apenas o corpo público", () => {
   const captured = {};
   const response = { status(value) { captured.status = value; return this; }, json(value) { captured.body = value; } };

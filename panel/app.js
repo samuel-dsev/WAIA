@@ -5,6 +5,16 @@ const ROLE_LABELS = {
   tenant_admin: "Administrador da empresa",
   tenant_operator: "Operador da empresa",
 };
+const TENANT_STATUS_ACTIONS = Object.freeze({
+  draft: Object.freeze({ label: "Ativar", status: "active", className: "button-primary" }),
+  rascunho: Object.freeze({ label: "Ativar", status: "active", className: "button-primary" }),
+  active: Object.freeze({ label: "Suspender", status: "suspended", className: "button-danger" }),
+  ativa: Object.freeze({ label: "Suspender", status: "suspended", className: "button-danger" }),
+  ativo: Object.freeze({ label: "Suspender", status: "suspended", className: "button-danger" }),
+  suspended: Object.freeze({ label: "Ativar", status: "active", className: "button-primary" }),
+  suspensa: Object.freeze({ label: "Ativar", status: "active", className: "button-primary" }),
+  suspenso: Object.freeze({ label: "Ativar", status: "active", className: "button-primary" }),
+});
 
 const VIEW_DEFINITIONS = {
   dashboard: {
@@ -581,10 +591,11 @@ function rowActions(view, item) {
     group.append(button("Detalhes", () => openRecord(view, item), "button button-secondary button-small"));
   }
   if (view === "companies" && allowed("platform")) {
-    const suspended = ["suspended", "suspensa", "suspenso"].includes(String(item.status).toLocaleLowerCase("pt-BR"));
-    group.append(button(suspended ? "Ativar" : "Suspender", () => changeTenantStatus(id, suspended ? "active" : "suspended", item.name), `button ${suspended ? "button-primary" : "button-danger"} button-small`));
+    const action = TENANT_STATUS_ACTIONS[String(item.status).toLocaleLowerCase("pt-BR")];
+    if (action) group.append(button(action.label, () => changeTenantStatus(id, action.status, item.name), `button ${action.className} button-small`));
   }
   if (view === "numbers" && allowed("settings")) {
+    group.append(button("Configurar", () => openNumberSettings(item), "button button-secondary button-small"));
     group.append(button("Rotacionar credencial", () => openCredentialRotation(id), "button button-quiet button-small"));
   }
   return group;
@@ -741,7 +752,9 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   const integrationsCard = node("section", "panel-card");
   integrationsCard.append(nodeWithText("h2", "Integrações"));
   const integrationList = node("dl", "detail-list");
-  for (const integration of listFrom(integrationPayload)) {
+  const integrations = listFrom(integrationPayload);
+  const googleSheetsIntegration = integrations.find((integration) => integration.type === "google_sheets");
+  for (const integration of integrations) {
     integrationList.append(nodeWithText("dt", integration.name || integration.provider || "Integração"), valueNode(integration.health || integration.status, "status"));
     if (integration.type === "google_sheets") {
       integrationList.append(nodeWithText("dt", "Configuração"), button(
@@ -751,7 +764,13 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
       ));
     }
   }
-  if (!integrationList.children.length) integrationList.append(nodeWithText("dt", "Estado"), valueNode("not_configured", "status"));
+  if (!googleSheetsIntegration) {
+    if (!integrationList.children.length) integrationList.append(nodeWithText("dt", "Estado"), valueNode("not_configured", "status"));
+    integrationList.append(
+      nodeWithText("dt", "Google Sheets"),
+      button("Adicionar Google Sheets", () => createGoogleSheetsIntegration(listFrom(credentialPayload)), "button button-secondary button-small"),
+    );
+  }
   integrationsCard.append(integrationList);
 
   const credentialsCard = node("section", "panel-card");
@@ -827,6 +846,26 @@ function openPaymentCredential() {
   });
 }
 
+async function createGoogleSheetsIntegration(credentials) {
+  try {
+    const integration = await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations`, {
+      method: "POST",
+      body: {
+        type: "google_sheets",
+        name: "Google Sheets",
+        enabled: false,
+        requiredForConfirmation: false,
+        status: "nao_configurada",
+        configuration: {},
+      },
+    });
+    openGoogleSheetsConfig(integration, credentials);
+  } catch (error) {
+    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    toast(error.message || "Não foi possível criar a integração Google Sheets.");
+  }
+}
+
 function openGoogleSheetsConfig(integration, credentials) {
   const configuration = integration.configuration || {};
   const purpose = `google_sheets:${integration.id}`;
@@ -889,9 +928,9 @@ function openCredentialUpdate(credentialId) {
 async function saveModules(event) {
   event.preventDefault();
   if (!allowed("settings")) return;
+  const enabledModules = [...event.currentTarget.elements.modules].filter((input) => input.checked).map((input) => input.value);
   const confirmed = await confirmAction("Alterar módulos pode interromper fluxos em andamento. Deseja continuar?", "Salvar módulos");
   if (!confirmed) return;
-  const enabledModules = [...event.currentTarget.elements.modules].filter((input) => input.checked).map((input) => input.value);
   await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/modules`, {
     method: "PUT",
     body: { enabledModules },
@@ -1096,6 +1135,23 @@ function openNumberForm() {
   ], async (values) => performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/numbers`, {
     method: "POST", body: { ...nonEmpty(values), status: "pendente", principal: false }, success: "Número vinculado.",
   }));
+}
+
+function openNumberSettings(number) {
+  openFormDialog("Configurar número WhatsApp", [
+    ["numeroE164", "Número em formato +5511...", "tel", true],
+    ["wabaId", "WABA ID", "text", false],
+    ["nomeVerificado", "Nome verificado", "text", false],
+    ["status", "Estado", "select", true, [["pendente", "Pendente"], ["ativo", "Ativo"], ["inativo", "Inativo"]]],
+    ["principal", "Número principal", "select", true, [["false", "Não"], ["true", "Sim"]]],
+  ], async (values) => {
+    const body = nonEmpty(values);
+    body.principal = body.principal === "true";
+    if (body.principal && body.status !== "ativo") throw new Error("Defina o estado como Ativo para tornar este número principal.");
+    await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/numbers/${encodeURIComponent(number.id)}`, {
+      method: "PATCH", body, success: "Número WhatsApp atualizado.",
+    });
+  }, { ...number, principal: String(Boolean(number.principal)) });
 }
 
 function openUserForm() {

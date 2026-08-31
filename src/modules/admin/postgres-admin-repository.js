@@ -49,7 +49,11 @@ const RESOURCES = Object.freeze({
   "ai-config": descriptor({
     table: "configuracoes_ia", id: "empresa_id", singleton: true,
     fields: { enabled: "habilitada", provider: "provedor", model: "modelo", prompt: "prompt", personality: "personalidade", keyType: "tipo_chave", ownCredentialId: "credencial_propria_id", monthlyTokenLimit: "limite_tokens_mensal", monthlyCostLimit: "limite_custo_mensal", alertPercent: "alerta_percentual", maxHistoryMessages: "max_historico_mensagens", maxOutputTokens: "max_output_tokens", fallbackMessage: "mensagem_contingencia" },
-    select: { id: "empresa_id" }, sorts: { updatedAt: "updated_at" },
+    select: {
+      id: "empresa_id",
+      credentialStatus: "(SELECT c.status FROM credenciais_empresa c WHERE c.empresa_id = r.empresa_id AND c.id = r.credencial_propria_id LIMIT 1)",
+    },
+    sorts: { updatedAt: "updated_at" },
   }),
   "runtime-config": descriptor({
     table: "configuracoes_empresa", id: "empresa_id", singleton: true,
@@ -130,7 +134,7 @@ const RESOURCES = Object.freeze({
 
 function quoteIdentifier(value) { return `"${String(value).replaceAll('"', '""')}"`; }
 function qualified(alias, expression) {
-  if (expression.startsWith("'") || expression.includes("::")) return expression.replace(/^([a-z_]+)/u, `${alias}.$1`);
+  if (expression.startsWith("(") || expression.startsWith("'") || expression.includes("::")) return expression.replace(/^([a-z_]+)/u, `${alias}.$1`);
   return `${alias}.${expression}`;
 }
 function selectSql(definition) {
@@ -679,6 +683,39 @@ export class PostgresAdminRepository {
     if (resource === "users") return this.#updateUser({ empresaId, id, changes, transaction });
     const definition = resourceDefinition(resource);
     return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
+      let effectiveChanges = changes;
+      if (resource === "numbers") {
+        const current = (await client.query(
+          "SELECT status, principal FROM numeros_whatsapp WHERE empresa_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
+          [empresaId, id],
+        )).rows[0];
+        if (!current) return null;
+        const nextStatus = changes.status ?? current.status;
+        const nextPrincipal = changes.principal ?? current.principal;
+        if (nextPrincipal && nextStatus !== "ativo") {
+          throw new AdminValidationError("Somente um número ativo pode ser definido como principal.");
+        }
+        if (changes.status === "ativo" || changes.principal === true) {
+          const credential = await client.query(
+            `SELECT 1
+               FROM credenciais_empresa
+              WHERE empresa_id = $1 AND provedor = 'meta' AND status = 'ativa'
+                AND finalidade IN ($2, 'whatsapp')
+              LIMIT 1`,
+            [empresaId, `whatsapp:${id}`],
+          );
+          if (!credential.rowCount) {
+            throw new AdminValidationError("Cadastre o token Meta deste número antes de ativá-lo.");
+          }
+        }
+        effectiveChanges = nextStatus === "ativo" ? { ...changes } : { ...changes, principal: false };
+        if (nextPrincipal) {
+          await client.query(
+            "UPDATE numeros_whatsapp SET principal = false WHERE empresa_id = $1 AND id <> $2 AND principal = true AND deleted_at IS NULL",
+            [empresaId, id],
+          );
+        }
+      }
       if (resource === "ai-config" && changes.ownCredentialId) {
         const credential = await client.query(
           "SELECT 1 FROM credenciais_empresa WHERE empresa_id = $1 AND id = $2 AND provedor = 'openai' AND status = 'ativa'",
@@ -693,7 +730,7 @@ export class PostgresAdminRepository {
         );
         if (!credential.rowCount) throw new AdminValidationError("Credencial de pagamento ativa não encontrada para esta empresa.");
       }
-      const entries = Object.entries(changes).filter(([field]) => definition.fields[field]);
+      const entries = Object.entries(effectiveChanges).filter(([field]) => definition.fields[field]);
       if (!entries.length) return this.get({ resource, empresaId, id });
       const params = [empresaId, id];
       const assignments = entries.map(([field, value]) => { params.push(inputValue(resource, field, value)); return `${definition.fields[field]} = $${params.length}`; });

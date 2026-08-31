@@ -48,6 +48,14 @@ function requiredText(value, field, max = 200) {
   return text;
 }
 
+function requiredSecret(value, max = 20_000) {
+  const secret = String(value || "").trim();
+  if (!secret || secret.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(secret)) {
+    throw new AdminValidationError("secret inválido.", { field: "secret" });
+  }
+  return secret;
+}
+
 function requiredHumanMessage(value) {
   const text = String(value || "").replace(/\r\n?/gu, "\n").trim();
   if (!text || text.length > 4_096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) {
@@ -145,6 +153,24 @@ function validatedPayload(resource, body, { partial = false } = {}) {
   }
   if (Object.keys(output).length === 0) throw new AdminValidationError("Nenhum campo válido foi informado.");
   return output;
+}
+
+function normalizedResourcePayload(resource, payload) {
+  if (resource !== "numbers") return payload;
+  const normalized = { ...payload };
+  if (Object.hasOwn(normalized, "status") && !["pendente", "ativo", "inativo", "falha", "revogado"].includes(normalized.status)) {
+    throw new AdminValidationError("Estado do número WhatsApp inválido.", { field: "status" });
+  }
+  if (Object.hasOwn(normalized, "numeroE164")) {
+    if (normalized.numeroE164 !== null && !/^\+[1-9][0-9]{7,14}$/u.test(normalized.numeroE164)) {
+      throw new AdminValidationError("O número deve usar o formato internacional, como +5511999999999.", { field: "numeroE164" });
+    }
+    normalized.numeroMascarado = normalized.numeroE164 ? `••••${normalized.numeroE164.slice(-4)}` : null;
+  }
+  if (normalized.principal === true && Object.hasOwn(normalized, "status") && normalized.status !== "ativo") {
+    throw new AdminValidationError("Somente um número ativo pode ser definido como principal.", { field: "principal" });
+  }
+  return normalized;
 }
 
 function pagination(definition, query = {}) {
@@ -422,7 +448,7 @@ export class AdminService {
     if (!definition || ["none", "credential"].includes(definition.write)) throw new AdminForbiddenError();
     assertTenantBody(empresaId, body);
     await this.#tenant(auth, empresaId, definition, { write: true, action: `${resource}.create`, resource });
-    const payload = validatedPayload(resource, body);
+    const payload = normalizedResourcePayload(resource, validatedPayload(resource, body));
     const id = this.idGenerator();
     const record = await this.#auditedMutation({
       auth,
@@ -439,7 +465,7 @@ export class AdminService {
     if (!definition || ["none", "credential"].includes(definition.write)) throw new AdminForbiddenError();
     assertTenantBody(empresaId, body);
     await this.#tenant(auth, empresaId, definition, { write: true, operatorAllowed: definition.write === "operator", action: `${resource}.update`, resource });
-    const payload = validatedPayload(resource, body, { partial: true });
+    const payload = normalizedResourcePayload(resource, validatedPayload(resource, body, { partial: true }));
     if (resource === "users"
       && normalizedAdminAuth(auth).platformRole !== "platform_admin"
       && Object.keys(payload).some((field) => ["email", "name", "status", "initialPassword"].includes(field))
@@ -490,7 +516,7 @@ export class AdminService {
       credentialId: body.credentialId || this.idGenerator(),
       provider: requiredText(body.provider, "provider"),
       purpose: requiredText(body.purpose, "purpose"),
-      secret: requiredText(body.secret, "secret", 20_000),
+      secret: requiredSecret(body.secret),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     });
@@ -503,7 +529,7 @@ export class AdminService {
     return sanitizedCredentialView(await this.credentialVault.rotateCredential({
       empresaId,
       credentialId: requiredText(credentialId, "credentialId"),
-      newSecret: requiredText(body?.secret, "secret", 20_000),
+      newSecret: requiredSecret(body?.secret),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     }));
