@@ -34,6 +34,8 @@ Há duas opções:
 
 No mesmo formulário, habilite a IA, escolha o modelo, prompt, personalidade e limites. O WAIA usa a Responses API para perguntas livres; menu, compra, PIX, comprovante e confirmação continuam determinísticos. O runtime não envia PIX nem bytes do comprovante ao modelo.
 
+Regras públicas do local, como vestimenta e benefícios de aniversariante, devem ser cadastradas em **Módulos e configurações → Identidade e atendimento → Regras do estabelecimento**. Elas entram no contexto validado da empresa enviado à IA, subordinadas às regras imutáveis da plataforma; não use esse campo para credenciais, PIX ou dados pessoais.
+
 ## 4. Google Sheets
 
 ### Preparar o Google

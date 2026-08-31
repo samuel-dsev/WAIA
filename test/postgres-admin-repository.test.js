@@ -40,6 +40,7 @@ test("configuração operacional consulta somente datas existentes na tabela", a
   const select = calls.find(({ sql }) => /AS "id".*FROM configuracoes_empresa r/u.test(sql))?.sql;
   assert.ok(select);
   assert.match(select, /r\.updated_at AS "updatedAt"/u);
+  assert.match(select, /r\.regras_estabelecimento AS "establishmentRules"/u);
   assert.doesNotMatch(select, /r\.created_at/u);
 });
 

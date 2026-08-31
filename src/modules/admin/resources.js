@@ -58,7 +58,7 @@ const definitions = {
     singleton: true,
     fields: {
       greeting: "string", fallbackMessage: "string", address: "string?", menuUrl: "string?",
-      birthdayRule: "string?", schedules: "object", publicReplies: "array", routing: "object",
+      birthdayRule: "string?", establishmentRules: "string?", schedules: "object", publicReplies: "array", routing: "object",
     },
     filters: [],
     sorts: ["updatedAt"],

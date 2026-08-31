@@ -61,3 +61,9 @@ test("configurações permitem criar a integração Google Sheets ausente", asyn
   assert.match(js, /type: "google_sheets",\s*name: "Google Sheets",\s*enabled: false/u);
   assert.match(js, /openGoogleSheetsConfig\(integration, credentials\)/u);
 });
+
+test("identidade e atendimento permitem editar regras do estabelecimento", async () => {
+  const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
+  assert.match(js, /nodeWithText\("dt", "Regras do estabelecimento"\), valueNode\(runtimeConfig\.establishmentRules\)/u);
+  assert.match(js, /\["establishmentRules", "Regras do estabelecimento", "textarea", false\]/u);
+});

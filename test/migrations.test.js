@@ -58,3 +58,15 @@ test("jobs falhos preservam origem, decisão e novo job de retentativa", async (
   assert.match(migration, /retry_job_id IS NOT NULL/u);
   assert.match(migration, /jobs_falhos_retry_job_fkey/u);
 });
+
+test("regras do estabelecimento possuem coluna própria e carga inicial do Capitão Mor", async () => {
+  const migration = await readFile(new URL("../db/migrations/015_establishment_rules.sql", import.meta.url), "utf8");
+  const existingTenantBackfill = await readFile(new URL("../db/migrations/016_capitao_mor_establishment_rules.sql", import.meta.url), "utf8");
+  const seed = await readFile(new URL("../db/seeds/002_capitao_mor_demo.sql", import.meta.url), "utf8");
+  assert.match(migration, /ADD COLUMN regras_estabelecimento text NOT NULL DEFAULT ''/u);
+  assert.match(migration, /não é permitida a entrada usando boné/u);
+  assert.match(existingTenantBackfill, /company\.slug = 'capitao-mor'/u);
+  assert.match(existingTenantBackfill, /config\.regras_estabelecimento = ''/u);
+  assert.match(seed, /regras_estabelecimento/u);
+  assert.match(seed, /aniversariante do mês tem entrada VIP/u);
+});

@@ -57,7 +57,7 @@ const RESOURCES = Object.freeze({
   }),
   "runtime-config": descriptor({
     table: "configuracoes_empresa", id: "empresa_id", singleton: true,
-    fields: { greeting: "saudacao", fallbackMessage: "mensagem_fallback", address: "endereco", menuUrl: "link_cardapio", birthdayRule: "regra_aniversariante", schedules: "horarios", publicReplies: "respostas_publicas", routing: "roteamento" },
+    fields: { greeting: "saudacao", fallbackMessage: "mensagem_fallback", address: "endereco", menuUrl: "link_cardapio", birthdayRule: "regra_aniversariante", establishmentRules: "regras_estabelecimento", schedules: "horarios", publicReplies: "respostas_publicas", routing: "roteamento" },
     dates: { updatedAt: "updated_at" },
     select: { id: "empresa_id" }, sorts: { updatedAt: "updated_at" },
   }),

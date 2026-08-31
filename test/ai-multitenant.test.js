@@ -106,6 +106,18 @@ test("prompt, contexto e histórico permanecem isolados por empresa", async () =
   assert.equal(callA.store, false);
 });
 
+test("regras públicas do estabelecimento chegam ao contexto processado pelo modelo", async () => {
+  const setupAi = setup({
+    configs: [config("tenant-a", { allowedContextKeys: ["identity"] })],
+    responder: async () => ({ output_text: "Regra informada.", usage: { input_tokens: 5, output_tokens: 2 } }),
+  });
+  await setupAi.service.reply(request("tenant-a", {
+    context: { identity: { name: "Bar Capitão Mor", establishmentRules: "Não é permitida a entrada usando boné." } },
+  }));
+  const call = setupAi.clientFactory.requests[0].request;
+  assert.match(JSON.stringify(call.input), /Não é permitida a entrada usando boné/u);
+});
+
 test("limite mensal bloqueia somente o tenant que consumiu sua quota", async () => {
   const setupAi = setup({
     configs: [

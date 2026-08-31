@@ -6,7 +6,7 @@ SELECT set_config('app.is_platform_admin', 'true', true);
 
 INSERT INTO configuracoes_empresa (
   empresa_id, saudacao, mensagem_fallback, endereco, link_cardapio,
-  regra_aniversariante, respostas_publicas, roteamento
+  regra_aniversariante, regras_estabelecimento, respostas_publicas, roteamento
 )
 VALUES (
   '00000000-0000-4000-8000-000000000001',
@@ -14,7 +14,8 @@ VALUES (
   'Consigo ajudar apenas com informações validadas desta empresa. Consulte o menu ou fale com a equipe.',
   'Rua Demonstração, 100 — Centro',
   'https://example.invalid/capitao-mor/cardapio',
-  'Consulte elegibilidade e disponibilidade com a equipe; nenhum benefício é confirmado automaticamente.',
+  'O aniversariante do mês tem entrada VIP. Se levar até 10 convidados, também terá direito a um acompanhante VIP. Caso contrário, somente o aniversariante terá entrada VIP.',
+  E'Vestimenta: não é permitida a entrada usando boné, regata, corrente de prata ou camisa de time de futebol.\n\nAniversariante: o aniversariante do mês tem entrada VIP. Se levar até 10 convidados, também terá direito a um acompanhante VIP. Caso contrário, somente o aniversariante terá entrada VIP.',
   '[{"module":"catalog","action":"catalog.address","text":"Endereço demonstrativo: Rua Demonstração, 100 — Centro."},{"module":"catalog","action":"catalog.menu","text":"Cardápio demonstrativo: https://example.invalid/capitao-mor/cardapio"},{"module":"events","action":"events.birthday_rule","text":"Regra demonstrativa: consulte a equipe; nenhum benefício é automático."}]'::jsonb,
   '{"greetings":["oi","olá","bom dia","boa tarde","boa noite"],"fallbackAction":"ai_freeform.reply"}'::jsonb
 )

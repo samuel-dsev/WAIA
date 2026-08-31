@@ -206,6 +206,7 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
   definition.runtime.payments = {
     pix: { key: "pix-privado-nao-enviar", recipient: "favorecida-privada" },
   };
+  definition.runtime.identity.establishmentRules = "Não é permitida a entrada usando boné.";
   definition.publicReplies = [{
     module: "catalog",
     action: "catalog.address",
@@ -249,6 +250,7 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
   await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-ai" });
   assert.match(sent[0].text, /Quer saber mais alguma coisa\?$/u);
   assert.match(JSON.stringify(requests[0].context), /Endereço público/u);
+  assert.match(JSON.stringify(requests[0].context), /Não é permitida a entrada usando boné/u);
   assert.doesNotMatch(JSON.stringify(requests[0].context), /pix-privado-nao-enviar|favorecida-privada/u);
 });
 

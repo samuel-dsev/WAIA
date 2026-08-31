@@ -78,7 +78,12 @@ export class PostgresTenantDefinitionRepository {
         runtime: {
           empresaId,
           version: Number(company.versao_configuracao),
-          identity: { name: company.nome_exibicao, welcomeMessage: settings.saudacao, fallbackMessage: settings.mensagem_fallback },
+          identity: {
+            name: company.nome_exibicao,
+            welcomeMessage: settings.saudacao,
+            fallbackMessage: settings.mensagem_fallback,
+            establishmentRules: settings.regras_estabelecimento,
+          },
           enabledModules,
           menu: {
             text: menuRows[0]?.mensagem || settings.saudacao,

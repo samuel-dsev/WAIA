@@ -734,6 +734,7 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
     nodeWithText("dt", "Contingência"), valueNode(runtimeConfig.fallbackMessage),
     nodeWithText("dt", "Endereço"), valueNode(runtimeConfig.address),
     nodeWithText("dt", "Cardápio"), valueNode(runtimeConfig.menuUrl),
+    nodeWithText("dt", "Regras do estabelecimento"), valueNode(runtimeConfig.establishmentRules),
   );
   runtimeCard.append(runtimeList, button("Editar atendimento", () => openRuntimeConfig(runtimeConfig), "button button-secondary"));
 
@@ -797,6 +798,7 @@ function openRuntimeConfig(current) {
     ["fallbackMessage", "Mensagem de contingência", "text", true],
     ["address", "Endereço", "text", false], ["menuUrl", "URL do cardápio", "url", false],
     ["birthdayRule", "Regra de aniversariante", "text", false],
+    ["establishmentRules", "Regras do estabelecimento", "textarea", false],
   ], async (values) => performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/runtime-config/${encodeURIComponent(state.selectedEmpresaId)}`, {
     method: "PATCH", body: nonEmpty(values), success: "Atendimento atualizado.",
   }), current);

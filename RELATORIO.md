@@ -12,7 +12,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
 - Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com quatorze migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- PostgreSQL como fonte de verdade, com dezesseis migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
 - Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
 - Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
 - Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.
@@ -97,16 +97,19 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O worker agora preserva o `selectionId` de respostas interativas; botões deixam de cair no fallback da IA. O roteamento também reconhece aliases dentro de frases naturais e o Capitão Mor ganhou cópia direta para cardápio, seleção da noite, evento, PIX, comprovante e contingência.
 - Os fluxos conversacionais passaram a aceitar novas intenções antes da etapa pendente: trocar sexta por sábado substitui o evento, perguntas naturais com dia abrem a programação correspondente e `oi` reinicia o menu. Respostas livres da IA recebem apenas a base pública do tenant, sem PIX/credenciais, usam o histórico e terminam com uma pergunta configurável.
 - `MASTER_KEYRING` passou a ser interpolado como escalar YAML citado no Compose; isso preserva as duas chaves finais do JSON em versões recentes do Docker Compose e evita o ciclo de reinício da API/worker observado após uma recriação.
+- A área **Módulos e configurações → Identidade e atendimento** ganhou o campo multilinha **Regras do estabelecimento**, persistido por tenant e auditado pelo fluxo administrativo existente.
+- As regras do Capitão Mor foram cadastradas com as restrições de vestimenta e a política de aniversariante solicitadas; o backfill usa o `slug` único da empresa e preserva regras já preenchidas em outros tenants.
+- O carregador inclui as regras em `TenantRuntimeConfig.identity`; o worker as envia somente dentro do contexto público permitido da empresa, processado pela IA sob as guardrails imutáveis da plataforma e sem PIX, credenciais ou mídia privada.
 
 ## Validação executada
 
-- `npm test`: 198 testes descobertos; 192 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
-- `node --check`: 139 arquivos JavaScript válidos.
+- `npm test`: 202 testes descobertos; 196 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `node --check`: 140 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
 - Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
 - PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
-- Migração incremental concluída; quatorze migrações descobertas e `014_google_sheets_runtime.sql` aplicada uma vez.
+- Migração incremental concluída; dezesseis migrações descobertas, com `015_establishment_rules.sql` e `016_capitao_mor_establishment_rules.sql` aplicadas uma vez cada.
 - Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
 - API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
 - `GET /health/ready` retornou HTTP 200.
@@ -125,6 +128,8 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O teste de regressão do repositório PostgreSQL confirmou que a sessão reconstruída mantém o ID do usuário.
 - Após reconstruir a API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 em `/api/admin/auth/session`, `/api/admin/tenants` e `/api/admin/dashboard`.
 - Após a correção da configuração operacional e novo build da API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 nos cinco recursos usados pela tela: módulos, IA, integrações, configuração operacional e credenciais; o container permaneceu saudável.
+- A regressão direcionada das regras aprovou 55 de 55 testes; ela comprovou formulário, descritor administrativo, parsing do runtime, envio ao contexto processado pelo modelo e exclusão dos dados privados de pagamento.
+- No PostgreSQL real, a nova coluna foi criada e o tenant `capitao-mor` recebeu 294 caracteres de regras; após rebuild, API e worker permaneceram saudáveis e `/health/ready` retornou HTTP 200.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 

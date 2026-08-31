@@ -163,6 +163,7 @@ export function parseTenantRuntimeConfig(input) {
       name: requiredText(input.identity?.name, "identity.name", { max: 160 }),
       welcomeMessage: optionalText(input.identity?.welcomeMessage, "identity.welcomeMessage", { max: 1000 }),
       fallbackMessage: optionalText(input.identity?.fallbackMessage, "identity.fallbackMessage", { max: 1000 }),
+      establishmentRules: optionalText(input.identity?.establishmentRules, "identity.establishmentRules", { max: 10_000 }),
     },
     enabledModules,
     menu: {

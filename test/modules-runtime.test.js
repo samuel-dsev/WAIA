@@ -38,7 +38,11 @@ function runtime(config, dependencies = {}) {
 
 const barConfig = {
   empresaId: "empresa-bar",
-  identity: { name: "Bar da Praça", welcomeMessage: "Bem-vindo ao Bar da Praça" },
+  identity: {
+    name: "Bar da Praça",
+    welcomeMessage: "Bem-vindo ao Bar da Praça",
+    establishmentRules: "Não é permitida a entrada usando boné.",
+  },
   enabledModules: ["catalog", "orders", "events", "payments", "human_handoff"],
   menu: {
     text: "Escolha uma opção do Bar da Praça:",
@@ -104,6 +108,11 @@ test("registro contém exatamente as oito capacidades canônicas", () => {
   assert.deepEqual(registry.keys(), MODULE_KEYS);
   assert.equal(registry.resolveAction("catalog.list").key, "catalog");
   assert.equal(registry.resolveAction("human_handoff.request").key, "human_handoff");
+});
+
+test("TenantRuntimeConfig preserva as regras públicas do estabelecimento na identidade", () => {
+  const config = parseTenantRuntimeConfig(barConfig);
+  assert.equal(config.identity.establishmentRules, "Não é permitida a entrada usando boné.");
 });
 
 test("TenantRuntimeConfig rejeita módulo desconhecido, menu desabilitado e ação de outro módulo", () => {
