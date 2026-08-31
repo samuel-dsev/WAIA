@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 30 de agosto de 2026 após integrar o Google Sheets do Capitão Mor ao runtime SaaS oficial.
+Atualizado em 31 de agosto de 2026 após corrigir e validar a tela de módulos e configurações do Capitão Mor.
 
 ## Diagnóstico executivo
 
@@ -84,10 +84,11 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Adicionado `docs/CONFIGURACAO_INTEGRACOES.md` com o fluxo de configuração Meta, OpenAI, Google Sheets e segredos de infraestrutura.
 - Corrigido o mapeamento do usuário ao reabrir uma sessão PostgreSQL: a consulta retorna `user_id_value`, e o repositório agora preserva esse ID nas requisições administrativas posteriores ao login.
 - Foram removidas, com autorização explícita, 24 empresas `Tenant A`/`Tenant B` e 24 contatos com slugs exclusivos `priv-a-*`/`priv-b-*`, resíduos dos testes de isolamento; nenhum outro dado foi atingido.
+- Corrigida a leitura da configuração operacional: o descritor PostgreSQL de `configuracoes_empresa` não consulta mais a coluna inexistente `created_at`, preservando somente `updated_at` como definido pela migração.
 
 ## Validação executada
 
-- `npm test`: 183 testes descobertos; 177 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
+- `npm test`: 184 testes descobertos; 178 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
 - `node --check`: 139 arquivos JavaScript válidos.
 - `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
 - `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
@@ -111,6 +112,7 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - A nova tabela `integracao_operacoes` foi comprovada com privilégios DML do papel restrito e `ENABLE/FORCE ROW LEVEL SECURITY`; API retornou `/health/ready` 200 e worker permaneceu saudável sem credencial Google real.
 - O teste de regressão do repositório PostgreSQL confirmou que a sessão reconstruída mantém o ID do usuário.
 - Após reconstruir a API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 em `/api/admin/auth/session`, `/api/admin/tenants` e `/api/admin/dashboard`.
+- Após a correção da configuração operacional e novo build da API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 nos cinco recursos usados pela tela: módulos, IA, integrações, configuração operacional e credenciais; o container permaneceu saudável.
 
 O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
 

@@ -31,6 +31,18 @@ test("repositório PostgreSQL usa descritor fixo e filtro redundante de empresa"
   await assert.rejects(repository.list({ resource: "contatos; DROP TABLE empresas", empresaId: TENANT_ID }), /suportado/u);
 });
 
+test("configuração operacional consulta somente datas existentes na tabela", async () => {
+  const { calls, pool } = fakePool();
+  const repository = new PostgresAdminRepository(pool);
+
+  await repository.list({ resource: "runtime-config", empresaId: TENANT_ID, limit: 1, page: 1, sort: "updatedAt", direction: "desc", filters: {} });
+
+  const select = calls.find(({ sql }) => /AS "id".*FROM configuracoes_empresa r/u.test(sql))?.sql;
+  assert.ok(select);
+  assert.match(select, /r\.updated_at AS "updatedAt"/u);
+  assert.doesNotMatch(select, /r\.created_at/u);
+});
+
 test("unidade administrativa usa uma transação e faz rollback se a auditoria falhar", async () => {
   const { calls, pool } = fakePool();
   const repository = new PostgresAdminRepository(pool);

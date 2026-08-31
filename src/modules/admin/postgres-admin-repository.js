@@ -23,8 +23,8 @@ const fromMemberStatus = mapValue(MEMBER_STATUS_FROM_DB);
 
 const commonDates = { createdAt: "created_at", updatedAt: "updated_at" };
 
-function descriptor({ table, alias = "r", id = "id", fields, select = {}, filters = {}, sorts = {}, search = [], softDelete = false, singleton = false }) {
-  return Object.freeze({ table, alias, id, fields: Object.freeze(fields), select: Object.freeze({ id, empresaId: "empresa_id", ...fields, ...commonDates, ...select }), filters: Object.freeze(filters), sorts: Object.freeze(sorts), search: Object.freeze(search), softDelete, singleton });
+function descriptor({ table, alias = "r", id = "id", fields, select = {}, dates = commonDates, filters = {}, sorts = {}, search = [], softDelete = false, singleton = false }) {
+  return Object.freeze({ table, alias, id, fields: Object.freeze(fields), select: Object.freeze({ id, empresaId: "empresa_id", ...fields, ...dates, ...select }), filters: Object.freeze(filters), sorts: Object.freeze(sorts), search: Object.freeze(search), softDelete, singleton });
 }
 
 const RESOURCES = Object.freeze({
@@ -54,6 +54,7 @@ const RESOURCES = Object.freeze({
   "runtime-config": descriptor({
     table: "configuracoes_empresa", id: "empresa_id", singleton: true,
     fields: { greeting: "saudacao", fallbackMessage: "mensagem_fallback", address: "endereco", menuUrl: "link_cardapio", birthdayRule: "regra_aniversariante", schedules: "horarios", publicReplies: "respostas_publicas", routing: "roteamento" },
+    dates: { updatedAt: "updated_at" },
     select: { id: "empresa_id" }, sorts: { updatedAt: "updated_at" },
   }),
   modules: descriptor({
