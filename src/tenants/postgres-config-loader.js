@@ -1,6 +1,66 @@
 import { withTenantTransaction } from "../infra/postgres/transaction.js";
+import {
+  materializeLegacyTenantDefinition,
+  verifyCompiledTenantRuntimeConfigV2,
+} from "../modules/configuration/index.js";
 
 const actionModule = (action) => String(action || "").split(".")[0];
+
+export class TenantRuntimeConfigurationError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "TenantRuntimeConfigurationError";
+    this.code = code;
+  }
+}
+
+function runtimeConfigurationError(code, message) {
+  return new TenantRuntimeConfigurationError(code, message);
+}
+
+async function loadVersionedDefinition(client, company, empresaId, paymentResolver) {
+  if (!company.configuracao_ativa_versao) {
+    throw runtimeConfigurationError(
+      "ACTIVE_CONFIGURATION_REQUIRED",
+      "A empresa versionada não possui uma revisão ativa.",
+    );
+  }
+  if (Number(company.versao_configuracao) !== Number(company.configuracao_ativa_versao)) {
+    throw runtimeConfigurationError(
+      "ACTIVE_CONFIGURATION_POINTER_INVALID",
+      "A versão ativa da empresa está inconsistente.",
+    );
+  }
+  const revision = (await client.query(
+    `SELECT config_version, checksum, configuracao_compilada
+       FROM configuracoes_revisoes
+      WHERE empresa_id = $1 AND config_version = $2`,
+    [empresaId, company.configuracao_ativa_versao],
+  )).rows[0];
+  if (!revision) {
+    throw runtimeConfigurationError(
+      "ACTIVE_CONFIGURATION_NOT_FOUND",
+      "A revisão ativa da empresa não foi encontrada.",
+    );
+  }
+  const compiled = revision.configuracao_compilada;
+  const revisionMatchesEnvelope = compiled?.empresaId === empresaId
+    && compiled?.configVersion === Number(revision.config_version)
+    && compiled?.checksum === revision.checksum;
+  if (!revisionMatchesEnvelope || !verifyCompiledTenantRuntimeConfigV2(compiled)) {
+    throw runtimeConfigurationError(
+      "ACTIVE_CONFIGURATION_CORRUPTED",
+      "A revisão ativa da empresa falhou na verificação de integridade.",
+    );
+  }
+  const paymentsEnabled = compiled.configuration.modules.includes("payments");
+  const payment = paymentsEnabled && paymentResolver
+    ? await paymentResolver.resolve({ empresaId, type: "pix" })
+    : null;
+  return materializeLegacyTenantDefinition(compiled, {
+    ...(paymentsEnabled ? { payment } : {}),
+  });
+}
 
 export class PostgresTenantDefinitionRepository {
   constructor(pool, { paymentResolver } = {}) {
@@ -14,6 +74,18 @@ export class PostgresTenantDefinitionRepository {
       // sequenciais; executar Promise.all no mesmo client causa concorrência
       // não suportada e pode trocar resultados entre etapas no pg >= 9.
       const companyResult = await client.query("SELECT * FROM empresas WHERE id = $1 AND deleted_at IS NULL", [empresaId]);
+      const company = companyResult.rows[0];
+      if (!company) return null;
+      const configurationMode = company.configuracao_runtime_modo;
+      if (configurationMode === "versionado") {
+        return loadVersionedDefinition(client, company, empresaId, this.paymentResolver);
+      }
+      if (configurationMode !== "legado") {
+        throw runtimeConfigurationError(
+          "CONFIGURATION_MODE_UNSUPPORTED",
+          "O modo de configuração da empresa não é suportado.",
+        );
+      }
       const settingsResult = await client.query("SELECT * FROM configuracoes_empresa WHERE empresa_id = $1", [empresaId]);
       const modulesResult = await client.query("SELECT module_key, configuracao FROM modulos_empresa WHERE empresa_id = $1 AND habilitado", [empresaId]);
       const menuResult = await client.query(
@@ -53,8 +125,6 @@ export class PostgresTenantDefinitionRepository {
             GROUP BY p.id, p.sku, p.nome, p.descricao, p.ativo ORDER BY p.nome, p.id`,
           [empresaId],
         );
-      const company = companyResult.rows[0];
-      if (!company) return null;
       const settings = settingsResult.rows[0] || {};
       const enabledModules = modulesResult.rows.map((row) => row.module_key);
       const moduleConfigurations = new Map(modulesResult.rows.map((row) => [row.module_key, row.configuracao || {}]));

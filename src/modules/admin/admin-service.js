@@ -22,6 +22,7 @@ const OPERATOR_ASSIGNABLE_PERMISSIONS = new Set([
 const TENANT_MODULES = Object.freeze([
   "catalog", "orders", "events", "appointments", "payments", "human_handoff", "ai_freeform", "external_integrations",
 ]);
+const ONBOARDING_RESOURCE = Object.freeze({ read: "admin", write: "admin" });
 
 function slugFromName(value) {
   const slug = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/gu, "")
@@ -222,9 +223,10 @@ function sanitizedAdminView(value) {
 }
 
 export class AdminService {
-  constructor({ repository, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
+    this.onboardingService = onboardingService;
     this.credentialVault = credentialVault;
     this.conversationService = conversationService;
     this.healthService = healthService;
@@ -316,6 +318,9 @@ export class AdminService {
   async createTenant({ auth, body }) {
     await this.#platform(auth, "tenant.create", "tenants");
     const input = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+    if (Object.hasOwn(input, "status")) {
+      throw new AdminValidationError("O status é controlado pelo fluxo de onboarding.", { field: "status" });
+    }
     const payload = validatedPayload("tenants", {
       slug: input.slug || slugFromName(input.name),
       name: input.name,
@@ -323,7 +328,7 @@ export class AdminService {
       identity: input.identity == null || input.identity === "" ? null : input.identity,
       timezone: input.timezone || "America/Sao_Paulo",
       locale: input.locale || "pt-BR",
-      status: input.status || "draft",
+      status: "draft",
       messageRetentionDays: input.messageRetentionDays ?? 365,
       logRetentionDays: input.logRetentionDays ?? 90,
     });
@@ -340,6 +345,9 @@ export class AdminService {
   async updateTenant({ auth, empresaId, body }) {
     await this.#platform(auth, "tenant.update", "tenants");
     assertTenantBody(empresaId, body);
+    if (body && typeof body === "object" && Object.hasOwn(body, "status")) {
+      throw new AdminValidationError("O status é controlado pelo fluxo de onboarding.", { field: "status" });
+    }
     const payload = validatedPayload("tenants", body, { partial: true });
     return this.#auditedMutation({
       auth,
@@ -354,18 +362,118 @@ export class AdminService {
     });
   }
 
-  async suspendTenant({ auth, empresaId, suspended = true }) {
-    await this.#platform(auth, suspended ? "tenant.suspend" : "tenant.activate", "tenants");
+  async suspendTenant({ auth, empresaId }) {
+    await this.#platform(auth, "tenant.suspend", "tenants");
     return this.#auditedMutation({
       auth,
       empresaId,
       platform: true,
       mutate: async (transaction) => {
-        const tenant = await this.repository.updateTenant({ empresaId, changes: { status: suspended ? "suspended" : "active" }, transaction });
+        const tenant = await this.repository.updateTenant({ empresaId, changes: { status: "suspended" }, transaction });
         if (!tenant) throw new AdminNotFoundError();
         return tenant;
       },
-      audit: { action: suspended ? "tenant.suspend" : "tenant.activate", resource: "tenants", resourceId: empresaId, fields: ["status"] },
+      audit: { action: "tenant.suspend", resource: "tenants", resourceId: empresaId, fields: ["status"] },
+    });
+  }
+
+  #requiredOnboardingService() {
+    if (!this.onboardingService) throw new TypeError("onboardingService não está configurado.");
+    return this.onboardingService;
+  }
+
+  async getOnboarding({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().getProgress({ empresaId });
+  }
+
+  async saveOnboardingStep({ auth, empresaId, step, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.step.update",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().saveProgressStep({
+      empresaId,
+      expectedRevision: body?.revision,
+      currentStep: Number(step),
+      completedSteps: body?.completedSteps,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async getActionCatalog({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.action_catalog.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().getActionCatalog();
+  }
+
+  async readConfigurationDraft({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "configuration.draft.read",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().readDraft({ empresaId });
+  }
+
+  async saveConfigurationDraft({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "configuration.draft.update",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().saveDraft({
+      empresaId,
+      configuration: body?.configuration,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async validateConfiguration({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "configuration.validate",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().validate({ empresaId });
+  }
+
+  async configurationReadiness({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.readiness.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().readiness({ empresaId });
+  }
+
+  async publishConfiguration({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "configuration.publish",
+      resource: "configuration_revision",
+    });
+    return this.#requiredOnboardingService().publish({
+      empresaId,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async activateTenant({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#platform(auth, "tenant.activate", "tenants");
+    return this.#requiredOnboardingService().activate({
+      empresaId,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
     });
   }
 

@@ -17,8 +17,37 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
   router.post("/tenants", asyncRoute(async (request, response) => response.status(201).json(await adminService.createTenant({ auth: request.auth, body: request.body }))));
   router.get("/tenants/:empresaId", asyncRoute(async (request, response) => response.json(await adminService.getTenant({ auth: request.auth, empresaId: request.params.empresaId }))));
   router.patch("/tenants/:empresaId", asyncRoute(async (request, response) => response.json(await adminService.updateTenant({ auth: request.auth, empresaId: request.params.empresaId, body: request.body }))));
-  router.post("/tenants/:empresaId/suspend", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId, suspended: true }))));
-  router.post("/tenants/:empresaId/activate", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId, suspended: false }))));
+  router.post("/tenants/:empresaId/suspend", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.get("/tenants/:empresaId/onboarding", asyncRoute(async (request, response) => response.json(await adminService.getOnboarding({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.patch("/tenants/:empresaId/onboarding/:step", asyncRoute(async (request, response) => response.json(await adminService.saveOnboardingStep({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    step: request.params.step,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.get("/tenants/:empresaId/action-catalog", asyncRoute(async (request, response) => response.json(await adminService.getActionCatalog({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.get("/tenants/:empresaId/configuration/draft", asyncRoute(async (request, response) => response.json(await adminService.readConfigurationDraft({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.put("/tenants/:empresaId/configuration/draft", asyncRoute(async (request, response) => response.json(await adminService.saveConfigurationDraft({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/configuration/validate", asyncRoute(async (request, response) => response.json(await adminService.validateConfiguration({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/configuration/publish", asyncRoute(async (request, response) => response.status(201).json(await adminService.publishConfiguration({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.get("/tenants/:empresaId/readiness", asyncRoute(async (request, response) => response.json(await adminService.configurationReadiness({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/activate", asyncRoute(async (request, response) => response.json(await adminService.activateTenant({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
   router.get("/dashboard", asyncRoute(async (request, response) => response.json(await adminService.globalDashboard({ auth: request.auth, query: request.query }))));
   router.get("/diagnostics", asyncRoute(async (request, response) => response.json(await adminService.diagnostics({ auth: request.auth }))));
   router.get("/tenants/:empresaId/dashboard", asyncRoute(async (request, response) => response.json(await adminService.tenantDashboard({ auth: request.auth, empresaId: request.params.empresaId, query: request.query }))));

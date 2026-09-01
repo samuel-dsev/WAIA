@@ -16,9 +16,18 @@ export {
 } from "./compiler.js";
 export { adaptLegacyTenantDefinitionToV2, materializeLegacyTenantDefinition } from "./legacy-adapter.js";
 export { configurationChecksum, stableJson } from "./stable-json.js";
+export { PostgresVersionedConfigurationRepository } from "./postgres-versioned-configuration-repository.js";
+export { VersionedConfigurationService } from "./versioned-configuration-service.js";
+export {
+  DraftVersionConflictError,
+  VersionedConfigurationError,
+  VersionedConfigurationNotFoundError,
+  VersionedConfigurationPersistenceError,
+} from "./versioned-configuration-errors.js";
 export {
   ConfigurationValidationError,
   FLOW_STEP_TYPES_V2,
+  parseTenantRuntimeConfigV2Draft,
   parseTenantRuntimeConfigV2,
   validateTenantRuntimeConfigV2,
 } from "./tenant-runtime-config-v2.js";

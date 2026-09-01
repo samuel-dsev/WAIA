@@ -101,6 +101,88 @@ function allowedKeys(value, path, keys) {
   }
 }
 
+const DRAFT_OBJECT_SCHEMAS = Object.freeze([
+  [ /^$/u, [
+    "schemaVersion", "identity", "retention", "modules", "menu", "routing",
+    "publicReplies", "catalog", "events", "appointments", "payments", "orders",
+    "humanHandoff", "ai", "flows", "integrations",
+  ] ],
+  [ /^\/identity$/u, [
+    "name", "displayName", "publicIdentity", "segment", "locale", "timezone",
+    "welcomeMessage", "fallbackMessage", "address", "schedules", "publicRules",
+    "establishmentRules", "privacyPolicy", "consentText",
+  ] ],
+  [ /^\/retention$/u, ["messagesDays", "logsDays"] ],
+  [ /^\/menu$/u, ["text", "options"] ],
+  [ /^\/menu\/options\/\d+$/u, ["id", "label", "action", "params"] ],
+  [ /^\/routing$/u, ["greetings", "aliases", "fallbackAction"] ],
+  [ /^\/routing\/aliases\/\d+$/u, ["terms", "action", "params"] ],
+  [ /^\/publicReplies\/\d+$/u, ["action", "text"] ],
+  [ /^\/catalog$/u, ["items"] ],
+  [ /^\/catalog\/items\/\d+$/u, ["id", "name", "description", "price", "active"] ],
+  [ /^\/events$/u, ["items", "presentation"] ],
+  [ /^\/events\/items\/\d+$/u, [
+    "id", "name", "startsAt", "timezone", "attractions", "description",
+    "vipRule", "birthdayRule", "location", "price", "active",
+  ] ],
+  [ /^\/events\/presentation$/u, ["intro", "emptyMessage", "includeDescription"] ],
+  [ /^\/appointments$/u, ["services"] ],
+  [ /^\/appointments\/services\/\d+$/u, ["id", "name", "description", "active", "slots"] ],
+  [ /^\/appointments\/services\/\d+\/slots\/\d+$/u, ["id", "label", "startsAt", "available"] ],
+  [ /^\/payments$/u, ["credentialRef", "integrationRef"] ],
+  [ /^\/orders$/u, [
+    "pendingStatus", "selectionPrompt", "paymentPrompt", "receiptPrompt", "namePrompt", "successMessage",
+  ] ],
+  [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef"] ],
+  [ /^\/ai$/u, [
+    "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion",
+  ] ],
+  [ /^\/flows$/u, ["definitions"] ],
+  [ /^\/flows\/definitions\/\d+$/u, ["key", "name", "version", "startStepId", "steps"] ],
+  [ /^\/flows\/definitions\/\d+\/steps\/\d+$/u, [
+    "id", "type", "message", "field", "required", "options", "nextStepId",
+    "condition", "whenTrueStepId", "whenFalseStepId",
+  ] ],
+  [ /^\/flows\/definitions\/\d+\/steps\/\d+\/options\/\d+$/u, ["id", "label", "nextStepId"] ],
+  [ /^\/flows\/definitions\/\d+\/steps\/\d+\/condition$/u, ["field", "operator", "value"] ],
+  [ /^\/integrations\/\d+$/u, ["id", "type", "name", "enabled", "required", "credentialRefs"] ],
+]);
+
+const DRAFT_FREEFORM_PATHS = Object.freeze([
+  /^\/menu\/options\/\d+\/params(?:\/.*)?$/u,
+  /^\/routing\/aliases\/\d+\/params(?:\/.*)?$/u,
+]);
+
+function validateDraftShape(value, path = "") {
+  if (!value || typeof value !== "object") return;
+  if (DRAFT_FREEFORM_PATHS.some((pattern) => pattern.test(path))) return;
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) validateDraftShape(child, pointer(path, index));
+    return;
+  }
+  const schema = DRAFT_OBJECT_SCHEMAS.find(([pattern]) => pattern.test(path));
+  if (!schema) fail("UNKNOWN_FIELD", path || "/", "Este objeto não pertence ao schema V2.");
+  allowedKeys(value, path, schema[1]);
+  for (const [key, child] of Object.entries(value)) validateDraftShape(child, pointer(path, key));
+}
+
+export function parseTenantRuntimeConfigV2Draft(input) {
+  let normalized;
+  try {
+    normalized = JSON.parse(stableJson(input));
+  } catch {
+    fail("INVALID_JSON", "/", "O rascunho deve conter somente JSON seguro e sem ciclos.");
+  }
+  rejectForbiddenFields(normalized);
+  const object = plainObject(normalized, "");
+  validateDraftShape(object);
+  if (object.schemaVersion !== undefined && object.schemaVersion !== TENANT_RUNTIME_CONFIG_V2_SCHEMA_VERSION) {
+    fail("UNSUPPORTED_SCHEMA_VERSION", "/schemaVersion", `schemaVersion deve ser ${TENANT_RUNTIME_CONFIG_V2_SCHEMA_VERSION}.`);
+  }
+  return deepFreeze({ ...object, schemaVersion: TENANT_RUNTIME_CONFIG_V2_SCHEMA_VERSION });
+}
+
 function text(value, path, { max = 1_000, optional = false } = {}) {
   if (optional && (value == null || value === "")) return undefined;
   if (typeof value !== "string") fail("INVALID_STRING", path, "Este campo deve ser um texto.");

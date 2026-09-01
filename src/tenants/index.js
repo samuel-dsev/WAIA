@@ -5,4 +5,7 @@ export {
   createCapitaoMorRuntime,
   loadCapitaoMorTenantConfig,
 } from "./capitao-mor.js";
-export { PostgresTenantDefinitionRepository } from "./postgres-config-loader.js";
+export {
+  PostgresTenantDefinitionRepository,
+  TenantRuntimeConfigurationError,
+} from "./postgres-config-loader.js";

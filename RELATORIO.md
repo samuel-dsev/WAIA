@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 1º de setembro de 2026 após concluir os contratos e o compilador da Fase 1 do onboarding pelo painel.
+Atualizado em 1º de setembro de 2026 após concluir o rascunho e a publicação versionada da Fase 2 do onboarding pelo painel.
 
 ## Diagnóstico executivo
 
@@ -34,13 +34,46 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - O teste de caracterização compara o Capitão Mor atual e a ponte V2 durante menu, agenda, cardápio, compra completa, comprovante, nome e criação do pedido pendente, sem alterar nenhuma resposta ou efeito esperado.
 - `flows` valida apenas o contrato declarativo e referências `flow:*`; o executor, persistência, pinagem e submissões continuam reservados para a Fase 4.
 - `npm test` aprovou 203 de 209 testes, com seis integrações opcionais ignoradas; 148 arquivos JavaScript passaram em `node --check`; os cinco cenários de carga sintética terminaram sem falhas.
-- As migrações `001` a `016` não foram alteradas. Não houve banco, Docker, rota, painel, credencial real, tag, push, publicação ou deploy nesta fase. A Fase 2 depende de confirmação explícita do usuário.
+- As migrações `001` a `016` não foram alteradas. Não houve banco, Docker, rota, painel, credencial real, tag, push, publicação ou deploy nesta fase. A Fase 2 só foi iniciada após confirmação explícita do usuário.
+
+## Onboarding pelo painel — Fase 2 concluída
+
+- Como o checkout principal estava em `main` com `package.json` local divergente, a implementação foi isolada em `.data/worktrees/fase2-dev`, na branch `dev` e no commit de partida `492a16d`; a `main` permaneceu em `00a0a09` e a alteração local não foi sobrescrita, guardada ou misturada.
+- A migração aditiva `017_versioned_tenant_configuration.sql` criou progresso do onboarding, rascunho com `draft_version` otimista e revisões publicadas append-only, sem alterar as migrações `001` a `016`.
+- As três estruturas são tenant-scoped, possuem limites JSONB, índices tenant-first, `ENABLE/FORCE ROW LEVEL SECURITY` e policies com `USING/WITH CHECK`. A revisão liga envelope, tenant, versões e checksum por constraints no banco.
+- Empresas anteriores à migração foram explicitamente marcadas como `legado`; novas empresas recebem o modo `versionado` e permanecem sem revisão ativa até a primeira publicação. A ponte ativa usa FK composta `(empresa_id, config_version)`.
+- O seed sintético do Capitão Mor declara o modo `legado`, preservando o runtime atual tanto em bancos migrados quanto na sequência banco vazio → migrações → seeds.
+- O serviço versionado salva drafts com precondição obrigatória (`0 → 1`, `N → N+1`), retorna conflito estruturado e sanitizado, e audita criação ou atualização sem armazenar conteúdo da configuração na auditoria.
+- Drafts incompletos são aceitos para autosave, mas passam por uma allowlist recursiva do schema V2: campos desconhecidos, `transportId` administrativo, JSON inseguro e padrões de segredo são recusados antes da persistência e novamente na leitura.
+- A publicação bloqueia empresa e draft, recompila dentro da transação, insere a revisão imutável, atualiza a ponte ativa, incrementa a versão e registra a auditoria na mesma unidade. Falha de compilação ou auditoria reverte todos os efeitos.
+- O loader PostgreSQL usa somente revisão ativa com envelope e checksum válidos para tenants versionados. Ausência, corrupção, ponte inconsistente ou modo desconhecido falham fechado; somente o valor explícito `legado` consulta as tabelas anteriores.
+- `npm test` aprovou 223 de 230 testes, com sete integrações opcionais ignoradas; 155 arquivos JavaScript passaram em `node --check`; e os cinco cenários de carga sintética terminaram sem falhas.
+- Em uma pilha Docker isolada `waia-fase2`, as 17 migrações foram aplicadas. As seis integrações PostgreSQL reais passaram, cobrindo papel restrito, RLS, domínio anterior, concorrência otimista, rollback, checksum e bloqueio de `UPDATE`/`DELETE` das revisões.
+- PostgreSQL, Redis, API e worker ficaram saudáveis e `/health/ready` retornou HTTP 200. O seed isolado confirmou `capitao-mor|legado|null`. Após a validação, os containers foram parados sem remover volumes.
+- Não foram criadas rotas HTTP, wizard, readiness, ativação administrativa, flows executáveis, Meta multiaplicativo, credenciais reais, tag, push, publicação externa ou deploy. O mapper HTTP seguro de erros/versionamento pertence à Fase 3, que depende de confirmação explícita do usuário.
+
+## Onboarding pelo painel — Fase 3 concluída
+
+- Criado o domínio `src/modules/onboarding/` com progresso do wizard, política de prontidão, validadores, serviço de aplicação, erros públicos sanitizados e repositório PostgreSQL tenant-scoped.
+- O backend passou a produzir checks estáveis com `code`, `state`, `severity`, `step`, `message` e `correctiveAction` para identidade, retenção, módulos e dependências, menus e ações, serviços, pagamentos, fluxos, IA, WhatsApp/Meta, administrador, integrações e compilação.
+- Tenants ativos no modo legado recebem diagnóstico e avisos sem suspensão automática. Novas publicações e ativações sempre recalculam a prontidão em modo `enforcement`.
+- A capacidade `flows` permanece bloqueada por `FLOW_RUNTIME_AVAILABLE` até a Fase 4, impedindo que o loader atual receba uma revisão que ainda não consegue executar.
+- Publicação e ativação agora bloqueiam tenant e draft, verificam a versão otimista, recalculam readiness, compilam, inserem a revisão imutável, trocam o ponteiro ativo, auditam e, na ativação, alteram o status na mesma transação.
+- Falha de readiness, compilação, persistência ou auditoria reverte todos os efeitos. A empresa ativa que tenta publicar um draft incompleto permanece ativa na revisão anterior, sem suspensão automática.
+- Criação e edição genéricas de empresas deixaram de aceitar `status`; novas empresas nascem em `draft`. A antiga ativação administrativa por simples troca de status foi removida do caminho HTTP.
+- Administradores do tenant podem manter progresso, draft, validação e publicação da própria empresa; ativar ou reativar o tenant continua restrito ao administrador da plataforma, preservando o controle sobre suspensões.
+- Foram adicionadas rotas de progresso, catálogo de ações, draft, validação, publicação, readiness e ativação. `preflight`, simulador, executor de flows, Meta multiaplicativo e wizard visual permanecem nas fases posteriores previstas.
+- Erros de concorrência e readiness retornam somente códigos, issues, versões e checks allowlisted; segredos, SQL, payload de credenciais e causas internas não são expostos.
+- `npm test` aprovou 249 de 257 testes, com oito integrações opcionais ignoradas; 168 arquivos JavaScript passaram em `node --check`; os cinco cenários de carga terminaram sem falhas; e o Compose foi validado com valores sintéticos.
+- Na pilha isolada `waia-fase3`, as sete integrações PostgreSQL reais passaram, incluindo bloqueio de tenant incompleto, rollback, ativação atômica, auditoria, revisão versionada, RLS, mídia e operação. API, worker, PostgreSQL e Redis ficaram saudáveis e `/health/ready` retornou HTTP 200.
+- API e worker não receberam `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL`. Os containers foram parados após a validação sem remover volumes. Não houve credencial real, Filaretti, tag, push, publicação externa, deploy ou alteração da `main`.
+- A Fase 4 — fluxos configuráveis — só deve começar após confirmação explícita do usuário.
 
 ## O que está comprovadamente implementado
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
 - Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com dezesseis migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- PostgreSQL como fonte de verdade, com dezessete migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
 - Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
 - Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
 - Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.

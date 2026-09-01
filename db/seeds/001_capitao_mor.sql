@@ -10,7 +10,8 @@ INSERT INTO empresas (
   identidade,
   timezone,
   locale,
-  status
+  status,
+  configuracao_runtime_modo
 )
 VALUES (
   '00000000-0000-4000-8000-000000000001',
@@ -20,7 +21,8 @@ VALUES (
   'Bar com atendimento acolhedor, agenda de eventos e venda de convites.',
   'America/Sao_Paulo',
   'pt-BR',
-  'rascunho'
+  'rascunho',
+  'legado'
 )
 ON CONFLICT (id) DO NOTHING;
 

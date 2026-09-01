@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AdminForbiddenError, AdminService, AdminValidationError, MemoryAdminRepository, adminErrorMiddleware } from "../src/modules/admin/index.js";
+import { AdminForbiddenError, AdminService, AdminValidationError, MemoryAdminRepository, adminErrorMiddleware, publicAdminError } from "../src/modules/admin/index.js";
 import { ConversationService, MemoryConversationRepository } from "../src/modules/conversations/index.js";
+import { DraftVersionConflictError } from "../src/modules/configuration/index.js";
+import { TenantNotReadyError } from "../src/modules/onboarding/onboarding-errors.js";
 
 const platform = { user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
 const tenantAdmin = { user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
@@ -87,12 +89,95 @@ test("middleware administrativo converte restrições PostgreSQL sem expor SQL",
   });
 });
 
+test("erros de onboarding e concorrência expõem somente diagnóstico seguro", () => {
+  const conflict = publicAdminError(new DraftVersionConflictError({
+    expectedDraftVersion: 3,
+    currentDraftVersion: 4,
+  }));
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(conflict.body.error.details, { expectedDraftVersion: 3, currentDraftVersion: 4 });
+
+  const blocked = publicAdminError(new TenantNotReadyError([{
+    code: "TOKEN_REQUIRED",
+    state: "failed",
+    severity: "blocker",
+    step: 8,
+    message: "Token ausente",
+    correctiveAction: "Cadastre a credencial pelo cofre.",
+    accessToken: "nao-pode-vazar",
+  }]));
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.body.error.code, "TENANT_NOT_READY");
+  assert.equal(blocked.body.error.checks[0].code, "TOKEN_REQUIRED");
+  assert.doesNotMatch(JSON.stringify(blocked), /nao-pode-vazar/u);
+});
+
 test("administrador global cria e suspende empresa com auditoria", async () => {
   const { service, repository } = fixture();
-  const created = await service.createTenant({ auth: platform, body: { slug: "tenant-c", name: "C", displayName: "Empresa C", timezone: "America/Sao_Paulo", locale: "pt-BR", status: "draft", messageRetentionDays: 180, logRetentionDays: 30 } });
+  await assert.rejects(
+    service.createTenant({ auth: platform, body: { name: "C", status: "active" } }),
+    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "status",
+  );
+  const created = await service.createTenant({ auth: platform, body: { slug: "tenant-c", name: "C", displayName: "Empresa C", timezone: "America/Sao_Paulo", locale: "pt-BR", messageRetentionDays: 180, logRetentionDays: 30 } });
+  assert.equal(created.status, "draft");
+  await assert.rejects(
+    service.updateTenant({ auth: platform, empresaId: created.id, body: { status: "active" } }),
+    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "status",
+  );
   const suspended = await service.suspendTenant({ auth: platform, empresaId: created.id });
   assert.equal(suspended.status, "suspended");
   assert.equal(repository.audit.some((item) => item.action === "tenant.suspend"), true);
+});
+
+test("onboarding exige administrador do tenant e ativação exige plataforma", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "draft" }],
+  });
+  const calls = [];
+  const onboardingService = new Proxy({}, {
+    get(_target, method) {
+      return async (input) => {
+        calls.push([method, input]);
+        return { ok: true };
+      };
+    },
+  });
+  const service = new AdminService({ repository, onboardingService });
+  await service.saveOnboardingStep({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    step: "3",
+    body: { revision: 1, completedSteps: [{ step: 2, completedAt: "2026-09-01T12:00:00.000Z" }] },
+    correlationId: "00000000-0000-4000-8000-000000000302",
+  });
+  await service.activateTenant({
+    auth: platform,
+    empresaId: "tenant-a",
+    body: { draftVersion: 4 },
+  });
+  assert.deepEqual(calls[0], ["saveProgressStep", {
+    empresaId: "tenant-a",
+    expectedRevision: 1,
+    currentStep: 3,
+    completedSteps: [{ step: 2, completedAt: "2026-09-01T12:00:00.000Z" }],
+    actorId: "admin-a",
+    correlationId: "00000000-0000-4000-8000-000000000302",
+  }]);
+  assert.deepEqual(calls[1], ["activate", {
+    empresaId: "tenant-a",
+    expectedDraftVersion: 4,
+    actorId: "platform",
+    correlationId: null,
+  }]);
+  await assert.rejects(
+    service.activateTenant({ auth: tenantAdmin, empresaId: "tenant-a", body: { draftVersion: 4 } }),
+    (error) => error.code === "FORBIDDEN",
+  );
+  await assert.rejects(
+    service.configurationReadiness({ auth: operator, empresaId: "tenant-a" }),
+    (error) => error.code === "FORBIDDEN",
+  );
 });
 
 test("falha de auditoria reverte a mutação administrativa", async () => {

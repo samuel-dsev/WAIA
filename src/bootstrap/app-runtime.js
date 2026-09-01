@@ -26,6 +26,19 @@ import { PostgresAuthRepository, createSessionTokenCodec, MemoryAuthRateLimiter 
 import { AuthService, authErrorMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
 import { AdminService, PostgresAdminRepository, adminErrorMiddleware, createAdminRouter } from "../modules/admin/index.js";
 import {
+  CAPABILITY_CATALOG_V2,
+  PostgresVersionedConfigurationRepository,
+  VersionedConfigurationService,
+  actionOwnerV2,
+  compileTenantRuntimeConfigV2,
+  validateActionParamsV2,
+} from "../modules/configuration/index.js";
+import {
+  OnboardingService,
+  PostgresOnboardingRepository,
+  ReadinessService,
+} from "../modules/onboarding/index.js";
+import {
   CredentialVaultService,
   PostgresCredentialRepository,
 } from "../modules/secrets/credential-vault-service.js";
@@ -140,6 +153,24 @@ export function createPostgresRuntime({
     : null;
   const credentialRepository = new PostgresCredentialRepository(pool);
   const adminRepository = new PostgresAdminRepository(pool);
+  const configurationRepository = new PostgresVersionedConfigurationRepository(pool);
+  const configurationService = new VersionedConfigurationService(configurationRepository);
+  const onboardingRepository = new PostgresOnboardingRepository(pool, {
+    environment: config.environment,
+    platformAiCredentialConfigured: Boolean(config.openai.apiKey),
+  });
+  const readinessService = new ReadinessService({
+    compiler: compileTenantRuntimeConfigV2,
+    capabilityCatalog: CAPABILITY_CATALOG_V2,
+    actionOwner: actionOwnerV2,
+    validateActionParams: validateActionParamsV2,
+    flowRuntimeAvailable: false,
+  });
+  const onboardingService = new OnboardingService({
+    repository: onboardingRepository,
+    configurationService,
+    readinessService,
+  });
   const health = createHealthService({
     database: { health: () => pool.query("SELECT 1").then(() => ({ state: "healthy" })) },
     redis: { health: () => redis.ping().then(() => ({ state: "healthy" })) },
@@ -198,6 +229,7 @@ export function createPostgresRuntime({
   });
   const adminService = new AdminService({
     repository: adminRepository,
+    onboardingService,
     credentialVault,
     conversationService,
     healthService: health,
@@ -240,6 +272,7 @@ export function createPostgresRuntime({
     conversationService,
     mediaStore,
     adminService,
+    onboardingService,
     authService,
     aiService,
     tenantDefinitionRepository,
