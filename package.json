@@ -1,6 +1,6 @@
 {
-  "name": "capitao-mor-whatsapp-chatbot",
-  "version": "1.4.0",
+  "name": "whatsapp-chatbot",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "scripts": {

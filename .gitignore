@@ -9,4 +9,7 @@ dist/
 backups/
 *.log
 docs/
-*.md
+PLAN.md
+RELATORIO.md
+AGENTS.md
+package-lock.json
