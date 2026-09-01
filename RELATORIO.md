@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 31 de agosto de 2026 após corrigir e validar a tela de módulos e configurações do Capitão Mor.
+Atualizado em 1º de setembro de 2026 após concluir os contratos e o compilador da Fase 1 do onboarding pelo painel.
 
 ## Diagnóstico executivo
 
@@ -21,6 +21,20 @@ Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/ser
 - Foi adicionado um teste golden exato e totalmente sintético para menu, agenda, compra, PIX demonstrativo, comprovante, estado conversacional e pedido pendente do Capitão Mor.
 - Na `dev`, a linha de base atualizada aprovou 197 de 203 testes, com as mesmas seis integrações opcionais ignoradas, e 141 arquivos JavaScript passaram na verificação de sintaxe.
 - Nenhuma migração, credencial real, dado da Filaretti, tag, push, publicação, deploy ou alteração de runtime foi criada nesta fase. A Fase 1 depende de confirmação explícita do usuário.
+
+## Onboarding pelo painel — Fase 1 concluída
+
+- Criado o domínio isolado `src/modules/configuration/`, sem conectar o V2 ao loader PostgreSQL, API, worker ou painel nesta fase.
+- `TenantRuntimeConfigV2` possui schema fechado para identidade, retenção, módulos, menu, roteamento, respostas públicas, catálogo, eventos, serviços, pagamentos por referência, pedidos, handoff, IA pública, fluxos declarativos e integrações por referência.
+- O catálogo V2 contém as oito capacidades atuais e reserva `flows` como nona capacidade, com 19 ações, dependências, contextos permitidos e parâmetros fechados; o runtime V1 permanece com exatamente oito módulos.
+- O compilador recebe o tenant e as versões por envelope confiável, gera configuração destacada e profundamente imutável, IDs de transporte determinísticos e checksum SHA-256 vinculado ao tenant, versão do compilador, revisão e versão otimista.
+- A serialização canônica normaliza Unicode e rejeita ciclos, accessors, propriedades perigosas ou extras, arrays esparsos ou excessivos, valores não JSON, profundidade e tamanho acima dos limites.
+- Segredos inline e formatos conhecidos de chave são recusados com erros sanitizados. Pagamentos, IA, handoff e integrações aceitam somente referências opacas do tipo esperado; o compilador não acessa o cofre, banco, relógio ou rede.
+- O adaptador V1 → V2 descarta o PIX e demais bindings privados. A ponte temporária V2 → V1 só materializa pagamento por binding efêmero fora do draft, revisão e checksum.
+- O teste de caracterização compara o Capitão Mor atual e a ponte V2 durante menu, agenda, cardápio, compra completa, comprovante, nome e criação do pedido pendente, sem alterar nenhuma resposta ou efeito esperado.
+- `flows` valida apenas o contrato declarativo e referências `flow:*`; o executor, persistência, pinagem e submissões continuam reservados para a Fase 4.
+- `npm test` aprovou 203 de 209 testes, com seis integrações opcionais ignoradas; 148 arquivos JavaScript passaram em `node --check`; os cinco cenários de carga sintética terminaram sem falhas.
+- As migrações `001` a `016` não foram alteradas. Não houve banco, Docker, rota, painel, credencial real, tag, push, publicação ou deploy nesta fase. A Fase 2 depende de confirmação explícita do usuário.
 
 ## O que está comprovadamente implementado
 
