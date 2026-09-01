@@ -8,4 +8,5 @@ coverage/
 dist/
 backups/
 *.log
-
+docs/
+*.md

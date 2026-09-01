@@ -21,3 +21,4 @@
 - Para atualizações urgentes, priorize restaurar ou proteger o funcionamento atual e registre riscos ou débitos que devam ser tratados depois.
 - Para futuras implementações, diferencie claramente o que já existe, o que é urgente, o que está planejado e o que ainda depende de decisão.
 - Faça verificações proporcionais ao risco da alteração e relate com clareza o que foi alterado, o que foi validado e o que permanece pendente.
+- Ao final de cada implementação relativamente grande, retorne ao usuário um texto para commit explicando as alterações feitas.

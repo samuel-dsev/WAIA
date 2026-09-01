@@ -8,6 +8,20 @@ A fundação SaaS multiempresa está funcional e tecnicamente consistente para d
 
 Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/server.js` permanece apenas para compatibilidade com a demonstração legada do Capitão Mor.
 
+## Onboarding pelo painel — Fase 0 concluída
+
+- `dev`, `main`, `origin/dev` e `origin/main` foram confirmadas no commit preservado `00a0a09`; a `main` não foi alterada.
+- As mudanças locais anteriores em `.gitignore`, `AGENTS.md` e `package.json` foram preservadas e permanecem separadas dos arquivos desta atualização.
+- A versão preservada foi instalada em `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`, como worktree destacado no SHA exato, sem branch própria.
+- A pilha `waia-baseline-00a0a09` usa redes e volumes exclusivos para PostgreSQL, Redis e mídia, sem Caddy e sem portas publicadas no host.
+- Depois da validação, os containers do baseline foram parados sem remover containers, worktree ou volumes, permitindo reinício futuro sem contaminar a `dev`.
+- No worktree preservado, `npm test` aprovou 196 de 202 testes, com seis integrações opcionais ignoradas; 140 arquivos JavaScript passaram em `node --check`; os cinco cenários de carga sintética terminaram sem falhas; e o Compose foi validado com valores sintéticos.
+- PostgreSQL, Redis, API e worker reais ficaram saudáveis; `/health/ready` retornou HTTP 200; os cinco testes PostgreSQL opcionais passaram depois de receberem explicitamente as URLs sintéticas dos papéis owner e aplicação.
+- O teste Redis opcional expôs uma expectativa desatualizada: o contrato já normalizava `orderId` como `null`. A expectativa foi alinhada na `dev` e passou contra o Redis isolado.
+- Foi adicionado um teste golden exato e totalmente sintético para menu, agenda, compra, PIX demonstrativo, comprovante, estado conversacional e pedido pendente do Capitão Mor.
+- Na `dev`, a linha de base atualizada aprovou 197 de 203 testes, com as mesmas seis integrações opcionais ignoradas, e 141 arquivos JavaScript passaram na verificação de sintaxe.
+- Nenhuma migração, credencial real, dado da Filaretti, tag, push, publicação, deploy ou alteração de runtime foi criada nesta fase. A Fase 1 depende de confirmação explícita do usuário.
+
 ## O que está comprovadamente implementado
 
 - API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
