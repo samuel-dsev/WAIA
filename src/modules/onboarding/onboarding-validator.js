@@ -1,3 +1,5 @@
+import { validateFlowDefinition } from "../flows/index.js";
+
 function text(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -124,14 +126,7 @@ export function appointmentsAreReady(configuration) {
 export function flowsAreReady(configuration) {
   if (!selectedModules(configuration).has("flows")) return true;
   const definitions = list(configuration?.flows?.definitions);
-  return definitions.length > 0 && definitions.every((flow) => {
-    const steps = list(flow?.steps);
-    const ids = new Set(steps.map((step) => step?.id).filter(text));
-    return text(flow?.key)
-      && text(flow?.startStepId)
-      && ids.has(flow.startStepId)
-      && steps.some((step) => step?.type === "completion");
-  });
+  return definitions.length > 0 && definitions.every((flow) => validateFlowDefinition(flow).valid);
 }
 
 export function requiredIntegrationsAreAvailable(configuration, snapshot) {

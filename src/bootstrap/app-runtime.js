@@ -53,6 +53,7 @@ import {
 import { MultiTenantAiService } from "../modules/ai/index.js";
 import { PostgresTenantDefinitionRepository } from "../tenants/postgres-config-loader.js";
 import { ConversationService } from "../modules/conversations/index.js";
+import { PostgresFlowRepository } from "../modules/flows/index.js";
 import {
   ConversationHandoffRepository,
   PostgresAppointmentRepository,
@@ -155,6 +156,7 @@ export function createPostgresRuntime({
   const adminRepository = new PostgresAdminRepository(pool);
   const configurationRepository = new PostgresVersionedConfigurationRepository(pool);
   const configurationService = new VersionedConfigurationService(configurationRepository);
+  const flowRepository = new PostgresFlowRepository(pool);
   const onboardingRepository = new PostgresOnboardingRepository(pool, {
     environment: config.environment,
     platformAiCredentialConfigured: Boolean(config.openai.apiKey),
@@ -164,12 +166,13 @@ export function createPostgresRuntime({
     capabilityCatalog: CAPABILITY_CATALOG_V2,
     actionOwner: actionOwnerV2,
     validateActionParams: validateActionParamsV2,
-    flowRuntimeAvailable: false,
+    flowRuntimeAvailable: true,
   });
   const onboardingService = new OnboardingService({
     repository: onboardingRepository,
     configurationService,
     readinessService,
+    flowPublisher: flowRepository,
   });
   const health = createHealthService({
     database: { health: () => pool.query("SELECT 1").then(() => ({ state: "healthy" })) },
@@ -232,6 +235,7 @@ export function createPostgresRuntime({
     onboardingService,
     credentialVault,
     conversationService,
+    flowRepository,
     healthService: health,
     mediaStore,
     googleSheetsIntegration,
@@ -487,6 +491,7 @@ export function createWorkerRuntime({
       orderRepository: new PostgresOrderRepository(runtime.pool),
       appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
       handoffRepository: new ConversationHandoffRepository(runtime.conversationService),
+      flowRepository: runtime.flowRepository,
       mediaStore: runtime.mediaStore,
       googleSheetsIntegration: runtime.googleSheetsIntegration,
       logger,
@@ -516,6 +521,7 @@ export function createWorkerRuntime({
   const retention = startRetentionScheduler(createRetentionRunner({
     pool: runtime.pool,
     conversationService: runtime.conversationService,
+    flowRepository: runtime.flowRepository,
     mediaStore: runtime.mediaStore,
     batchSize: config.maintenance.retentionBatchSize,
     logger,

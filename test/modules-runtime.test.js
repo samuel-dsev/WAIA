@@ -103,7 +103,7 @@ const storeConfig = {
   },
 };
 
-test("registro contém exatamente as oito capacidades canônicas", () => {
+test("registro contém exatamente as capacidades canônicas, incluindo flows", () => {
   const registry = createModuleRegistry(createCanonicalModuleDefinitions());
   assert.deepEqual(registry.keys(), MODULE_KEYS);
   assert.equal(registry.resolveAction("catalog.list").key, "catalog");

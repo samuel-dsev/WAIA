@@ -50,7 +50,7 @@ test("catálogo V2 congela capacidades, ações, contextos e parâmetros sem alt
     "catalog", "orders", "events", "appointments", "payments",
     "human_handoff", "ai_freeform", "external_integrations", "flows",
   ]);
-  assert.equal(CAPABILITY_CATALOG_V2.find(({ key }) => key === "flows").reserved, true);
+  assert.notEqual(CAPABILITY_CATALOG_V2.find(({ key }) => key === "flows").reserved, true);
   assert.ok(ACTION_KEYS_V2.includes("flows.start"));
   assert.ok(ACTION_KEYS_V2.includes("flows.continue"));
   assert.ok(ACTION_KEYS_V2.includes("flows.cancel"));
@@ -160,7 +160,7 @@ test("schema e checksum rejeitam segredos, referências erradas e JSON ambíguo"
   assert.throws(() => stableJson(oversized), /limite de itens/u);
 });
 
-test("flows fica reservado e só compila com definição declarativa válida", () => {
+test("flows fica disponível e só compila com definição declarativa válida", () => {
   assert.throws(
     () => parseTenantRuntimeConfigV2(minimalConfig({
       modules: ["flows"],

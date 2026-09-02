@@ -1,4 +1,5 @@
 import { paginateInteractiveOptions, withPageIndicator } from "../runtime/interactive-pagination.js";
+import { executeFlowAction } from "../flows/index.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -311,12 +312,211 @@ function delegatedHandler(key, action, delegate) {
   };
 }
 
+function flowKeyFromReference(value) {
+  const match = /^flow:([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})$/u.exec(String(value || ""));
+  return match?.[1] || null;
+}
+
+function flowStatus(status) {
+  return ({
+    waiting_input: "waiting",
+    completed: "completed",
+    handoff: "handed_off",
+    cancelled: "cancelled",
+  })[status];
+}
+
+function flowInput(input) {
+  const selection = String(input.selectionId || "");
+  if (selection.startsWith("flow-option:")) return { type: "selection", value: selection.slice(12) };
+  if (selection === "flow-consent:true") return { type: "consent", value: true };
+  if (selection === "flow-consent:false") return { type: "consent", value: false };
+  if (selection === "flow-skip" || String(input.text || "").trim().toLocaleLowerCase("pt-BR") === "pular") {
+    return { type: "skip" };
+  }
+  if (["image", "document"].includes(input.type) && input.messageId) {
+    return { type: "document", value: `document:${input.messageId}` };
+  }
+  const text = String(input.text || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(text)) return { type: "date", value: text };
+  if (/^(?:sim|aceito|concordo)$/iu.test(text)) return { type: "consent", value: true };
+  if (/^(?:não|nao|recuso|discordo)$/iu.test(text)) return { type: "consent", value: false };
+  return { type: "text", value: text };
+}
+
+function flowReply(effects, config, executionState) {
+  const texts = effects.filter((effect) => effect.type === "message" || effect.type === "prompt")
+    .map((effect) => effect.text).filter(Boolean);
+  if (texts.length === 0) {
+    if (effects.some((effect) => effect.type === "cancelled")) texts.push("Fluxo cancelado.");
+    else if (effects.some((effect) => effect.type === "completed")) texts.push("Fluxo concluído.");
+    else if (effects.some((effect) => effect.type === "handoff")) texts.push("A equipe continuará o atendimento.");
+  }
+  const prompt = [...effects].reverse().find((effect) => effect.type === "prompt");
+  let options = prompt?.input?.options || [];
+  if (prompt?.input?.type === "consent") {
+    return reply(texts.join("\n\n"), [
+      menuButton("flow-consent:true", "Sim"),
+      menuButton("flow-consent:false", "Não"),
+    ]);
+  }
+  if (prompt?.input?.type === "selection" && options.length === 0) {
+    if (config.appointments?.services?.length > 0 && prompt.stepId) {
+      const activeServices = active(config.appointments.services);
+      const selectedService = Object.values(executionState.answers || {})
+        .map(String)
+        .map((id) => activeServices.find((service) => service.id === id))
+        .find(Boolean);
+      options = selectedService
+        ? (selectedService.slots || []).filter((slot) => slot.available !== false)
+          .map((slot) => ({ id: slot.id, label: slot.label }))
+        : activeServices.map((service) => ({ id: service.id, label: service.name }));
+    }
+  }
+  const buttons = options.map((option) => menuButton(`flow-option:${option.id}`, option.label));
+  if (prompt?.input?.required === false) buttons.push(menuButton("flow-skip", "Pular"));
+  return reply(texts.join("\n\n"), buttons);
+}
+
+function flowHandler({ flowRepository, handoffRepository }) {
+  return {
+    key: "flows",
+    actions: ["flows.start", "flows.continue", "flows.cancel"],
+    async handle({ action, config, input, payload }) {
+      requireRepositoryMethod(flowRepository, "startSubmission", "flowRepository");
+      requireRepositoryMethod(flowRepository, "findPublishedDefinition", "flowRepository");
+      requireRepositoryMethod(flowRepository, "findActiveSubmission", "flowRepository");
+      requireRepositoryMethod(flowRepository, "saveSubmission", "flowRepository");
+      let activeSubmission;
+      let result;
+      let persisted;
+      if (action === "flows.start") {
+        const flowKey = flowKeyFromReference(payload?.flowRef);
+        if (!flowKey) return { reply: reply("O fluxo selecionado é inválido.") };
+        const definition = config.flows.definitions.find((flow) => flow.key === flowKey);
+        if (!definition) return { reply: reply("O fluxo selecionado não está disponível nesta revisão.") };
+        const previous = await flowRepository.findActiveSubmission({
+          empresaId: config.empresaId,
+          conversationId: input.conversationId,
+        });
+        if (previous) {
+          const cancelled = executeFlowAction({
+            action: "flows.cancel",
+            state: previous.submission.data,
+          });
+          await flowRepository.saveSubmission({
+            empresaId: config.empresaId,
+            submissionId: previous.submission.id,
+            flowVersionId: previous.submission.flowVersionId,
+            expectedRevision: previous.submission.revision,
+            status: "cancelled",
+            currentStepId: cancelled.state.currentStepId,
+            data: cancelled.state,
+            correlationId: input.correlationId,
+          });
+        }
+        const published = await flowRepository.findPublishedDefinition({
+          empresaId: config.empresaId,
+          flowKey,
+          configurationVersion: config.version,
+        });
+        if (!published) return { reply: reply("O fluxo selecionado ainda não possui versão publicada.") };
+        result = executeFlowAction({
+          action,
+          definition: published.definition,
+          flowVersionId: published.flowVersionId,
+        });
+        activeSubmission = await flowRepository.startSubmission({
+          empresaId: config.empresaId,
+          flowKey,
+          configurationVersion: config.version,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          expectedFlowVersionId: published.flowVersionId,
+          initialState: result.state,
+          correlationId: input.correlationId,
+        });
+        persisted = activeSubmission.submission;
+      } else {
+        activeSubmission = await flowRepository.findActiveSubmission({
+          empresaId: config.empresaId,
+          conversationId: input.conversationId,
+        });
+        if (!activeSubmission) return { state: null, reply: reply("Não há fluxo em andamento nesta conversa.") };
+        result = executeFlowAction({
+          action,
+          definition: activeSubmission.version.definition,
+          state: activeSubmission.submission.data,
+          ...(action === "flows.continue" ? { input: flowInput(input) } : {}),
+        });
+      }
+
+      const submission = activeSubmission.submission;
+      if (action === "flows.continue" && result.state.status !== "cancelled"
+        && ["image", "document"].includes(input.type) && input.messageId) {
+        requireRepositoryMethod(flowRepository, "attachDocument", "flowRepository");
+        const currentStep = activeSubmission.version.definition.steps
+          .find((step) => step.id === submission.data.currentStepId);
+        await flowRepository.attachDocument({
+          empresaId: config.empresaId,
+          submissionId: submission.id,
+          messageId: input.messageId,
+          field: currentStep?.field,
+          storageKey: input.mediaStorageKey,
+          mimeType: input.mediaMimeType,
+          sizeBytes: input.mediaSizeBytes,
+          sha256: input.mediaSha256,
+          correlationId: input.correlationId,
+        });
+      }
+      if (!persisted) {
+        persisted = await flowRepository.saveSubmission({
+          empresaId: config.empresaId,
+          submissionId: submission.id,
+          flowVersionId: submission.flowVersionId,
+          expectedRevision: submission.revision,
+          status: flowStatus(result.state.status),
+          currentStepId: result.state.currentStepId,
+          data: result.state,
+          correlationId: input.correlationId,
+        });
+      }
+      const rendered = flowReply(result.effects, config, result.state);
+      if (result.state.status === "handoff") {
+        if (handoffRepository) {
+          requireRepositoryMethod(handoffRepository, "request", "handoffRepository");
+          await handoffRepository.request({
+            empresaId: config.empresaId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+            idempotencyKey: `flow-handoff:${persisted.id}`,
+          });
+        }
+        return {
+          state: { module: "human_handoff", step: "waiting_operator", data: {} },
+          reply: rendered,
+        };
+      }
+      if (["completed", "cancelled"].includes(result.state.status)) return { state: null, reply: rendered };
+      return {
+        state: {
+          module: "flows",
+          step: result.state.currentStepId,
+          data: { submissionId: persisted.id, flowVersionId: persisted.flowVersionId },
+        },
+        reply: rendered,
+      };
+    },
+  };
+}
+
 export function createCanonicalModuleDefinitions({
   orderRepository,
   appointmentRepository,
   handoffRepository,
   aiHandler,
   integrationsHandler,
+  flowRepository,
   logger = console,
 } = {}) {
   return [
@@ -328,5 +528,6 @@ export function createCanonicalModuleDefinitions({
     handoffHandler({ handoffRepository }),
     delegatedHandler("ai_freeform", "ai_freeform.reply", aiHandler),
     delegatedHandler("external_integrations", "external_integrations.run", integrationsHandler),
+    flowHandler({ flowRepository, handoffRepository }),
   ];
 }

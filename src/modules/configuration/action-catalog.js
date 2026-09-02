@@ -66,7 +66,6 @@ const definitions = [
     description: "Triagens e coletas declarativas, sem código arbitrário.",
     dependencies: [],
     actions: ["flows.start", "flows.continue", "flows.cancel"],
-    reserved: true,
   },
 ];
 

@@ -11,6 +11,7 @@ export const MODULE_KEYS = Object.freeze([
   "human_handoff",
   "ai_freeform",
   "external_integrations",
+  "flows",
 ]);
 
 export const MESSAGE_STATUSES = Object.freeze([

@@ -190,6 +190,7 @@ export class OnboardingService {
     repository,
     configurationService,
     readinessService,
+    flowPublisher = null,
     compiler = compileTenantRuntimeConfigV2,
     draftParser = parseTenantRuntimeConfigV2Draft,
     validator = validateTenantRuntimeConfigV2,
@@ -200,12 +201,14 @@ export class OnboardingService {
     requireRepository(repository);
     requireService(configurationService, "configurationService", ["readDraft", "saveDraft"]);
     requireService(readinessService, "readinessService", ["evaluate"]);
+    if (flowPublisher != null) requireService(flowPublisher, "flowPublisher", ["publishDefinitions"]);
     if (![compiler, draftParser, validator, idGenerator, clock].every((item) => typeof item === "function")) {
       throw new TypeError("Helpers do onboarding são inválidos.");
     }
     this.repository = repository;
     this.configurationService = configurationService;
     this.readinessService = readinessService;
+    this.flowPublisher = flowPublisher;
     this.compiler = compiler;
     this.draftParser = draftParser;
     this.validator = validator;
@@ -367,6 +370,25 @@ export class OnboardingService {
         publishedAt,
         transaction,
       });
+      const flowDefinitions = compiled.configuration.flows?.definitions || [];
+      if (flowDefinitions.length > 0) {
+        if (!this.flowPublisher) {
+          throw new OnboardingError(
+            "FLOW_PUBLISHER_UNAVAILABLE",
+            "Não foi possível materializar as versões imutáveis dos fluxos.",
+            { status: 500 },
+          );
+        }
+        await this.flowPublisher.publishDefinitions({
+          empresaId: tenantId,
+          configVersion,
+          definitions: flowDefinitions,
+          actorId: userId,
+          correlationId,
+          publishedAt,
+          transaction,
+        });
+      }
       const activeRevision = await this.repository.setActiveRevision({
         empresaId: tenantId,
         configVersion,

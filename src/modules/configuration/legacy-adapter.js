@@ -123,12 +123,8 @@ function requiredPaymentBinding(value) {
 export function materializeLegacyTenantDefinition(compiled, { payment: paymentBinding } = {}) {
   if (!verifyCompiledTenantRuntimeConfigV2(compiled)) throw new TypeError("A revisão V2 compilada é inválida.");
   const config = compiled.configuration;
-  if (config.modules.includes("flows")) throw new TypeError("O runtime V1 não executa a capacidade flows.");
   const paymentsEnabled = config.modules.includes("payments");
   const payment = paymentsEnabled ? requiredPaymentBinding(paymentBinding) : undefined;
-  for (const alias of config.routing.aliases) {
-    if (Object.keys(alias.params).length > 0) throw new TypeError("O runtime V1 não suporta parâmetros em aliases.");
-  }
   const presentation = config.events.presentation;
   return {
     runtime: {
@@ -156,6 +152,7 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
       payments: { pix: payment },
       orders: structuredClone(config.orders),
       appointments: { services: structuredClone(config.appointments.services) },
+      flows: { definitions: structuredClone(config.flows.definitions) },
       humanHandoff: {
         message: config.humanHandoff.message,
         channel: config.humanHandoff.channel,
@@ -171,7 +168,11 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
       : undefined,
     routing: {
       greetings: [...config.routing.greetings],
-      aliases: config.routing.aliases.map((alias) => ({ terms: [...alias.terms], action: alias.action })),
+      aliases: config.routing.aliases.map((alias) => ({
+        terms: [...alias.terms],
+        action: alias.action,
+        payload: structuredClone(alias.params),
+      })),
       fallbackAction: config.routing.fallbackAction,
     },
     ai: {

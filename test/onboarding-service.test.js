@@ -182,12 +182,13 @@ class FakeReadinessService {
   }
 }
 
-function subject({ repository = new FakeOnboardingRepository(), compiler } = {}) {
+function subject({ repository = new FakeOnboardingRepository(), compiler, flowPublisher = null } = {}) {
   const readinessService = new FakeReadinessService(repository);
   const service = new OnboardingService({
     repository,
     configurationService: new FakeConfigurationService(repository),
     readinessService,
+    flowPublisher,
     compiler,
     idGenerator: (() => {
       let value = 400;
@@ -197,6 +198,49 @@ function subject({ repository = new FakeOnboardingRepository(), compiler } = {})
   });
   return { service, repository, readinessService };
 }
+
+test("publicação materializa versões imutáveis dos fluxos antes de trocar a revisão ativa", async () => {
+  const repository = new FakeOnboardingRepository();
+  repository.draft.configuration = {
+    schemaVersion: 2,
+    identity: { name: "Empresa Fluxos" },
+    modules: ["flows"],
+    menu: {
+      text: "Escolha:",
+      options: [{ id: "triagem", label: "Triagem", action: "flows.start", params: { flowRef: "flow:triagem" } }],
+    },
+    flows: {
+      definitions: [{
+        key: "triagem",
+        name: "Triagem",
+        version: 1,
+        startStepId: "pergunta",
+        steps: [
+          { id: "pergunta", type: "text", field: "nome", required: true, nextStepId: "fim" },
+          { id: "fim", type: "completion", message: "Concluído." },
+        ],
+      }],
+    },
+  };
+  const calls = [];
+  const flowPublisher = {
+    async publishDefinitions(input) {
+      repository.events.push("flow-versions");
+      calls.push(clone(input));
+    },
+  };
+  const { service } = subject({ repository, flowPublisher });
+
+  await service.publish({ empresaId: TENANT_ID, actorId: ACTOR_ID, expectedDraftVersion: 1 });
+
+  assert.deepEqual(repository.events, [
+    "lock", "readiness-snapshot", "readiness", "revision", "flow-versions",
+    "active-revision", "publication-audit",
+  ]);
+  assert.equal(calls[0].configVersion, 2);
+  assert.equal(calls[0].definitions[0].key, "triagem");
+  assert.deepEqual(calls[0].transaction, { fake: true });
+});
 
 test("progresso começa em zero, salva etapa auditada com revisão otimista e recusa stale", async () => {
   const { service, repository } = subject();
@@ -278,7 +322,7 @@ test("catálogo retornado é destacado e imutável", () => {
   const second = service.getActionCatalog();
   assert.notEqual(first, second);
   assert.equal(Object.isFrozen(first), true);
-  assert.equal(first.find(({ key }) => key === "flows").reserved, true);
+  assert.notEqual(first.find(({ key }) => key === "flows").reserved, true);
 });
 
 test("readiness devolve somente checks públicos e preserva modo diagnóstico", async () => {

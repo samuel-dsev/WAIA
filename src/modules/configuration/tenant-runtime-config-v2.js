@@ -6,6 +6,7 @@ import {
   validateActionParamsV2,
 } from "./action-catalog.js";
 import { configurationChecksum, stableJson } from "./stable-json.js";
+import { FlowDefinitionValidationError, parseFlowDefinition } from "../flows/index.js";
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/u;
 const ACTION_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
@@ -661,13 +662,21 @@ function parseFlows(value, path) {
         fail("FLOW_OPTIONS_MISSING", pointer(pointer(pointer(entryPath, "steps"), index), "options"), "Uma escolha única exige opções.");
       }
     }
-    return {
+    const definition = {
       key: id(flow.key, pointer(entryPath, "key")),
       name: text(flow.name, pointer(entryPath, "name"), { max: 160 }),
       version: integer(flow.version, pointer(entryPath, "version"), { min: 1, max: 1_000_000, fallback: 1 }),
       startStepId,
       steps,
     };
+    try {
+      return parseFlowDefinition(JSON.parse(JSON.stringify(definition)));
+    } catch (error) {
+      if (!(error instanceof FlowDefinitionValidationError)) throw error;
+      const first = error.issues[0];
+      const nestedPath = first?.path && first.path !== "/" ? first.path : "";
+      fail(first?.code || "FLOW_DEFINITION_INVALID", `${entryPath}${nestedPath}`, first?.message || "A definição do fluxo é inválida.");
+    }
   }, { optional: true, max: 100 });
   unique(definitions, (flow) => flow.key, pointer(path, "definitions"));
   return { definitions };
@@ -763,6 +772,34 @@ export function parseTenantRuntimeConfigV2(input) {
   }
   if (!enabled.has("flows") && parsed.flows.definitions.length > 0) {
     fail("FLOW_CAPABILITY_DISABLED", "/flows/definitions", "Habilite flows antes de configurar definições.");
+  }
+  for (const [flowIndex, flow] of parsed.flows.definitions.entries()) {
+    for (const [stepIndex, step] of flow.steps.entries()) {
+      const interactiveLimit = step.required === true ? 10 : 9;
+      if (step.type === "service_selection") {
+        const activeServices = parsed.appointments.services.filter((service) => service.active !== false);
+        if (activeServices.length > interactiveLimit) {
+          fail(
+            "FLOW_OPTIONS_LIMIT",
+            `/flows/definitions/${flowIndex}/steps/${stepIndex}`,
+            `A seleção de serviço excede ${interactiveLimit} opções interativas seguras.`,
+          );
+        }
+      }
+      if (step.type === "schedule_selection") {
+        const oversizedService = parsed.appointments.services.find((service) => (
+          service.active !== false
+          && service.slots.filter((slot) => slot.available !== false).length > interactiveLimit
+        ));
+        if (oversizedService) {
+          fail(
+            "FLOW_OPTIONS_LIMIT",
+            `/appointments/services/${parsed.appointments.services.indexOf(oversizedService)}/slots`,
+            `A seleção de horário excede ${interactiveLimit} opções interativas seguras.`,
+          );
+        }
+      }
+    }
   }
   const knownFlowRefs = new Set(parsed.flows.definitions.map((flow) => `flow:${flow.key}`));
   const flowBindings = [

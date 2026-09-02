@@ -56,6 +56,10 @@ function resolveCommand({ config, input, state, registry }) {
   const menuOption = config.menu.options.find((option) => normalized(option.id) === selected || normalized(option.label) === selected);
   if (menuOption) return { module: registry.get(menuOption.module), action: menuOption.action, payload: menuOption.payload };
 
+  if (state?.module === "flows") {
+    return { module: registry.get("flows"), action: "flows.continue", payload: {} };
+  }
+
   if (selected.startsWith("event:")) {
     const selectedId = selected.slice(6);
     const eventId = config.events.items.find((event) => normalized(event.id) === selectedId)?.id || selectedRaw.slice(6);
@@ -128,12 +132,25 @@ export function createTenantRuntimeRouter({
       };
     }
     if (input.resetToMenu === true) {
+      if (state.module === "flows") {
+        const flows = moduleRegistry.get("flows");
+        await flows.handle({ action: "flows.cancel", payload: {}, input, state, config });
+      }
       if (state.module || state.step) await stateRepository.save(stateContext, null);
       return menuReply(config);
     }
     const command = resolveCommand({ config, input, state, registry: moduleRegistry });
     if (command?.menuPage) return menuReply(config, command.menuPage);
     if (!command?.module) return menuReply(config);
+    if (state.module === "flows" && command.module.key !== "flows") {
+      await moduleRegistry.get("flows").handle({
+        action: "flows.cancel",
+        payload: {},
+        input,
+        state,
+        config,
+      });
+    }
     if (!enabled.has(command.module.key)) {
       return {
         source: "deterministic",
