@@ -20,6 +20,7 @@
 
 - Antes de implementar mudanças, recupere o contexto disponível no repositório e preserve alterações existentes do usuário.
 - Faça as implementações no checkout principal e na branch `dev`, sem criar worktree de desenvolvimento, salvo instrução posterior explícita do usuário.
+- Nas validações Docker das próximas fases, reutilize o projeto Compose isolado `waia-test` e preserve todos os projetos Docker existentes; não crie um projeto permanente por fase nem remova ambientes sem autorização explícita.
 - Para atualizações urgentes, priorize restaurar ou proteger o funcionamento atual e registre riscos ou débitos que devam ser tratados depois.
 - Para futuras implementações, diferencie claramente o que já existe, o que é urgente, o que está planejado e o que ainda depende de decisão.
 - Faça verificações proporcionais ao risco da alteração e relate com clareza o que foi alterado, o que foi validado e o que permanece pendente.

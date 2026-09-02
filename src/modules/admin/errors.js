@@ -29,6 +29,12 @@ export class AdminValidationError extends AdminError {
   }
 }
 
+export class AdminConflictError extends AdminError {
+  constructor(message = "O recurso foi alterado concorrentemente.") {
+    super(message, { code: "CONFLICT", status: 409 });
+  }
+}
+
 export class AdminNotFoundError extends AdminError {
   constructor() {
     super("Recurso não encontrado.", { code: "NOT_FOUND", status: 404 });

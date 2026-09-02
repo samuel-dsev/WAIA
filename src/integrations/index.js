@@ -1,4 +1,5 @@
 export { createMetaGateway } from "./meta/meta-gateway.js";
+export { MetaGraphHealthClient } from "./meta/meta-health-client.js";
 export { createGoogleSheetsIntegration } from "./google-sheets/google-sheets-integration.js";
 export {
   GoogleSheetsCredentialResolver,

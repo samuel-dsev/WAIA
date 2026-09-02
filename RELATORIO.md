@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 2 de setembro de 2026 após a implementação da Fase 4 do `PLAN.md`.
+Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 5 do `PLAN.md`.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` está em `6ec0236`; a `dev` local também contém o commit anterior `66a34de`, ainda não enviado ao remoto.
-- A Fase 4 está no working tree, preparada na versão `1.5.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
+- `origin/dev` e a `dev` local partem de `6227959`, commit remoto da Fase 4 (`v1.5.0`).
+- A Fase 5 está no working tree, preparada na versão `1.6.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -58,16 +58,30 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - A retenção usa a política da revisão publicada pinada, anonimiza submissões vencidas e remove arquivos privados associados.
 - O roteador permite cancelar ou trocar de intenção com segurança, mantendo compatibilidade com tenants legados sem `flows`.
 - Gate atingido: o teste sintético percorre início por alias, botões, continuação pinada após uma nova versão, cancelamento, reset e reinício sem lógica específica por empresa.
+- Commit remoto: `6227959` (`v1.5.0`).
 
-## Validação da Fase 4
+### Fase 5 — Meta multiaplicativo
 
-- `npm test`: 279 testes descobertos, 270 aprovados, 0 falhas e 9 integrações opcionais ignoradas sem variáveis de infraestrutura.
-- `node --check`: todos os arquivos JavaScript válidos.
-- `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
-- `docker compose config --quiet`: configuração válida com valores sintéticos.
-- PostgreSQL 16 real em projeto Compose isolado `waia-f4-flow`: 18 migrações aplicadas; integração de publicação v1/v2, pinagem em v1, isolamento entre tenants, conclusão e anonimização aprovada.
-- O ambiente temporário `waia-f4-flow`, sua rede e seu volume sintético foram removidos após o teste.
-- A pilha existente `waia-today` não foi alterada e permaneceu com API, worker, PostgreSQL, Redis, Caddy e painel saudáveis.
+- A migração aditiva `019_meta_multi_application.sql` cria aplicativos Meta tenant-scoped, referências ao cofre, identificador público opaco do webhook, revisão otimista, estado, health, último webhook válido e retenção de erro sanitizado.
+- Números WhatsApp passam a ter vínculo explícito com aplicativo Meta e credencial de access token do mesmo tenant, protegidos por FK composta e revisão do vínculo.
+- Todas as novas estruturas usam índices tenant-first e `ENABLE/FORCE ROW LEVEL SECURITY`; nenhum segredo é armazenado na configuração ou nas revisões.
+- A API administrativa permite listar, criar e editar aplicativos, vincular números, rotacionar App Secret e executar preflight sem receber ou devolver valores secretos.
+- O callback dinâmico `GET/POST /webhook/meta/:webhookPublicId` resolve a conexão por identificador aleatório, valida assinatura sobre os bytes brutos, confere WABA e `phone_number_id` e só depois ingere os eventos.
+- A rotação aceita o App Secret anterior por uma janela curta e limitada; fora dela, a credencial anterior não é carregada.
+- O preflight consulta app, WABA e número na Graph API por cliente injetável, persiste somente resultado sanitizado e controla o estado do aplicativo com revisão otimista.
+- O envio resolve exclusivamente o access token vinculado ao número e ao aplicativo ativo; números ainda não migrados conservam o fallback legado tenant-scoped.
+- O endpoint legado `/webhook` permanece disponível para o Capitão Mor.
+- Gate atingido: duas conexões com assinaturas, números, WABAs e credenciais diferentes foram testadas sem cruzamento, inclusive em PostgreSQL real.
+
+## Validação da Fase 5
+
+- `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: 197 arquivos JavaScript válidos.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores sintéticos.
+- O padrão permanente para novas validações Docker é o projeto isolado `waia-test`; projetos existentes não serão removidos sem autorização explícita.
+- PostgreSQL 16 real no `waia-test`: 19 migrações aplicadas; integração de dois aplicativos, números e credenciais Meta por tenant aprovada, incluindo bloqueio de vínculo cruzado.
+- API e worker do `waia-test` ficaram saudáveis; `/health/ready` respondeu HTTP 200 com estado `ready`.
 
 ## Segurança e limites preservados
 
@@ -76,27 +90,26 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Configurações e revisões não armazenam segredos; apenas referências ao cofre são permitidas.
 - Fluxos não executam JavaScript, SQL, HTTP livre nem templates arbitrários.
 - O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
-- O painel construtor de fluxos e seus CRUDs visuais pertencem à Fase 6; a Fase 4 fornece o contrato, persistência e runtime que eles consumirão.
+- O painel ainda não expõe a gestão visual das conexões Meta; ele será implementado junto ao wizard na Fase 6.
 
-## Próxima fase planejada — Fase 5
+## Próxima fase planejada — Fase 6
 
-A Fase 5 — Meta multiaplicativo só pode começar após o commit e push confirmados da Fase 4 e uma nova autorização explícita do usuário.
+A Fase 6 — wizard do painel só pode começar após o commit e push confirmados da Fase 5 e uma nova autorização explícita do usuário.
 
 Escopo previsto:
 
-- aplicativo Meta por tenant;
-- referências a credenciais no cofre;
-- callback dinâmico `GET/POST /webhook/meta/:webhookPublicId`;
-- validação da assinatura sobre os bytes brutos;
-- vínculo e conferência de WABA e `phone_number_id`;
-- rotação segura de App Secret;
-- health check e compatibilidade temporária com `/webhook`.
+- dez etapas do onboarding;
+- autosave e retomada com revisão otimista;
+- formulários condicionais e seletores sem IDs técnicos;
+- CRUDs completos da operação;
+- construtor visual de fluxos;
+- checklist, simulador e erros por campo;
+- acessibilidade do painel.
 
-Gate: duas assinaturas e dois números não podem se confundir.
+Gate: nenhuma etapa pode exigir IDs internos, SQL ou edição de `.env`.
 
 ## Pendências posteriores
 
-- Fase 6: wizard completo do painel, inclusive construtor visual de fluxos e CRUDs.
 - Fase 7: simulador isolado e preflight externo auditado.
 - Fase 8: regressão integral do Capitão Mor.
 - Fase 9: Empresa Beta Sintética criada e ativada somente pelo painel, sem dados da Filaretti.

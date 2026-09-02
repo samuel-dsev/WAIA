@@ -283,14 +283,21 @@ export class PostgresOnboardingRepository {
            JOIN credenciais_empresa ce
              ON ce.empresa_id = nw.empresa_id
             AND ce.provedor = 'meta'
-            AND ce.finalidade IN ('whatsapp', 'whatsapp:' || nw.id::text)
+            AND ce.id = nw.access_token_credencial_id
+            AND ce.finalidade IN ('whatsapp-access-token', 'whatsapp', 'whatsapp:' || nw.id::text)
             AND ce.status = 'ativa'
            WHERE nw.empresa_id = e.id AND nw.principal AND nw.status = 'ativo' AND nw.deleted_at IS NULL
          ) AS access_token_configured,
          EXISTS (
-           SELECT 1 FROM integracoes mi
-            WHERE mi.empresa_id = e.id AND mi.tipo = 'meta' AND mi.habilitada
-              AND mi.status = 'saudavel' AND mi.deleted_at IS NULL
+           SELECT 1 FROM numeros_whatsapp nw
+           JOIN aplicativos_meta am
+             ON am.empresa_id = nw.empresa_id
+            AND am.id = nw.aplicativo_meta_id
+            AND am.estado = 'ativo'
+            AND am.deleted_at IS NULL
+            WHERE am.empresa_id = e.id AND nw.empresa_id = e.id
+              AND nw.principal AND nw.status = 'ativo'
+              AND nw.access_token_credencial_id IS NOT NULL AND nw.deleted_at IS NULL
          ) AS application_valid,
          COALESCE((
            SELECT array_agg('credential:' || ce.id::text ORDER BY ce.id)

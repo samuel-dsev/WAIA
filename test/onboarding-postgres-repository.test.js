@@ -159,7 +159,7 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
   const query = calls[0];
   assert.deepEqual(query.params, [TENANT_ID]);
   assert.match(query.sql, /FROM empresas e[^]*WHERE e\.id = \$1/u);
-  for (const alias of ["cr", "ue", "nw", "ce", "mi", "i"]) {
+  for (const alias of ["cr", "ue", "nw", "ce", "am", "i"]) {
     assert.match(query.sql, new RegExp(`${alias}\\.empresa_id = e\\.id`, "u"));
   }
   assert.doesNotMatch(query.sql, /secret_ciphertext|secret_nonce|secret_tag|valor_mascarado|configuracao_compilada/iu);

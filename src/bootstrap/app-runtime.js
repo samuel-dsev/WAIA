@@ -55,6 +55,15 @@ import { PostgresTenantDefinitionRepository } from "../tenants/postgres-config-l
 import { ConversationService } from "../modules/conversations/index.js";
 import { PostgresFlowRepository } from "../modules/flows/index.js";
 import {
+  MetaHealthService,
+  MetaWebhookConnectionResolver,
+  MetaWebhookCredentialResolver,
+  PostgresMetaAppRepository,
+  createMetaMultiAppIngestionHandler,
+  createMetaMultiAppVerificationHandler,
+  createMetaMultiAppWebhookService,
+} from "../modules/meta/index.js";
+import {
   ConversationHandoffRepository,
   PostgresAppointmentRepository,
   PostgresOrderRepository,
@@ -85,6 +94,7 @@ import {
   createGoogleSheetsIntegration,
   createGoogleSheetsSyncRunner,
   createMetaGateway,
+  MetaGraphHealthClient,
   legacyCapitaoMorOrderRow,
   startGoogleSheetsSyncScheduler,
 } from "../integrations/index.js";
@@ -157,6 +167,7 @@ export function createPostgresRuntime({
   const configurationRepository = new PostgresVersionedConfigurationRepository(pool);
   const configurationService = new VersionedConfigurationService(configurationRepository);
   const flowRepository = new PostgresFlowRepository(pool);
+  const metaAppRepository = new PostgresMetaAppRepository(pool);
   const onboardingRepository = new PostgresOnboardingRepository(pool, {
     environment: config.environment,
     platformAiCredentialConfigured: Boolean(config.openai.apiKey),
@@ -209,6 +220,16 @@ export function createPostgresRuntime({
     orderRowMapper: legacyCapitaoMorOrderRow,
     logger: runtimeLogger,
   });
+  const metaHealthService = credentialVault
+    ? new MetaHealthService({
+      repository: metaAppRepository,
+      credentialVault,
+      client: new MetaGraphHealthClient({
+        apiVersion: config.whatsapp.apiVersion,
+        timeoutMs: config.whatsapp.requestTimeoutMs,
+      }),
+    })
+    : null;
   const authRepository = new PostgresAuthRepository(pool);
   const tokenCodec = createSessionTokenCodec({
     pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
@@ -239,6 +260,8 @@ export function createPostgresRuntime({
     healthService: health,
     mediaStore,
     googleSheetsIntegration,
+    metaAppRepository,
+    metaHealthService,
   });
   const aiService = new MultiTenantAiService({
     configResolver: new PostgresAiConfigResolver(pool),
@@ -264,6 +287,34 @@ export function createPostgresRuntime({
     timeoutMs: config.whatsapp.requestTimeoutMs,
     logger: runtimeLogger,
   });
+  const webhookIngestionService = createWebhookIngestionService({
+    tenantResolver: new PostgresTenantResolver(pool),
+    repository: new PostgresWebhookRepository(pool),
+    outbox: new PostgresOutboxRepository(),
+    logger: runtimeLogger,
+    metrics,
+  });
+  const metaWebhookService = createMetaMultiAppWebhookService({
+    connectionResolver: new MetaWebhookConnectionResolver({ repository: metaAppRepository }),
+    credentialVault: new MetaWebhookCredentialResolver({
+      credentialVault,
+      sharedAppSecret: config.whatsapp.appSecret,
+      sharedVerifyToken: config.whatsapp.verifyToken,
+    }),
+    ingestionService: {
+      async ingestEvents(events, context) {
+        const results = await webhookIngestionService.ingestEvents(events, {
+          correlationId: context?.correlationId,
+        });
+        await metaAppRepository.recordValidWebhook({
+          empresaId: context.metaContext.empresaId,
+          appId: context.metaContext.metaApplicationId,
+        });
+        return results;
+      },
+    },
+    logger: runtimeLogger,
+  });
   const queue = new BullMqJobQueue({
     connection: redis,
     queueName: config.redis.queueName,
@@ -274,6 +325,7 @@ export function createPostgresRuntime({
     logger: runtimeLogger,
     logSink,
     conversationService,
+    flowRepository,
     mediaStore,
     adminService,
     onboardingService,
@@ -281,6 +333,9 @@ export function createPostgresRuntime({
     aiService,
     tenantDefinitionRepository,
     metaGateway,
+    metaAppRepository,
+    metaHealthService,
+    metaWebhookService,
     queue,
     health,
     metrics,
@@ -342,18 +397,41 @@ class PostgresPaymentResolver {
   }
 }
 
-class PostgresMetaCredentialResolver {
-  constructor({ pool, credentialVault, apiVersion }) {
+export class PostgresMetaCredentialResolver {
+  constructor({ pool, credentialVault, apiVersion, transactionRunner = withTenantTransaction }) {
     this.pool = pool;
     this.credentialVault = credentialVault;
     this.apiVersion = apiVersion;
+    this.transactionRunner = transactionRunner;
   }
 
   async resolveMeta({ empresaId, numeroWhatsappId }) {
     if (!this.credentialVault) return null;
-    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
+    const number = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
       await client.query(
-        `SELECT id, finalidade
+        `SELECT nw.phone_number_id, nw.aplicativo_meta_id, nw.access_token_credencial_id,
+                am.estado AS aplicativo_estado
+           FROM numeros_whatsapp nw
+           LEFT JOIN aplicativos_meta am
+             ON am.empresa_id = nw.empresa_id
+            AND am.id = nw.aplicativo_meta_id
+            AND am.deleted_at IS NULL
+          WHERE nw.empresa_id = $1 AND nw.id = $2 AND nw.deleted_at IS NULL`,
+        [empresaId, numeroWhatsappId],
+      )
+    ).rows[0]);
+    if (!number) return null;
+    if (number.aplicativo_meta_id || number.access_token_credencial_id) {
+      if (number.aplicativo_estado !== "ativo" || !number.access_token_credencial_id) return null;
+      const accessToken = await this.credentialVault.getCredentialForUse({
+        empresaId,
+        credentialId: number.access_token_credencial_id,
+      });
+      return { accessToken, phoneNumberId: number.phone_number_id, apiVersion: this.apiVersion };
+    }
+    const legacyCredential = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
+      await client.query(
+        `SELECT id
            FROM credenciais_empresa
           WHERE empresa_id = $1
             AND provedor = 'meta'
@@ -364,20 +442,14 @@ class PostgresMetaCredentialResolver {
         [empresaId, `whatsapp:${numeroWhatsappId}`],
       )
     ).rows[0]);
-    if (!row) return null;
+    if (!legacyCredential) return null;
     const accessToken = await this.credentialVault.getCredentialForUse({
       empresaId,
-      credentialId: row.id,
+      credentialId: legacyCredential.id,
     });
-    const phoneNumberId = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
-      await client.query(
-        "SELECT phone_number_id FROM numeros_whatsapp WHERE empresa_id = $1 AND id = $2",
-        [empresaId, numeroWhatsappId],
-      )
-    ).rows[0]?.phone_number_id);
     return {
       accessToken,
-      phoneNumberId,
+      phoneNumberId: number.phone_number_id,
       apiVersion: this.apiVersion,
     };
   }
@@ -434,6 +506,10 @@ export function createApiApp({
   app.get("/privacy", (_request, response) => response.sendFile("privacy.html", { root: publicDirectory }));
   app.get("/data-deletion", (_request, response) => response.sendFile("data-deletion.html", { root: publicDirectory }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
+  if (runtime.metaWebhookService) {
+    app.get("/webhook/meta/:webhookPublicId", createMetaMultiAppVerificationHandler({ service: runtime.metaWebhookService }));
+    app.post("/webhook/meta/:webhookPublicId", createMetaMultiAppIngestionHandler({ service: runtime.metaWebhookService }));
+  }
   app.get("/webhook", createWebhookVerificationHandler({ verifyToken: config.whatsapp.verifyToken }));
   app.post("/webhook", createWebhookHandler({
     signatureVerifier: createMetaSignatureVerifier({
@@ -460,6 +536,15 @@ export function createApiApp({
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),
   }));
+  app.use((error, _request, response, next) => {
+    if (error?.status === 400 && error?.type === "entity.parse.failed") {
+      return response.status(400).json({
+        error: "INVALID_JSON",
+        message: "O corpo da solicitacao deve conter JSON valido.",
+      });
+    }
+    return next(error);
+  });
   app.use(authErrorMiddleware);
   app.use(adminErrorMiddleware);
   app.use((error, request, response, _next) => {
