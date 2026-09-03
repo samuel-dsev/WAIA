@@ -94,28 +94,30 @@ function credentialReferences(snapshot) {
   return new Set([...direct, ...records]);
 }
 
-export function referenceIsAvailable(snapshot, reference) {
-  return text(reference) && credentialReferences(snapshot).has(reference);
+export function referenceIsAvailable(snapshot, reference, provider = null) {
+  if (!text(reference)) return false;
+  const records = list(snapshot?.credentials);
+  if (provider && records.length > 0) {
+    return records.some((credential) => credential?.reference === reference
+      && credential?.provider === provider
+      && credential?.configured === true
+      && ["active", "ativo"].includes(String(credential?.status || "").toLocaleLowerCase("pt-BR")));
+  }
+  return credentialReferences(snapshot).has(reference);
 }
 
 export function aiIsReady(configuration, snapshot) {
   if (!selectedModules(configuration).has("ai_freeform")) return true;
   const ai = configuration?.ai;
   if (!ai?.enabled || !text(ai.provider) || !text(ai.model) || !text(ai.prompt)) return false;
-  if (ai.keyMode === "own") return referenceIsAvailable(snapshot, ai.credentialRef);
+  if (ai.keyMode === "own") return referenceIsAvailable(snapshot, ai.credentialRef, ai.provider);
   if (ai.keyMode === "shared") return snapshot?.platformAiCredentialConfigured === true;
   return ai.keyMode === "simulated" && snapshot?.environment === "test";
 }
 
 export function paymentIsReady(configuration, snapshot) {
   if (!selectedModules(configuration).has("payments")) return true;
-  if (referenceIsAvailable(snapshot, configuration?.payments?.credentialRef)) return true;
-  const integrationRef = configuration?.payments?.integrationRef;
-  return text(integrationRef) && list(snapshot?.integrations).some((integration) => (
-    integration.reference === integrationRef
-    && ["healthy", "simulated"].includes(integration.status)
-    && (integration.status !== "simulated" || snapshot?.environment === "test")
-  ));
+  return referenceIsAvailable(snapshot, configuration?.payments?.credentialRef, "payment");
 }
 
 export function appointmentsAreReady(configuration) {

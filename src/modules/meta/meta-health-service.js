@@ -145,7 +145,7 @@ export class MetaHealthService {
     this.clock = clock;
   }
 
-  async run({ empresaId, appId, numberId, actorId = null, correlationId = null } = {}) {
+  async run({ empresaId, appId, numberId, actorId = null, correlationId = null, signal = null } = {}) {
     const tenantId = requiredText(empresaId, "empresaId");
     const applicationId = requiredText(appId, "appId");
     const whatsappNumberId = requiredText(numberId, "numberId");
@@ -199,11 +199,13 @@ export class MetaHealthService {
 
       let external;
       try {
+        if (signal?.aborted) localFailure("META_EXTERNAL_UNAVAILABLE");
         external = await this.client.checkConnection({
           appId: app.appId,
           wabaId: number.wabaId,
           phoneNumberId: number.phoneNumberId,
           accessToken,
+          signal,
         });
       } catch (error) {
         code = "META_EXTERNAL_UNAVAILABLE";

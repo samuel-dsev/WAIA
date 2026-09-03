@@ -36,6 +36,8 @@ import {
 import {
   OnboardingService,
   PostgresOnboardingRepository,
+  PreflightService,
+  PreviewService,
   ReadinessService,
 } from "../modules/onboarding/index.js";
 import {
@@ -68,6 +70,7 @@ import {
   PostgresAppointmentRepository,
   PostgresOrderRepository,
 } from "../modules/business/repositories.js";
+import { PostgresPaymentResolver } from "../modules/business/payment-resolver.js";
 import {
   PostgresJobHandlerRepository,
   createWorkerHandlers,
@@ -143,6 +146,64 @@ function firstMetaMessageId(result) {
   return result?.messages?.[0]?.id || result?.id || null;
 }
 
+function referenceId(reference, prefix) {
+  const value = String(reference || "").trim();
+  return value.startsWith(`${prefix}:`) ? value.slice(prefix.length + 1) : null;
+}
+
+function createOnboardingPreflightProbes({
+  metaHealthService,
+  googleSheetsIntegration,
+  credentialVault,
+  sharedOpenAiKey,
+  environment,
+}) {
+  const aiClients = new ResponsesClientFactory({ environment });
+  const integrationProbe = async ({ empresaId, target, signal }) => {
+    if (signal.aborted || target.type !== "google_sheets") return { success: false };
+    const result = await googleSheetsIntegration.health({ empresaId, signal });
+    return { success: !signal.aborted && result.health === "healthy" };
+  };
+  return Object.freeze({
+    meta: async ({ empresaId, target, signal, actorId, correlationId }) => {
+      if (signal.aborted || !metaHealthService) return { success: false };
+      const result = await metaHealthService.run({
+        empresaId,
+        appId: target.applicationId,
+        numberId: target.numberId,
+        actorId,
+        correlationId,
+        signal,
+      });
+      return { success: !signal.aborted && result.success === true };
+    },
+    ai: async ({ empresaId, target, signal }) => {
+      if (signal.aborted || target.provider !== "openai" || !target.model) return { success: false };
+      let apiKey = target.keyMode === "shared" ? sharedOpenAiKey : null;
+      if (target.keyMode === "own") {
+        const credentialId = referenceId(target.credentialRef, "credential");
+        if (!credentialVault || !credentialId) return { success: false };
+        const metadata = await credentialVault.getCredentialMetadata({ empresaId, credentialId });
+        if (metadata?.empresaId !== empresaId || metadata?.provider !== target.provider
+            || metadata?.status !== "active" || metadata?.configured !== true) return { success: false };
+        apiKey = await credentialVault.getCredentialForUse({ empresaId, credentialId });
+      }
+      if (!apiKey || signal.aborted) return { success: false };
+      try {
+        const client = await aiClients.create({ provider: target.provider, apiKey });
+        if (typeof client.models?.retrieve !== "function") return { success: false };
+        await client.models.retrieve(target.model, { signal });
+        return { success: !signal.aborted };
+      } finally {
+        apiKey = null;
+      }
+    },
+    payments: integrationProbe,
+    appointments: integrationProbe,
+    integrations: integrationProbe,
+  });
+}
+
 export function createPostgresRuntime({
   config = defaultConfig,
   pool = createPostgresPool({
@@ -178,12 +239,6 @@ export function createPostgresRuntime({
     actionOwner: actionOwnerV2,
     validateActionParams: validateActionParamsV2,
     flowRuntimeAvailable: true,
-  });
-  const onboardingService = new OnboardingService({
-    repository: onboardingRepository,
-    configurationService,
-    readinessService,
-    flowPublisher: flowRepository,
   });
   const health = createHealthService({
     database: { health: () => pool.query("SELECT 1").then(() => ({ state: "healthy" })) },
@@ -230,6 +285,43 @@ export function createPostgresRuntime({
       }),
     })
     : null;
+  const previewService = new PreviewService({
+    configurationVersionResolver: async ({ empresaId }) => {
+      const snapshot = await onboardingRepository.readReadinessSnapshot({ empresaId });
+      if (!snapshot) throw new Error("Empresa não encontrada para simulação.");
+      return snapshot.nextConfigurationVersion;
+    },
+  });
+  const preflightService = new PreflightService({
+    probes: createOnboardingPreflightProbes({
+      metaHealthService,
+      googleSheetsIntegration,
+      credentialVault,
+      sharedOpenAiKey: config.openai.apiKey,
+      environment: config.environment,
+    }),
+    timeoutMs: Math.min(60_000, Math.max(10_000, Number(config.whatsapp.requestTimeoutMs || 10_000) + 2_000)),
+    auditWriter: (event) => adminRepository.writeAudit({
+      id: randomUUID(),
+      empresaId: event.empresaId,
+      actorId: event.actorId,
+      action: event.action,
+      resource: event.resource,
+      resourceId: event.resourceId,
+      result: event.result,
+      changedFields: (event.details?.checks || []).map((check) => check.code),
+      correlationId: event.correlationId,
+      occurredAt: event.occurredAt,
+    }),
+  });
+  const onboardingService = new OnboardingService({
+    repository: onboardingRepository,
+    configurationService,
+    readinessService,
+    flowPublisher: flowRepository,
+    previewService,
+    preflightService,
+  });
   const authRepository = new PostgresAuthRepository(pool);
   const tokenCodec = createSessionTokenCodec({
     pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
@@ -371,32 +463,6 @@ class RedisAuthRateLimiter {
   }
 }
 
-class PostgresPaymentResolver {
-  constructor(pool, { credentialVault } = {}) {
-    this.pool = pool;
-    this.credentialVault = credentialVault;
-  }
-
-  async resolve({ empresaId, type }) {
-    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const result = await client.query(
-        `SELECT tipo, nome, identificador_mascarado, favorecido, instrucoes, credencial_id
-           FROM formas_pagamento
-          WHERE empresa_id = $1 AND tipo = $2 AND ativa AND deleted_at IS NULL
-          ORDER BY created_at DESC, id DESC
-          LIMIT 1`,
-        [empresaId, type],
-      );
-      return result.rows[0] || null;
-    });
-    if (!row) return null;
-    const value = row.credencial_id && this.credentialVault
-      ? await this.credentialVault.getCredentialForUse({ empresaId, credentialId: row.credencial_id })
-      : row.identificador_mascarado || row.nome;
-    return { value, recipient: row.favorecido || row.nome, instructions: row.instrucoes || "" };
-  }
-}
-
 export class PostgresMetaCredentialResolver {
   constructor({ pool, credentialVault, apiVersion, transactionRunner = withTenantTransaction }) {
     this.pool = pool;
@@ -535,6 +601,12 @@ export function createApiApp({
     adminService: runtime.adminService,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),
+    sensitiveRateLimit: rateLimit({
+      windowMs: 60_000,
+      limit: 30,
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
   }));
   app.use((error, _request, response, next) => {
     if (error?.status === 400 && error?.type === "entity.parse.failed") {

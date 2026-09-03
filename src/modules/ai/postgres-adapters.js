@@ -1,40 +1,123 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
+import { verifyCompiledTenantRuntimeConfigV2 } from "../configuration/index.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const uuidOrNew = (value) => UUID_PATTERN.test(String(value || "")) ? value : randomUUID();
 const nullableUuid = (value) => UUID_PATTERN.test(String(value || "")) ? value : null;
 const month = (value) => `${new Date(value).toISOString().slice(0, 7)}-01`;
 
+function referenceId(reference, prefix) {
+  const value = String(reference || "").trim();
+  return value.startsWith(`${prefix}:`) ? value.slice(prefix.length + 1) : null;
+}
+
+export class AiRuntimeConfigurationError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "AiRuntimeConfigurationError";
+    this.code = code;
+  }
+}
+
+function legacyAiConfig(row, empresaId) {
+  if (!row) return null;
+  return {
+    empresaId,
+    enabled: row.habilitada,
+    provider: row.provedor === "simulado" ? "simulated" : row.provedor,
+    model: row.modelo,
+    prompt: row.prompt,
+    personality: row.personalidade,
+    keyType: row.tipo_chave === "propria" ? "own" : "shared",
+    credentialId: row.credencial_propria_id,
+    monthlyTokenLimit: row.limite_tokens_mensal == null ? null : Number(row.limite_tokens_mensal),
+    monthlyCostLimit: row.limite_custo_mensal == null ? null : Number(row.limite_custo_mensal),
+    alertPercent: row.alerta_percentual,
+    maxHistoryMessages: row.max_historico_mensagens,
+    maxOutputTokens: row.max_output_tokens,
+    contingencyMessage: row.mensagem_contingencia,
+    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address"],
+    version: Number(row.version),
+  };
+}
+
+function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum) {
+  const validEnvelope = compiled?.empresaId === empresaId
+    && Number(compiled?.configVersion) === Number(configVersion)
+    && compiled?.checksum === revisionChecksum
+    && verifyCompiledTenantRuntimeConfigV2(compiled);
+  if (!validEnvelope) {
+    throw new AiRuntimeConfigurationError(
+      "AI_ACTIVE_CONFIGURATION_CORRUPTED",
+      "A configuração ativa de IA falhou na verificação de integridade.",
+    );
+  }
+  const ai = compiled.configuration.ai;
+  const enabled = compiled.configuration.modules.includes("ai_freeform") && ai.enabled === true;
+  return {
+    empresaId,
+    enabled,
+    provider: ai.provider === "simulado" ? "simulated" : ai.provider,
+    model: ai.model,
+    prompt: ai.prompt,
+    personality: ai.personality,
+    keyType: ai.keyMode,
+    credentialId: ai.keyMode === "own" ? referenceId(ai.credentialRef, "credential") : null,
+    monthlyTokenLimit: ai.monthlyTokenLimit,
+    monthlyCostLimit: ai.monthlyCostLimit,
+    alertPercent: 80,
+    maxHistoryMessages: 8,
+    maxOutputTokens: ai.maxOutputTokens,
+    contingencyMessage: ai.fallbackMessage,
+    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address"],
+    version: Number(configVersion),
+  };
+}
+
 export class PostgresAiConfigResolver {
   constructor(pool) { this.pool = pool; }
   getAiConfig({ empresaId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const result = await client.query(
-        `SELECT * FROM configuracoes_ia WHERE empresa_id = $1`,
+      const company = (await client.query(
+        `SELECT configuracao_runtime_modo, configuracao_ativa_versao, versao_configuracao
+           FROM empresas
+          WHERE id = $1 AND deleted_at IS NULL`,
         [empresaId],
-      );
-      const row = result.rows[0];
-      if (!row) return null;
-      return {
+      )).rows[0];
+      if (!company) return null;
+      if (company.configuracao_runtime_modo === "legado") {
+        const legacy = await client.query("SELECT * FROM configuracoes_ia WHERE empresa_id = $1", [empresaId]);
+        return legacyAiConfig(legacy.rows[0], empresaId);
+      }
+      if (company.configuracao_runtime_modo !== "versionado") {
+        throw new AiRuntimeConfigurationError("AI_CONFIGURATION_MODE_UNSUPPORTED", "O modo de configuração de IA não é suportado.");
+      }
+      if (!company.configuracao_ativa_versao) {
+        throw new AiRuntimeConfigurationError("AI_ACTIVE_CONFIGURATION_REQUIRED", "A empresa versionada não possui configuração ativa de IA.");
+      }
+      if (Number(company.versao_configuracao) !== Number(company.configuracao_ativa_versao)) {
+        throw new AiRuntimeConfigurationError(
+          "AI_ACTIVE_CONFIGURATION_POINTER_INVALID",
+          "A versão ativa da configuração de IA está inconsistente.",
+        );
+      }
+      const revision = (await client.query(
+        `SELECT config_version, checksum, configuracao_compilada
+           FROM configuracoes_revisoes
+          WHERE empresa_id = $1 AND config_version = $2`,
+        [empresaId, company.configuracao_ativa_versao],
+      )).rows[0];
+      if (!revision) {
+        throw new AiRuntimeConfigurationError("AI_ACTIVE_CONFIGURATION_NOT_FOUND", "A revisão ativa de IA não foi encontrada.");
+      }
+      return versionedAiConfig(
+        revision.configuracao_compilada,
         empresaId,
-        enabled: row.habilitada,
-        provider: row.provedor === "simulado" ? "simulated" : row.provedor,
-        model: row.modelo,
-        prompt: row.prompt,
-        personality: row.personalidade,
-        keyType: row.tipo_chave === "propria" ? "own" : "shared",
-        credentialId: row.credencial_propria_id,
-        monthlyTokenLimit: row.limite_tokens_mensal == null ? null : Number(row.limite_tokens_mensal),
-        monthlyCostLimit: row.limite_custo_mensal == null ? null : Number(row.limite_custo_mensal),
-        alertPercent: row.alerta_percentual,
-        maxHistoryMessages: row.max_historico_mensagens,
-        maxOutputTokens: row.max_output_tokens,
-        contingencyMessage: row.mensagem_contingencia,
-        allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address"],
-        version: Number(row.version),
-      };
+        revision.config_version,
+        revision.checksum,
+      );
     });
   }
 }
@@ -192,6 +275,17 @@ export class AiSecretResolver {
   async resolve(input) {
     if (input.keyType === "simulated") return { apiKey: null, keyType: "simulated" };
     if (input.keyType === "shared") return { apiKey: this.sharedApiKey || null, keyType: "shared" };
+    const metadata = await this.credentialVault?.getCredentialMetadata({
+      empresaId: input.empresaId,
+      credentialId: input.credentialId,
+    });
+    if (metadata?.empresaId !== input.empresaId || metadata?.provider !== input.provider
+        || metadata?.status !== "active" || metadata?.configured !== true) {
+      throw new AiRuntimeConfigurationError(
+        "AI_CREDENTIAL_UNAVAILABLE",
+        "A credencial de IA selecionada não está disponível para este provedor.",
+      );
+    }
     return {
       apiKey: await this.credentialVault.getCredentialForUse({ empresaId: input.empresaId, credentialId: input.credentialId }),
       keyType: "own",

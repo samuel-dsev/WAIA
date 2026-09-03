@@ -85,7 +85,7 @@ export class MetaGraphHealthClient {
     return typeof document?.id === "string" ? document.id : null;
   }
 
-  async checkConnection({ appId, wabaId, phoneNumberId, accessToken: secret } = {}) {
+  async checkConnection({ appId, wabaId, phoneNumberId, accessToken: secret, signal = null } = {}) {
     const expected = {
       appId: graphId(appId, "appId"),
       wabaId: graphId(wabaId, "wabaId"),
@@ -93,6 +93,9 @@ export class MetaGraphHealthClient {
     };
     let token = accessToken(secret);
     const controller = new AbortController();
+    const abortFromCaller = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener?.("abort", abortFromCaller, { once: true });
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const [resolvedAppId, resolvedWabaId, resolvedPhoneNumberId] = await Promise.all([
@@ -108,6 +111,7 @@ export class MetaGraphHealthClient {
       });
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener?.("abort", abortFromCaller);
       token = null;
     }
   }

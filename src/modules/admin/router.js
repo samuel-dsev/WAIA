@@ -5,7 +5,7 @@ const asyncRoute = (handler) => async (request, response, next) => {
   try { await handler(request, response); } catch (error) { next(error); }
 };
 
-export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
+export function createAdminRouter({ adminService, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
   const router = express.Router();
   router.use(authenticate);
   router.use((request, _response, next) => {
@@ -43,6 +43,18 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
     correlationId: request.context?.correlationId,
   }))));
   router.get("/tenants/:empresaId/readiness", asyncRoute(async (request, response) => response.json(await adminService.configurationReadiness({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/preflight", sensitiveRateLimit, asyncRoute(async (request, response) => response.json(await adminService.preflightConfiguration({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/simulator/messages", sensitiveRateLimit, asyncRoute(async (request, response) => response.json(await adminService.simulateConfigurationMessage({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
   router.post("/tenants/:empresaId/activate", asyncRoute(async (request, response) => response.json(await adminService.activateTenant({
     auth: request.auth,
     empresaId: request.params.empresaId,

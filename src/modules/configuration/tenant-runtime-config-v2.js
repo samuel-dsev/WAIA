@@ -752,8 +752,8 @@ export function parseTenantRuntimeConfigV2(input) {
     integrations: parseIntegrations(object.integrations, "/integrations"),
   };
 
-  if (enabled.has("payments") && !parsed.payments.credentialRef && !parsed.payments.integrationRef) {
-    fail("PAYMENT_REFERENCE_REQUIRED", "/payments", "Pagamentos exigem uma referência de credencial ou integração.");
+  if (enabled.has("payments") && !parsed.payments.credentialRef) {
+    fail("PAYMENT_CREDENTIAL_REFERENCE_REQUIRED", "/payments/credentialRef", "Pagamentos exigem uma referência de credencial.");
   }
   if (enabled.has("appointments") && !parsed.appointments.services.some((service) => service.active)) {
     fail("APPOINTMENT_SERVICE_REQUIRED", "/appointments/services", "Agendamentos exigem ao menos um serviço ativo.");

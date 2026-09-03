@@ -52,6 +52,8 @@ test("rotas da Fase 3 mantêm contratos específicos antes do CRUD genérico", a
     ["validateConfiguration", { ready: true, checks: [] }],
     ["publishConfiguration", { configVersion: 2 }],
     ["configurationReadiness", { ready: true, checks: [] }],
+    ["preflightConfiguration", { state: "passed", checks: [] }],
+    ["simulateConfigurationMessage", { sessionId: "preview-a", sessionRevision: 1 }],
     ["activateTenant", { status: "active", configVersion: 2 }],
   ].map(([name, result]) => [name, async (input) => {
     calls.push([name, input]);
@@ -71,6 +73,11 @@ test("rotas da Fase 3 mantêm contratos específicos antes do CRUD genérico", a
     ["POST", "/api/admin/tenants/tenant-a/configuration/validate", {}, 200],
     ["POST", "/api/admin/tenants/tenant-a/configuration/publish", { draftVersion: 2 }, 201],
     ["GET", "/api/admin/tenants/tenant-a/readiness", undefined, 200],
+    ["POST", "/api/admin/tenants/tenant-a/preflight", { draftVersion: 2 }, 200],
+    ["POST", "/api/admin/tenants/tenant-a/simulator/messages", {
+      draftVersion: 2,
+      message: { type: "text", text: "oi" },
+    }, 200],
     ["POST", "/api/admin/tenants/tenant-a/activate", { draftVersion: 2 }, 200],
   ];
   for (const [method, path, body, status] of requests) {
@@ -86,7 +93,9 @@ test("rotas da Fase 3 mantêm contratos específicos antes do CRUD genérico", a
   assert.equal(savedStep.correlationId, correlationId);
   const activation = calls.find(([name]) => name === "activateTenant")[1];
   assert.deepEqual(activation.body, { draftVersion: 2 });
-  assert.equal(calls.filter(([name]) => name === "csrf").length, 5);
+  assert.equal(calls.filter(([name]) => name === "csrf").length, 7);
+  assert.equal(calls.find(([name]) => name === "preflightConfiguration")[1].correlationId, correlationId);
+  assert.equal(calls.find(([name]) => name === "simulateConfigurationMessage")[1].body.message.text, "oi");
 });
 
 test("lookup da equipe consulta somente um e-mail exato fora do CRUD tenant-scoped", async () => {

@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 6 do `PLAN.md`, ainda aguardando aprovação para commit e push.
+Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 7 do `PLAN.md`, ainda aguardando aprovação para commit e push.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o `HEAD` local permanecem em `88e37e6`, commit remoto da Fase 5 (`v1.6.0`).
-- A Fase 6 está no working tree, preparada na versão `1.7.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
+- `origin/dev` e o `HEAD` local permanecem em `7a96a0a`, commit remoto da Fase 6 (`v1.7.0`).
+- A Fase 7 está no working tree, preparada na versão `1.8.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -88,6 +88,23 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O Nginx do painel encaminha somente `/api/`, `/webhook` e `/webhook/` à API, permitindo usar a origem pública do painel no callback Meta sem expor outras rotas internas.
 - Gate atingido: a jornada da Fase 6 não exige IDs internos, SQL, `.env`, arquivo de tenant, alteração de código ou reinício por empresa.
 
+### Fase 7 — simulador e preflight
+
+- O simulador executa o draft corrente com o mesmo compilador V2, materializador e runtime configurável usados pelo worker.
+- Conversa, contato, estado, pedidos, agendamentos, handoff, submissões e documentos do simulador ficam exclusivamente em memória e são isolados por administrador, tenant e sessão.
+- Sessões usam revisão otimista, expiração, limite por administrador/tenant, limite global e invalidação quando o checksum do draft muda.
+- Texto, botões, listas, aliases, fallback, documentos sintéticos, reset, agendamento, fluxos e handoff podem ser exercitados pelo painel.
+- IA e integrações são simuladas; o serviço não recebe gateways, credenciais ou repositórios persistentes e informa explicitamente que chamadas externas são proibidas.
+- O preflight resolve no backend o número principal e o aplicativo Meta, testa somente integrações allowlisted e propaga cancelamento por timeout à Meta, OpenAI e Google Sheets.
+- Erros externos são convertidos em códigos públicos estáveis; tokens, respostas de provedores e detalhes internos não chegam à API, auditoria ou painel.
+- Cada execução externa registra início e conclusão sanitizados sob o mesmo `preflightId`, com ator, tenant, correlação, códigos dos checks e resultado. A auditoria inicial precisa ser persistida antes de qualquer chamada externa; timeout aborta o probe e sinaliza integrações que não encerram cooperativamente.
+- O runtime versionado de IA lê exclusivamente a revisão ativa, valida versão e checksum e recusa credenciais de outro tenant ou provedor antes de decifrá-las; o caminho legado continua restrito a empresas explicitamente legadas.
+- O pagamento versionado resolve exatamente a credencial `payment` publicada no V2. Uma integração externa não substitui a credencial PIX exigida pelo runtime, e falhas de vínculo fecham a carga sem recorrer à tabela legada.
+- O readiness continua sendo o único gate autoritativo para publicação e ativação e agora valida também o provedor associado a cada referência de credencial.
+- As novas rotas administrativas são tenant-scoped, exigem administrador da empresa, CSRF, versão exata do draft, corpo allowlisted e rate limit específico.
+- A etapa de revisão do wizard agora executa preflight e abre um diálogo acessível do simulador, sem persistir histórico no navegador.
+- Gate atingido no escopo conversacional: simulador e runtime tomam as mesmas decisões usando o mesmo contrato compilado e a mesma fábrica de runtime. Efeitos externos continuam deliberadamente simulados e serão cobertos pela regressão operacional das Fases 8 a 10.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -112,6 +129,20 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Nginx validado com `nginx -t`; os assets finais `app.js` e `onboarding.js` responderam HTTP 200, o callback dinâmico foi encaminhado à API e `/health/live` e `/health/ready` responderam HTTP 200.
 - A navegação visual autenticada pelo navegador embutido não foi executada porque esse navegador não alcançou a rede local do Docker; a navegação real permanece também na matriz final da Fase 10.
 
+## Validação da Fase 7
+
+- Testes focados de simulador, preflight, API, serviço, repositório, painel, IA e pagamento passaram sem falhas; o maior lote integrado teve 76 testes e a revisão final de credenciais teve 24.
+- `npm test`: 389 testes descobertos, 379 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: os 31 arquivos JavaScript alterados nesta entrega possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- PostgreSQL e Redis reais no `waia-test`: 10 integrações aprovadas em grupos serializados, cobrindo onboarding, configuração versionada, fluxos, Meta multiaplicativo, RLS, mídia, outbox, Google Sheets e Redis.
+- A execução simultânea de toda a suíte dentro do mesmo banco sintético apresentou uma colisão entre fixtures concorrentes; a repetição em grupos isolados comprovou que não havia falha funcional.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores exclusivamente sintéticos.
+- API, worker e migrador foram reconstruídos novamente após a revisão final de credenciais, na versão `1.8.0`; 19 migrações foram descobertas, nenhuma nova era necessária nesta fase, e API, worker, PostgreSQL e Redis ficaram saudáveis.
+- `/health/live` e `/health/ready` responderam HTTP 200. A rota administrativa de preflight respondeu HTTP 401 sem sessão, confirmando que o proxy do painel preserva a autenticação.
+- Após a recriação da API, o Nginx do painel precisou ser reiniciado para renovar o endereço do upstream; depois disso, o proxy voltou a responder normalmente. Nenhuma alteração de configuração ou novo projeto permanente foi necessária.
+- O painel e seus assets responderam HTTP 200 no `localhost` publicado temporariamente. O navegador embutido permaneceu sem acesso à rede local do Docker; o contêiner temporário foi encerrado e os projetos existentes foram preservados.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -121,22 +152,21 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
 - O ambiente `waia-test` recebeu somente dados sintéticos de validação da Fase 6; a Empresa Beta Sintética planejada para a Fase 9 não foi criada.
 
-## Próxima fase planejada — Fase 7
+## Próxima fase planejada — Fase 8
 
-A Fase 7 — simulador e preflight só pode começar após o commit e push confirmados da Fase 6 e uma nova autorização explícita do usuário.
+A Fase 8 — regressão do Capitão Mor só pode começar após o commit e push confirmados da Fase 7 e uma nova autorização explícita do usuário.
 
 Escopo previsto:
 
-- runtime local isolado com conversa e contato sintéticos;
-- IA e documentos simulados, sem chamadas Meta, OpenAI ou Google reais;
-- preflights externos auditados e sanitizados;
-- revisão final integrada ao wizard.
+- saudação, menu, cardápio, agenda, eventos, paginação e compra;
+- preço atual, PIX privado, comprovante e pedido pendente;
+- Google Sheets, IA pública, troca de intenção e handoff;
+- status Meta, outbox, idempotência e isolamento entre tenants.
 
-Gate: simulação e runtime devem tomar decisões equivalentes.
+Gate: nenhuma regressão funcional ou vazamento entre tenants.
 
 ## Pendências posteriores
 
-- Fase 8: regressão integral do Capitão Mor.
 - Fase 9: Empresa Beta Sintética criada e ativada somente pelo painel, sem dados da Filaretti.
 - Fase 10: validação final com PostgreSQL, Redis, Docker, RLS, carga, auditoria, segredos e navegação real.
 

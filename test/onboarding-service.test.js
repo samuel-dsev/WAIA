@@ -76,8 +76,19 @@ class FakeOnboardingRepository {
     return {
       tenant: clone(this.tenant),
       draftVersion: this.draft?.draftVersion,
+      nextConfigurationVersion: this.tenant.configurationVersion + 1,
       administratorCount: 1,
       whatsapp: { accessTokenConfigured: true },
+    };
+  }
+
+  async readPreflightTargets() {
+    return {
+      meta: {
+        empresaId: TENANT_ID,
+        applicationId: "00000000-0000-4000-8000-000000000311",
+        numberId: "00000000-0000-4000-8000-000000000312",
+      },
     };
   }
 
@@ -182,13 +193,15 @@ class FakeReadinessService {
   }
 }
 
-function subject({ repository = new FakeOnboardingRepository(), compiler, flowPublisher = null } = {}) {
+function subject({ repository = new FakeOnboardingRepository(), compiler, flowPublisher = null, previewService = null, preflightService = null } = {}) {
   const readinessService = new FakeReadinessService(repository);
   const service = new OnboardingService({
     repository,
     configurationService: new FakeConfigurationService(repository),
     readinessService,
     flowPublisher,
+    previewService,
+    preflightService,
     compiler,
     idGenerator: (() => {
       let value = 400;
@@ -198,6 +211,64 @@ function subject({ repository = new FakeOnboardingRepository(), compiler, flowPu
   });
   return { service, repository, readinessService };
 }
+
+test("simulador recebe somente draft atual, ator e sessão gerada no backend", async () => {
+  const calls = [];
+  const previewService = {
+    async simulate(input) {
+      calls.push(clone(input));
+      return { sessionId: input.sessionId, sessionRevision: 1, synthetic: true };
+    },
+  };
+  const { service } = subject({ previewService });
+  const result = await service.simulateMessage({
+    empresaId: TENANT_ID,
+    actorId: ACTOR_ID,
+    expectedDraftVersion: 1,
+    message: { type: "text", text: "oi" },
+  });
+  assert.equal(result.sessionId, "00000000-0000-4000-8000-000000000401");
+  assert.equal(calls[0].actorId, ACTOR_ID);
+  assert.equal(calls[0].draftVersion, 1);
+  assert.equal("configVersion" in calls[0], false);
+  await assert.rejects(
+    service.simulateMessage({
+      empresaId: TENANT_ID,
+      actorId: ACTOR_ID,
+      expectedDraftVersion: 0,
+      message: { type: "text", text: "oi" },
+    }),
+    (error) => error instanceof OnboardingRevisionConflictError,
+  );
+});
+
+test("preflight resolve alvos no backend, revalida o draft e anexa readiness diagnóstico", async () => {
+  const calls = [];
+  const preflightService = {
+    async run(input) {
+      calls.push(clone(input));
+      return {
+        authoritativeGate: "readiness",
+        testedAt: "2026-09-01T15:00:00.000Z",
+        completedAt: "2026-09-01T15:00:01.000Z",
+        summary: { total: 1, passedCount: 1, failedCount: 0 },
+        checks: [],
+      };
+    },
+  };
+  const { service } = subject({ preflightService });
+  const result = await service.preflight({
+    empresaId: TENANT_ID,
+    actorId: ACTOR_ID,
+    expectedDraftVersion: 1,
+    correlationId: "00000000-0000-4000-8000-000000000399",
+  });
+  assert.equal(result.state, "passed");
+  assert.equal(result.draftVersion, 1);
+  assert.equal(result.readiness.mode, "enforcement");
+  assert.equal(calls[0].targets.meta.applicationId, "00000000-0000-4000-8000-000000000311");
+  assert.equal(calls[0].configuration.schemaVersion, 2);
+});
 
 test("publicação materializa versões imutáveis dos fluxos antes de trocar a revisão ativa", async () => {
   const repository = new FakeOnboardingRepository();

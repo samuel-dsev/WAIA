@@ -61,12 +61,32 @@ test("wizard usa revisão otimista, autosave e contratos HTTP de aplicação", a
   for (const endpoint of [
     "/onboarding", "/action-catalog", "/configuration/draft", "/configuration/validate",
     "/configuration/publish", "/readiness", "/activate", "/meta-applications",
+    "/preflight", "/simulator/messages",
   ]) assert.match(source, new RegExp(endpoint.replaceAll("/", "\\/"), "u"));
   assert.match(source, /draftVersion: state\.draftVersion/u);
   assert.match(source, /revision: state\.progress\.revision/u);
   assert.match(source, /setTimeout\(\(\) => flushDraft\(\)\.catch/u);
   assert.match(source, /error\.status === 409/u);
   assert.match(source, /Recarregar versão atual/u);
+});
+
+test("revisão integra preflight e simulador sem persistir conversa no navegador", async () => {
+  const [source, css] = await Promise.all([
+    readFile(new URL("../panel/onboarding.js", import.meta.url), "utf8"),
+    readFile(new URL("../panel/styles.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(source, /Executar preflight externo/u);
+  assert.match(source, /openSimulatorDialog/u);
+  assert.match(source, /sessionRevision/u);
+  assert.match(source, /type: "document"/u);
+  assert.match(source, /type: "image"/u);
+  assert.match(source, /type: "reset"/u);
+  assert.match(source, /type: "list"/u);
+  assert.match(source, /Nenhuma chamada à Meta, OpenAI ou Google/u);
+  assert.doesNotMatch(source, /localStorage|sessionStorage/u);
+  assert.doesNotMatch(source, /será habilitado na Fase 7/u);
+  assert.match(css, /\.simulator-history/u);
+  assert.match(css, /\.simulator-message/u);
 });
 
 test("seletores escondem referências internas e segredos seguem direto ao cofre", async () => {

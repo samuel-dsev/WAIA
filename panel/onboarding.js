@@ -1059,17 +1059,160 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     return item;
   }
 
+  function openSimulatorDialog() {
+    const dialog = document.createElement("dialog");
+    dialog.className = "wizard-dialog simulator-dialog";
+    const titleId = `simulator-title-${crypto.randomUUID()}`;
+    dialog.setAttribute("aria-labelledby", titleId);
+    const shell = element("div", "dialog-card simulator-shell");
+    const heading = element("div", "dialog-heading");
+    const title = element("h2", "", "Simulador isolado");
+    title.id = titleId;
+    const close = button("×", "icon-button");
+    close.setAttribute("aria-label", "Fechar simulador");
+    close.addEventListener("click", () => dialog.close());
+    heading.append(title, close);
+    const notice = element("p", "alert alert-info", "Conversa, documentos, IA e operações são sintéticos. Nenhuma chamada à Meta, OpenAI ou Google será realizada.");
+    const history = element("div", "simulator-history");
+    history.setAttribute("role", "log");
+    history.setAttribute("aria-live", "polite");
+    history.append(element("p", "wizard-empty", "Envie uma mensagem para iniciar a conversa sintética."));
+    const replyChoices = element("div", "simulator-choices");
+    const activity = element("p", "muted simulator-activity", "Nenhum efeito sintético registrado.");
+    const status = element("p", "muted", "Sessão ainda não iniciada.");
+    status.setAttribute("role", "status");
+    const composer = document.createElement("form");
+    composer.className = "simulator-composer";
+    const message = document.createElement("textarea");
+    message.name = "message";
+    message.rows = 3;
+    message.maxLength = 5000;
+    message.placeholder = "Digite uma mensagem de teste";
+    message.setAttribute("aria-label", "Mensagem sintética");
+    const send = button("Enviar texto", "button button-primary", "submit");
+    const documentButton = button("Enviar PDF sintético");
+    const imageButton = button("Enviar imagem sintética");
+    const reset = button("Reiniciar conversa", "button button-danger");
+    const controls = element("div", "dialog-actions simulator-actions");
+    controls.append(documentButton, imageButton, reset, send);
+    composer.append(message, controls);
+    shell.append(heading, notice, history, replyChoices, activity, status, composer);
+    dialog.append(shell);
+    document.body.append(dialog);
+
+    let sessionId = null;
+    let sessionRevision = 0;
+    let sessionDraftVersion = null;
+    let busy = false;
+
+    const setBusy = (value) => {
+      busy = value;
+      for (const control of [close, message, send, documentButton, imageButton, reset, ...replyChoices.querySelectorAll("button, select")]) control.disabled = value;
+      composer.setAttribute("aria-busy", String(value));
+    };
+    const appendMessage = (direction, content, label) => {
+      if (history.querySelector(".wizard-empty")) history.replaceChildren();
+      const entry = element("article", "simulator-message", content || "Sem conteúdo textual.");
+      entry.dataset.direction = direction;
+      entry.prepend(element("strong", "", label));
+      history.append(entry);
+      history.scrollTop = history.scrollHeight;
+    };
+    const renderActivity = (result) => {
+      const effects = result.activity || {};
+      const counts = [
+        `${effects.orders?.length || 0} pedido(s)`,
+        `${effects.appointments?.length || 0} agendamento(s)`,
+        `${effects.flows?.length || 0} fluxo(s)`,
+        `${effects.handoffs?.length || 0} handoff(s)`,
+      ];
+      activity.textContent = `Efeitos somente em memória: ${counts.join(" · ")}.`;
+    };
+    const sendSimulation = async (payload, visibleText) => {
+      if (busy) return;
+      setBusy(true);
+      status.textContent = "Executando no runtime isolado…";
+      try {
+        await flushDraft();
+        if (sessionDraftVersion != null && sessionDraftVersion !== state.draftVersion) {
+          sessionId = null;
+          sessionRevision = 0;
+          replyChoices.replaceChildren();
+          appendMessage("system", "O rascunho mudou; uma nova sessão foi iniciada.", "Sistema");
+        }
+        const result = await apiFetch(endpoint("/simulator/messages"), {
+          method: "POST",
+          body: {
+            draftVersion: state.draftVersion,
+            ...(sessionId ? { sessionId, sessionRevision } : {}),
+            message: payload,
+          },
+        });
+        sessionId = result.sessionId;
+        sessionRevision = result.sessionRevision;
+        sessionDraftVersion = result.draftVersion;
+        appendMessage("inbound", visibleText, "Você");
+        appendMessage("outbound", result.reply?.text, result.reply?.module ? `Runtime · ${result.reply.module}` : "Runtime");
+        renderActivity(result);
+        replyChoices.replaceChildren();
+        const options = result.reply?.buttons || [];
+        for (const option of options) {
+          const choice = button(option.label, "button button-secondary button-small");
+          choice.addEventListener("click", () => sendSimulation({ type: "button", selectionId: option.id }, `Botão: ${option.label}`));
+          replyChoices.append(choice);
+        }
+        if (options.length) {
+          const listSelect = document.createElement("select");
+          listSelect.setAttribute("aria-label", "Escolha de lista sintética");
+          listSelect.append(new Option("Enviar como item de lista…", ""));
+          for (const option of options) listSelect.append(new Option(option.label, option.id));
+          listSelect.addEventListener("change", () => {
+            const selected = options.find((option) => option.id === listSelect.value);
+            if (selected) void sendSimulation({ type: "list", selectionId: selected.id }, `Lista: ${selected.label}`);
+          });
+          replyChoices.append(listSelect);
+        }
+        status.textContent = `Sessão sintética · revisão ${sessionRevision} · draft ${sessionDraftVersion}`;
+      } catch (error) {
+        if (error.status === 409) {
+          sessionId = null;
+          sessionRevision = 0;
+          sessionDraftVersion = null;
+          replyChoices.replaceChildren();
+        }
+        status.textContent = error.message || "Não foi possível executar a simulação.";
+      } finally {
+        setBusy(false);
+        message.focus();
+      }
+    };
+    composer.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = text(message.value);
+      if (!value) return message.focus();
+      message.value = "";
+      void sendSimulation({ type: "text", text: value }, value);
+    });
+    documentButton.addEventListener("click", () => sendSimulation({ type: "document", document: { name: "documento-sintetico.pdf", mimeType: "application/pdf", sizeBytes: 1024 } }, "Documento PDF sintético"));
+    imageButton.addEventListener("click", () => sendSimulation({ type: "image", document: { name: "imagem-sintetica.png", mimeType: "image/png", sizeBytes: 1024 } }, "Imagem sintética"));
+    reset.addEventListener("click", () => sendSimulation({ type: "reset" }, "Reiniciar conversa"));
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    dialog.showModal();
+    message.focus();
+  }
+
   async function renderReview(root) {
     const card = section("10. Revisão", "O backend é a fonte única do checklist e impede publicação ou ativação incompleta.");
     const actions = element("div", "wizard-review-actions");
     const validate = button("Validar configuração", "button button-secondary");
     const readiness = button("Recalcular prontidão", "button button-secondary");
+    const preflight = button("Executar preflight externo", "button button-secondary");
     const simulate = button("Abrir simulador", "button button-secondary");
     const publish = button("Publicar revisão", "button button-primary");
     const activate = button("Publicar e ativar", "button button-primary");
     activate.disabled = !canActivate();
     activate.title = canActivate() ? "" : "Somente um administrador da plataforma pode ativar.";
-    actions.append(validate, readiness, simulate, publish, activate); card.append(actions);
+    actions.append(validate, readiness, preflight, simulate, publish, activate); card.append(actions);
     const results = element("div", "wizard-review-results"); card.append(results); root.append(card);
 
     async function loadReadiness() {
@@ -1086,6 +1229,26 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       } catch (error) { results.replaceChildren(element("p", "alert alert-error", error.message)); return null; }
     }
     readiness.addEventListener("click", loadReadiness);
+    preflight.addEventListener("click", async () => {
+      results.replaceChildren(element("p", "muted", "Testando conexões externas configuradas…"));
+      preflight.disabled = true;
+      try {
+        await flushDraft();
+        const payload = await apiFetch(endpoint("/preflight"), { method: "POST", body: { draftVersion: state.draftVersion } });
+        const summary = element("div", `readiness-summary ${payload.state === "passed" ? "is-ready" : "has-blockers"}`);
+        summary.append(
+          element("strong", "", payload.state === "passed" ? "Preflight concluído" : "Há conexões externas pendentes"),
+          element("span", "", `${payload.summary?.passedCount || 0}/${payload.summary?.total || 0} testes aprovados · readiness continua sendo o gate`),
+        );
+        const checks = element("ul", "readiness-list");
+        for (const check of payload.checks || []) checks.append(checkCard(check));
+        results.replaceChildren(summary, checks);
+      } catch (error) {
+        results.replaceChildren(element("p", "alert alert-error", error.message));
+      } finally {
+        preflight.disabled = false;
+      }
+    });
     validate.addEventListener("click", async () => {
       results.replaceChildren(element("p", "muted", "Validando configuração…"));
       try {
@@ -1095,7 +1258,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
         else { const issues = element("ul", "readiness-list"); for (const issue of payload.issues || []) issues.append(checkCard({ ...issue, state: "failed", correctiveAction: issue.path })); results.replaceChildren(issues); }
       } catch (error) { showIssues(error); results.replaceChildren(element("p", "alert alert-error", error.message)); }
     });
-    simulate.addEventListener("click", () => toast("O runtime isolado do simulador será habilitado na Fase 7. Nenhuma chamada externa foi realizada."));
+    simulate.addEventListener("click", openSimulatorDialog);
     publish.addEventListener("click", async () => release("publish"));
     activate.addEventListener("click", async () => release("activate"));
     await loadReadiness();

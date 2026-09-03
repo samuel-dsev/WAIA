@@ -170,6 +170,45 @@ test("módulos condicionais geram bloqueadores específicos e não genéricos", 
   }
 });
 
+test("integração de pagamento não substitui a credencial exigida pelo runtime", () => {
+  const configuration = validConfiguration();
+  configuration.modules = ["catalog", "payments"];
+  configuration.payments = { integrationRef: "integration:payment-provider" };
+  configuration.menu.options = [{ id: "pagar", label: "Pagar", action: "payments.instructions", params: {} }];
+  const result = readiness().evaluate({
+    empresaId: TENANT_ID,
+    configuration,
+    snapshot: validSnapshot({ integrations: [{ reference: "integration:payment-provider", status: "healthy" }] }),
+  });
+  assert.equal(byCode(result, "PAYMENT_CREDENTIAL_AVAILABLE").state, "failed");
+  assert.equal(byCode(result, "RUNTIME_CONFIGURATION_COMPILES").state, "failed");
+});
+
+test("credencial ativa de outro provedor não satisfaz IA própria nem pagamento", () => {
+  const reference = "credential:compartilhada-errada";
+  const configuration = validConfiguration();
+  configuration.modules = ["catalog", "ai_freeform", "payments"];
+  configuration.ai = {
+    enabled: true,
+    provider: "openai",
+    model: "modelo-sintetico",
+    prompt: "Use somente dados públicos.",
+    keyMode: "own",
+    credentialRef: reference,
+  };
+  configuration.payments = { credentialRef: reference };
+  const result = readiness().evaluate({
+    empresaId: TENANT_ID,
+    configuration,
+    snapshot: validSnapshot({
+      credentialReferences: [reference],
+      credentials: [{ reference, provider: "google_sheets", status: "active", configured: true }],
+    }),
+  });
+  assert.equal(byCode(result, "AI_CONFIGURATION_AVAILABLE").state, "failed");
+  assert.equal(byCode(result, "PAYMENT_CREDENTIAL_AVAILABLE").state, "failed");
+});
+
 test("tenant ativo legado recebe apenas diagnóstico e nunca suspensão automática", () => {
   const snapshot = {
     tenant: { empresaId: TENANT_ID, status: "ativa", runtimeMode: "legado", configurationVersion: 1 },

@@ -191,6 +191,8 @@ export class OnboardingService {
     configurationService,
     readinessService,
     flowPublisher = null,
+    previewService = null,
+    preflightService = null,
     compiler = compileTenantRuntimeConfigV2,
     draftParser = parseTenantRuntimeConfigV2Draft,
     validator = validateTenantRuntimeConfigV2,
@@ -202,6 +204,8 @@ export class OnboardingService {
     requireService(configurationService, "configurationService", ["readDraft", "saveDraft"]);
     requireService(readinessService, "readinessService", ["evaluate"]);
     if (flowPublisher != null) requireService(flowPublisher, "flowPublisher", ["publishDefinitions"]);
+    if (previewService != null) requireService(previewService, "previewService", ["simulate"]);
+    if (preflightService != null) requireService(preflightService, "preflightService", ["run"]);
     if (![compiler, draftParser, validator, idGenerator, clock].every((item) => typeof item === "function")) {
       throw new TypeError("Helpers do onboarding são inválidos.");
     }
@@ -209,6 +213,8 @@ export class OnboardingService {
     this.configurationService = configurationService;
     this.readinessService = readinessService;
     this.flowPublisher = flowPublisher;
+    this.previewService = previewService;
+    this.preflightService = preflightService;
     this.compiler = compiler;
     this.draftParser = draftParser;
     this.validator = validator;
@@ -306,6 +312,72 @@ export class OnboardingService {
     return Object.freeze({ empresaId: tenantId, draftVersion: draft?.draftVersion || 0, ...readinessView(evaluated) });
   }
 
+  async simulateMessage({
+    empresaId,
+    expectedDraftVersion,
+    sessionId = null,
+    expectedSessionRevision = 0,
+    message,
+    actorId,
+  }) {
+    if (!this.previewService) throw new OnboardingError("PREVIEW_UNAVAILABLE", "O simulador não está disponível.", { status: 503 });
+    const userId = requiredText(actorId, "/actorId");
+    const { tenantId, draft } = await this.#requiredDraftVersion(empresaId, expectedDraftVersion);
+    return this.previewService.simulate({
+      actorId: userId,
+      empresaId: tenantId,
+      configuration: draft.configuration,
+      draftVersion: Number(draft.draftVersion),
+      sessionId: sessionId == null || sessionId === "" ? this.idGenerator() : sessionId,
+      expectedSessionRevision,
+      message,
+    });
+  }
+
+  async preflight({ empresaId, expectedDraftVersion, actorId, correlationId = null }) {
+    if (!this.preflightService) throw new OnboardingError("PREFLIGHT_UNAVAILABLE", "O preflight não está disponível.", { status: 503 });
+    if (typeof this.repository.readPreflightTargets !== "function") {
+      throw new OnboardingError("PREFLIGHT_UNAVAILABLE", "Os alvos do preflight não estão disponíveis.", { status: 503 });
+    }
+    const userId = requiredText(actorId, "/actorId");
+    const { tenantId, draft } = await this.#requiredDraftVersion(empresaId, expectedDraftVersion);
+    const snapshot = await this.repository.readReadinessSnapshot({ empresaId: tenantId });
+    if (!snapshot) throw new OnboardingNotFoundError("TENANT_NOT_FOUND", "A empresa não foi encontrada.");
+    const configuration = this.draftParser(draft.configuration);
+    const compiled = this.compiler(configuration, {
+      empresaId: tenantId,
+      configVersion: Number(snapshot.nextConfigurationVersion),
+      draftVersion: Number(draft.draftVersion),
+    });
+    const targets = await this.repository.readPreflightTargets({ empresaId: tenantId });
+    const result = await this.preflightService.run({
+      empresaId: tenantId,
+      configuration: compiled.configuration,
+      targets,
+      actorId: userId,
+      correlationId,
+    });
+    const currentDraft = await this.configurationService.readDraft({ empresaId: tenantId });
+    if (!currentDraft || Number(currentDraft.draftVersion) !== Number(draft.draftVersion)) {
+      throw new OnboardingRevisionConflictError(
+        "DRAFT_VERSION_CONFLICT",
+        "O rascunho mudou durante o preflight. Execute os testes novamente.",
+        {
+          expectedDraftVersion: Number(draft.draftVersion),
+          currentDraftVersion: Number(currentDraft?.draftVersion || 0),
+        },
+        "/expectedDraftVersion",
+      );
+    }
+    const readiness = await this.readiness({ empresaId: tenantId });
+    return immutableClone({
+      ...result,
+      draftVersion: Number(draft.draftVersion),
+      state: result.summary.failedCount === 0 ? "passed" : "failed",
+      readiness,
+    });
+  }
+
   publish(input) {
     return this.#release(input, { activate: false });
   }
@@ -319,6 +391,20 @@ export class OnboardingService {
     const draft = await this.configurationService.readDraft({ empresaId: tenantId });
     if (!draft) {
       throw new OnboardingNotFoundError("CONFIGURATION_DRAFT_NOT_FOUND", "O rascunho da configuração não foi encontrado.");
+    }
+    return { tenantId, draft };
+  }
+
+  async #requiredDraftVersion(empresaId, expectedDraftVersion) {
+    const expected = nonNegativeInteger(expectedDraftVersion, "/expectedDraftVersion");
+    const { tenantId, draft } = await this.#requiredDraft(empresaId);
+    if (Number(draft.draftVersion) !== expected) {
+      throw new OnboardingRevisionConflictError(
+        "DRAFT_VERSION_CONFLICT",
+        "O rascunho foi alterado por outra sessão. Recarregue antes de continuar.",
+        { expectedDraftVersion: expected, currentDraftVersion: Number(draft.draftVersion) },
+        "/expectedDraftVersion",
+      );
     }
     return { tenantId, draft };
   }

@@ -15,4 +15,14 @@ export {
   readinessCheck,
 } from "./onboarding-policy.js";
 export { PostgresOnboardingRepository } from "./postgres-onboarding-repository.js";
+export {
+  PREFLIGHT_CHECK_DEFINITIONS,
+  PreflightService,
+  PreflightServiceError,
+} from "./preflight-service.js";
+export {
+  PreviewService,
+  PreviewSessionError,
+  createPreviewService,
+} from "./preview-service.js";
 export { ReadinessService } from "./readiness-service.js";

@@ -125,6 +125,15 @@ test("schema e checksum rejeitam segredos, referências erradas e JSON ambíguo"
     })),
     (error) => error.issues[0].code === "INVALID_REFERENCE_TYPE",
   );
+  assert.throws(
+    () => parseTenantRuntimeConfigV2(minimalConfig({
+      modules: ["payments"],
+      payments: { integrationRef: "integration:pagamento" },
+      menu: { options: [{ id: "pagar", label: "Pagar", action: "payments.instructions", params: {} }] },
+    })),
+    (error) => error.issues[0].code === "PAYMENT_CREDENTIAL_REFERENCE_REQUIRED"
+      && error.issues[0].path === "/payments/credentialRef",
+  );
 
   const dangerous = { safe: true };
   Object.defineProperty(dangerous, "__proto__", { value: "colisão", enumerable: true });

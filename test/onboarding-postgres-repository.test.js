@@ -131,6 +131,12 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
     access_token_configured: true,
     application_valid: true,
     credential_references: ["credential:00000000-0000-4000-8000-0000000000e1"],
+    credentials: [{
+      reference: "credential:00000000-0000-4000-8000-0000000000e1",
+      provider: "openai",
+      status: "active",
+      configured: true,
+    }],
     integrations: [{ reference: "integration:00000000-0000-4000-8000-0000000000f1", status: "saudavel" }],
   };
   const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [row] }; } };
@@ -148,6 +154,12 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
   assert.equal(snapshot.whatsapp.accessTokenConfigured, true);
   assert.equal(snapshot.whatsapp.applicationValid, true);
   assert.deepEqual(snapshot.credentialReferences, ["credential:00000000-0000-4000-8000-0000000000e1"]);
+  assert.deepEqual(snapshot.credentials, [{
+    reference: "credential:00000000-0000-4000-8000-0000000000e1",
+    provider: "openai",
+    status: "active",
+    configured: true,
+  }]);
   assert.deepEqual(snapshot.integrations, [{
     id: "integration:00000000-0000-4000-8000-0000000000f1",
     reference: "integration:00000000-0000-4000-8000-0000000000f1",
@@ -163,6 +175,29 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
     assert.match(query.sql, new RegExp(`${alias}\\.empresa_id = e\\.id`, "u"));
   }
   assert.doesNotMatch(query.sql, /secret_ciphertext|secret_nonce|secret_tag|valor_mascarado|configuracao_compilada/iu);
+});
+
+test("alvo Meta do preflight é resolvido pelo número principal dentro do tenant", async () => {
+  const calls = [];
+  const row = {
+    number_id: "00000000-0000-4000-8000-0000000000d1",
+    application_id: "00000000-0000-4000-8000-0000000000d2",
+  };
+  const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [row] }; } };
+  const repository = new PostgresOnboardingRepository({ connect() {} }, {
+    transactionRunner: async (_pool, context, callback) => callback({ client, tenantId: context.empresaId }),
+  });
+  assert.deepEqual(await repository.readPreflightTargets({ empresaId: TENANT_ID }), {
+    meta: {
+      empresaId: TENANT_ID,
+      applicationId: row.application_id,
+      numberId: row.number_id,
+    },
+  });
+  assert.deepEqual(calls[0].params, [TENANT_ID]);
+  assert.match(calls[0].sql, /nw\.empresa_id = \$1/u);
+  assert.match(calls[0].sql, /nw\.principal/u);
+  assert.doesNotMatch(calls[0].sql, /access_token|secret|credencial/iu);
 });
 
 test("publicação e ativação expõem primitivas transacionais, tenant-scoped e auditadas", async () => {

@@ -66,6 +66,72 @@ test("loader usa exclusivamente a revisão ativa verificada para tenant versiona
   assert.equal(pool.queries.some(({ sql }) => sql.includes("configuracoes_empresa")), false);
 });
 
+test("loader versionado resolve exatamente a credencial de pagamento da revisão ativa", async () => {
+  const credentialRef = "credential:00000000-0000-4000-8000-000000000299";
+  const compiled = compileTenantRuntimeConfigV2({
+    ...minimalConfig(),
+    identity: { name: "Empresa Versionada", displayName: "Recebedor Versionado" },
+    modules: ["catalog", "payments"],
+    payments: { credentialRef },
+  }, { empresaId: EMPRESA_ID, configVersion: 8, draftVersion: 4 });
+  const pool = fakePool(async (sql) => {
+    if (sql.includes("FROM empresas")) return { rows: [{
+      id: EMPRESA_ID,
+      configuracao_runtime_modo: "versionado",
+      configuracao_ativa_versao: 8,
+      versao_configuracao: 8,
+    }] };
+    if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{
+      config_version: 8,
+      checksum: compiled.checksum,
+      configuracao_compilada: structuredClone(compiled),
+    }] };
+    assert.fail(`consulta inesperada: ${sql}`);
+  });
+  const calls = [];
+  const paymentResolver = {
+    async resolve(input) {
+      calls.push(input);
+      return { value: "pix-versionado", recipient: input.recipient, instructions: "Aguarde conferência." };
+    },
+  };
+
+  const definition = await new PostgresTenantDefinitionRepository(pool, { paymentResolver }).load(EMPRESA_ID);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].credentialRef, credentialRef);
+  assert.equal(calls[0].recipient, "Recebedor Versionado");
+  assert.equal(definition.runtime.payments.pix.key, "pix-versionado");
+  assert.equal(definition.runtime.payments.pix.recipient, "Recebedor Versionado");
+});
+
+test("loader versionado falha fechado quando a credencial de pagamento não resolve", async () => {
+  const compiled = compileTenantRuntimeConfigV2({
+    ...minimalConfig(),
+    modules: ["catalog", "payments"],
+    payments: { credentialRef: "credential:00000000-0000-4000-8000-000000000299" },
+  }, { empresaId: EMPRESA_ID, configVersion: 8, draftVersion: 4 });
+  const pool = fakePool(async (sql) => {
+    if (sql.includes("FROM empresas")) return { rows: [{
+      id: EMPRESA_ID,
+      configuracao_runtime_modo: "versionado",
+      configuracao_ativa_versao: 8,
+      versao_configuracao: 8,
+    }] };
+    if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{
+      config_version: 8,
+      checksum: compiled.checksum,
+      configuracao_compilada: structuredClone(compiled),
+    }] };
+    assert.fail(`consulta inesperada: ${sql}`);
+  });
+
+  await assert.rejects(
+    new PostgresTenantDefinitionRepository(pool, { paymentResolver: { async resolve() { return null; } } }).load(EMPRESA_ID),
+    (error) => error.code === "PAYMENT_CREDENTIAL_UNAVAILABLE",
+  );
+});
+
 test("loader falha fechado quando tenant versionado não possui revisão ativa", async () => {
   const pool = fakePool(async (sql) => {
     if (sql.includes("FROM empresas")) return { rows: [{

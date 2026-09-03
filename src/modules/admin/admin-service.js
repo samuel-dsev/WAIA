@@ -233,6 +233,14 @@ function sanitizedAdminView(value) {
   return redactSensitive(value);
 }
 
+function assertOnlyFields(body, allowed) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new AdminValidationError("Corpo JSON inválido.");
+  }
+  const unknown = Object.keys(body).find((field) => !allowed.has(field));
+  if (unknown) throw new AdminValidationError(`Campo não permitido: ${unknown}.`, { field: unknown });
+}
+
 function sanitizedMetaView(value) {
   if (Array.isArray(value)) return value.map(sanitizedMetaView);
   if (!value || typeof value !== "object") return value;
@@ -496,6 +504,50 @@ export class AdminService {
       resource: "onboarding",
     });
     return this.#requiredOnboardingService().readiness({ empresaId });
+  }
+
+  async simulateConfigurationMessage({ auth, empresaId, body, correlationId = null }) {
+    assertTenantBody(empresaId, body);
+    assertOnlyFields(body, new Set(["draftVersion", "sessionId", "sessionRevision", "message"]));
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.simulator.message",
+      resource: "onboarding_simulation",
+    });
+    const result = await this.#requiredOnboardingService().simulateMessage({
+      empresaId,
+      expectedDraftVersion: body.draftVersion,
+      sessionId: body.sessionId,
+      expectedSessionRevision: body.sessionRevision ?? 0,
+      message: body.message,
+      actorId: identity.actorId,
+    });
+    await this.#audit({
+      auth,
+      empresaId,
+      action: "onboarding.simulator.message",
+      resource: "onboarding_simulation",
+      resourceId: result.sessionId,
+      fields: ["draft_version", "session_revision", "message_type"],
+      correlationId,
+    });
+    return result;
+  }
+
+  async preflightConfiguration({ auth, empresaId, body, correlationId = null }) {
+    assertTenantBody(empresaId, body);
+    assertOnlyFields(body, new Set(["draftVersion"]));
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.preflight",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().preflight({
+      empresaId,
+      expectedDraftVersion: body.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
   }
 
   async publishConfiguration({ auth, empresaId, body, correlationId = null }) {

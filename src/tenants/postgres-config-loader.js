@@ -54,11 +54,26 @@ async function loadVersionedDefinition(client, company, empresaId, paymentResolv
     );
   }
   const paymentsEnabled = compiled.configuration.modules.includes("payments");
-  const payment = paymentsEnabled && paymentResolver
-    ? await paymentResolver.resolve({ empresaId, type: "pix" })
+  if (paymentsEnabled && !paymentResolver) {
+    throw runtimeConfigurationError("PAYMENT_RESOLVER_UNAVAILABLE", "O resolvedor de pagamento não está disponível.");
+  }
+  const payment = paymentsEnabled
+    ? await paymentResolver.resolve({
+      empresaId,
+      type: "pix",
+      credentialRef: compiled.configuration.payments.credentialRef,
+      recipient: compiled.configuration.identity.displayName || compiled.configuration.identity.name,
+    })
     : null;
+  if (paymentsEnabled && !payment) {
+    throw runtimeConfigurationError("PAYMENT_CREDENTIAL_UNAVAILABLE", "A credencial de pagamento da revisão ativa não está disponível.");
+  }
   return materializeLegacyTenantDefinition(compiled, {
-    ...(paymentsEnabled ? { payment } : {}),
+    ...(paymentsEnabled ? { payment: {
+      key: payment.value,
+      recipient: payment.recipient,
+      instructions: payment.instructions,
+    } } : {}),
   });
 }
 

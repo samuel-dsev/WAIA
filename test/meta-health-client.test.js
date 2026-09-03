@@ -73,3 +73,29 @@ test("health Meta normaliza indisponibilidade sem vazar erro interno", async () 
     (error) => error.code === "META_HEALTH_UNAVAILABLE" && !error.message.includes("detalhe privado"),
   );
 });
+
+test("health Meta propaga cancelamento externo para todas as chamadas Graph", async () => {
+  const caller = new AbortController();
+  caller.abort();
+  const receivedSignals = [];
+  const client = new MetaGraphHealthClient({
+    fetchImpl: async (_url, { signal }) => {
+      receivedSignals.push(signal);
+      if (signal.aborted) throw new Error("cancelado");
+      return response("não-deve-chegar");
+    },
+  });
+
+  await assert.rejects(
+    client.checkConnection({
+      appId: "app-a",
+      wabaId: "waba-a",
+      phoneNumberId: "phone-a",
+      accessToken: "token",
+      signal: caller.signal,
+    }),
+    (error) => error.code === "META_HEALTH_UNAVAILABLE",
+  );
+  assert.equal(receivedSignals.length, 3);
+  assert.ok(receivedSignals.every((signal) => signal.aborted));
+});

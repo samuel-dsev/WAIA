@@ -326,6 +326,54 @@ test("onboarding exige administrador do tenant e ativação exige plataforma", a
   );
 });
 
+test("simulador e preflight usam draft versionado, escopo administrativo e auditoria segura", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "draft" }],
+  });
+  const calls = [];
+  const onboardingService = {
+    async simulateMessage(input) {
+      calls.push(["simulateMessage", input]);
+      return { sessionId: "preview-a", sessionRevision: 1, synthetic: true };
+    },
+    async preflight(input) {
+      calls.push(["preflight", input]);
+      return { state: "passed", authoritativeGate: "readiness", checks: [] };
+    },
+  };
+  const service = new AdminService({ repository, onboardingService });
+  await service.simulateConfigurationMessage({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    body: { draftVersion: 2, message: { type: "text", text: "oi" } },
+    correlationId: "00000000-0000-4000-8000-000000000310",
+  });
+  await service.preflightConfiguration({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    body: { draftVersion: 2 },
+    correlationId: "00000000-0000-4000-8000-000000000311",
+  });
+  assert.equal(calls[0][1].actorId, "admin-a");
+  assert.equal(calls[0][1].expectedSessionRevision, 0);
+  assert.equal(calls[1][1].expectedDraftVersion, 2);
+  assert.deepEqual(repository.audit.at(-1).changedFields, ["draft_version", "session_revision", "message_type"]);
+  assert.doesNotMatch(JSON.stringify(repository.audit), /"text":"oi"/u);
+  await assert.rejects(
+    service.preflightConfiguration({ auth: operator, empresaId: "tenant-a", body: { draftVersion: 2 } }),
+    (error) => error.code === "FORBIDDEN",
+  );
+  await assert.rejects(
+    service.simulateConfigurationMessage({
+      auth: tenantAdmin,
+      empresaId: "tenant-a",
+      body: { draftVersion: 2, configVersion: 99, message: { type: "text", text: "oi" } },
+    }),
+    (error) => error.code === "VALIDATION_ERROR",
+  );
+});
+
 test("falha de auditoria reverte a mutação administrativa", async () => {
   const { service, repository } = fixture();
   repository.writeAudit = async () => { throw new Error("auditoria indisponível"); };

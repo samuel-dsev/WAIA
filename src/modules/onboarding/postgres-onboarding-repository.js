@@ -121,6 +121,12 @@ function mapReadiness(row, { environment, platformAiCredentialConfigured }) {
     reference: integration.reference,
     status: integrationStatus(integration.status),
   }));
+  const credentials = (row.credentials || []).map((credential) => Object.freeze({
+    reference: credential.reference,
+    provider: credential.provider,
+    status: credential.status,
+    configured: credential.configured === true,
+  }));
   return Object.freeze({
     tenant: Object.freeze({
       empresaId: row.empresa_id,
@@ -140,6 +146,7 @@ function mapReadiness(row, { environment, platformAiCredentialConfigured }) {
       applicationValid: row.application_valid === true,
     }),
     credentialReferences: Object.freeze([...(row.credential_references || [])]),
+    credentials: Object.freeze(credentials),
     integrations: Object.freeze(integrations),
     platformAiCredentialConfigured,
     environment,
@@ -306,6 +313,16 @@ export class PostgresOnboardingRepository {
          ), ARRAY[]::text[]) AS credential_references,
          COALESCE((
            SELECT jsonb_agg(jsonb_build_object(
+             'reference', 'credential:' || ce.id::text,
+             'provider', ce.provedor,
+             'status', CASE WHEN ce.status = 'ativa' THEN 'active' ELSE 'revoked' END,
+             'configured', true
+           ) ORDER BY ce.id)
+             FROM credenciais_empresa ce
+            WHERE ce.empresa_id = e.id AND ce.status = 'ativa'
+         ), '[]'::jsonb) AS credentials,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
              'reference', 'integration:' || i.id::text,
              'status', i.status
            ) ORDER BY i.id)
@@ -322,6 +339,30 @@ export class PostgresOnboardingRepository {
 
     if (transaction) return read(assertTransaction(transaction, empresaId));
     return this.transactionRunner(this.pool, { empresaId }, read);
+  }
+
+  readPreflightTargets({ empresaId }) {
+    return this.transactionRunner(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT nw.id AS number_id, nw.aplicativo_meta_id AS application_id
+           FROM numeros_whatsapp nw
+          WHERE nw.empresa_id = $1
+            AND nw.principal
+            AND nw.deleted_at IS NULL
+          ORDER BY (nw.status = 'ativo') DESC, nw.created_at DESC, nw.id
+          LIMIT 1`,
+        [empresaId],
+      )).rows[0];
+      return Object.freeze({
+        meta: row
+          ? Object.freeze({
+            empresaId,
+            applicationId: row.application_id || null,
+            numberId: row.number_id || null,
+          })
+          : null,
+      });
+    });
   }
 
   withActivationTransaction({ empresaId, actorId }, callback) {
