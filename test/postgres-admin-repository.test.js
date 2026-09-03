@@ -56,6 +56,52 @@ test("configuração de IA informa o estado da credencial própria", async () =>
   assert.match(select, /c\.id = r\.credencial_propria_id/u);
 });
 
+test("números expõem vínculo Meta versionado para seletores do painel", async () => {
+  const { calls, pool } = fakePool();
+  const repository = new PostgresAdminRepository(pool);
+
+  await repository.list({ resource: "numbers", empresaId: TENANT_ID, limit: 25, page: 1, sort: "createdAt", direction: "desc", filters: {} });
+
+  const select = calls.find(({ sql }) => /FROM numeros_whatsapp r/u.test(sql) && /AS "bindingRevision"/u.test(sql))?.sql;
+  assert.ok(select);
+  assert.match(select, /r\.aplicativo_meta_id AS "metaAppId"/u);
+  assert.match(select, /r\.meta_binding_revision AS "bindingRevision"/u);
+  assert.match(select, /SELECT am\.estado FROM aplicativos_meta am/u);
+  assert.doesNotMatch(select, /access_token_credencial_id/u);
+});
+
+test("usuários distinguem o estado global do estado do vínculo com a empresa", async () => {
+  const client = {
+    async query(sql) {
+      if (/count\(\*\)/u.test(sql)) return { rows: [{ total: 1 }], rowCount: 1 };
+      if (/SELECT u\.id/u.test(sql)) {
+        return {
+          rows: [{
+            id: ACTOR_ID,
+            empresaId: TENANT_ID,
+            email: "operador@example.test",
+            name: "Operador",
+            role: "operador",
+            permissions: [],
+            membershipStatus: "suspenso",
+            status: "ativo",
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const repository = new PostgresAdminRepository({ async connect() { return client; } });
+
+  const result = await repository.list({ resource: "users", empresaId: TENANT_ID, limit: 25, page: 1, sort: "name", direction: "asc", filters: {} });
+
+  assert.equal(result.items[0].status, "active");
+  assert.equal(result.items[0].membershipStatus, "suspended");
+  assert.equal(result.items[0].role, "tenant_operator");
+});
+
 test("ativação do número exige token Meta e troca o principal atomicamente", async () => {
   const calls = [];
   let hasCredential = false;
@@ -101,4 +147,48 @@ test("unidade administrativa usa uma transação e faz rollback se a auditoria f
   assert.equal(statements.filter((sql) => sql === "ROLLBACK").length, 1);
   assert.equal(statements.includes("COMMIT"), false);
   assert.equal(calls.some(({ sql, params }) => /UPDATE contatos/u.test(sql) && params.includes(TENANT_ID)), true);
+});
+
+test("proteção PostgreSQL bloqueia a perda do último administrador ativo", async () => {
+  let activeAdminCount = 1;
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT ue\.papel AS role/u.test(sql)) {
+        return {
+          rows: [{ role: "administrador", membership_status: "ativo", user_status: "ativo" }],
+          rowCount: 1,
+        };
+      }
+      if (/SELECT ue\.usuario_id/u.test(sql)) {
+        return { rows: Array.from({ length: activeAdminCount }, (_, index) => ({ usuario_id: `admin-${index}` })), rowCount: activeAdminCount };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const repository = new PostgresAdminRepository({ async connect() { throw new Error("não deveria abrir outra transação"); } });
+  const transaction = { client, isPlatformAdmin: true };
+
+  await assert.rejects(
+    repository.assertTenantAdminContinuity({
+      empresaId: TENANT_ID,
+      userId: ACTOR_ID,
+      resource: "users",
+      changes: { role: "tenant_operator" },
+      transaction,
+    }),
+    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "role",
+  );
+
+  activeAdminCount = 2;
+  await repository.assertTenantAdminContinuity({
+    empresaId: TENANT_ID,
+    userId: ACTOR_ID,
+    resource: "memberships",
+    remove: true,
+    transaction,
+  });
+  assert.equal(calls.every(({ params }) => params.includes(TENANT_ID)), true);
+  assert.equal(calls.some(({ sql }) => /FOR UPDATE OF ue, u/u.test(sql)), true);
 });

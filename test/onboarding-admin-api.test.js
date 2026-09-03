@@ -88,3 +88,26 @@ test("rotas da Fase 3 mantêm contratos específicos antes do CRUD genérico", a
   assert.deepEqual(activation.body, { draftVersion: 2 });
   assert.equal(calls.filter(([name]) => name === "csrf").length, 5);
 });
+
+test("lookup da equipe consulta somente um e-mail exato fora do CRUD tenant-scoped", async () => {
+  const calls = [];
+  const app = api({
+    async lookupGlobalUser(input) {
+      calls.push(["lookupGlobalUser", input]);
+      return { id: "user-a", name: "Pessoa A", email: "pessoa@example.test", status: "active" };
+    },
+  }, calls);
+  const response = await request(app, "/api/admin/users/lookup?email=pessoa%40example.test");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    id: "user-a",
+    name: "Pessoa A",
+    email: "pessoa@example.test",
+    status: "active",
+  });
+  assert.deepEqual(calls.find(([name]) => name === "lookupGlobalUser")[1], {
+    auth,
+    email: "pessoa@example.test",
+  });
+  assert.equal(calls.some(([name]) => name === "csrf"), false);
+});

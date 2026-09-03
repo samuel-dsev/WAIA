@@ -66,9 +66,19 @@ test("cofre aceita JSON de conta de serviço com múltiplas linhas", async () =>
 test("middleware administrativo devolve apenas o corpo público", () => {
   const captured = {};
   const response = { status(value) { captured.status = value; return this; }, json(value) { captured.body = value; } };
-  adminErrorMiddleware(new AdminValidationError("Inválido."), {}, response, () => assert.fail("não deveria delegar"));
+  adminErrorMiddleware(new AdminValidationError("Inválido.", {
+    field: "displayName",
+    internalQuery: "não pode vazar",
+  }), {}, response, () => assert.fail("não deveria delegar"));
   assert.equal(captured.status, 400);
-  assert.deepEqual(captured.body, { error: { code: "VALIDATION_ERROR", message: "Inválido." } });
+  assert.deepEqual(captured.body, {
+    error: {
+      code: "VALIDATION_ERROR",
+      message: "Inválido.",
+      details: { field: "displayName" },
+    },
+  });
+  assert.doesNotMatch(JSON.stringify(captured.body), /não pode vazar/u);
 });
 
 test("middleware administrativo converte restrições PostgreSQL sem expor SQL", () => {
@@ -127,6 +137,142 @@ test("administrador global cria e suspende empresa com auditoria", async () => {
   const suspended = await service.suspendTenant({ auth: platform, empresaId: created.id });
   assert.equal(suspended.status, "suspended");
   assert.equal(repository.audit.some((item) => item.action === "tenant.suspend"), true);
+});
+
+test("CRUD legado de módulos reconhece flows sem exigir mecanismo paralelo", async () => {
+  const { service } = fixture();
+  const result = await service.replaceModules({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    body: { enabledModules: ["catalog", "flows"] },
+  });
+  const modules = Object.fromEntries(result.items.map((item) => [item.moduleKey, item.enabled]));
+  assert.equal(modules.catalog, true);
+  assert.equal(modules.flows, true);
+});
+
+test("somente administrador global consulta usuário existente por e-mail exato sem enumerar vínculos", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "draft" }],
+    records: {
+      users: [{
+        id: "user-global-a",
+        empresaId: "tenant-b",
+        name: "Pessoa Existente",
+        email: "existente@example.test",
+        status: "active",
+        initialPassword: "não-pode-vazar",
+      }],
+    },
+  });
+  const service = new AdminService({ repository });
+  const result = await service.lookupGlobalUser({ auth: platform, email: "EXISTENTE@example.test" });
+  assert.deepEqual(result, {
+    id: "user-global-a",
+    name: "Pessoa Existente",
+    email: "existente@example.test",
+    status: "active",
+  });
+  assert.doesNotMatch(JSON.stringify(result), /não-pode-vazar|tenant-b/u);
+  await assert.rejects(
+    service.lookupGlobalUser({ auth: tenantAdmin, email: "existente@example.test" }),
+    (error) => error.code === "FORBIDDEN",
+  );
+  await assert.rejects(
+    service.lookupGlobalUser({ auth: platform, email: "existente" }),
+    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "email",
+  );
+});
+
+test("repositório em memória lista e edita vínculo de usuário global como o PostgreSQL", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "draft" }, { id: "tenant-b", name: "B", status: "active" }],
+    records: {
+      users: [{ id: "user-global", empresaId: "tenant-b", name: "Pessoa Global", email: "global@example.test", role: "tenant_operator", status: "active" }],
+    },
+  });
+  const service = new AdminService({ repository });
+
+  await service.create({
+    auth: platform,
+    empresaId: "tenant-a",
+    resource: "memberships",
+    body: { userId: "user-global", role: "tenant_operator", status: "active", permissions: ["contacts.read"] },
+  });
+  let users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
+  assert.equal(users.items[0].id, "user-global");
+  assert.equal(users.items[0].membershipStatus, "active");
+  assert.deepEqual(users.items[0].permissions, ["contacts.read"]);
+
+  await service.update({
+    auth: platform,
+    empresaId: "tenant-a",
+    resource: "memberships",
+    id: "user-global",
+    body: { status: "suspended", permissions: [] },
+  });
+  users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
+  assert.equal(users.items[0].membershipStatus, "suspended");
+  assert.deepEqual(users.items[0].permissions, []);
+
+  await service.remove({ auth: platform, empresaId: "tenant-a", resource: "users", id: "user-global" });
+  users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
+  assert.equal(users.items.length, 0);
+  assert.equal((await service.lookupGlobalUser({ auth: platform, email: "global@example.test" })).id, "user-global");
+});
+
+test("empresa mantém ao menos um administrador ativo ao editar ou remover a equipe", async () => {
+  const repository = new MemoryAdminRepository({
+    environment: "test",
+    tenants: [{ id: "tenant-a", name: "A", status: "draft" }],
+    records: {
+      users: [{
+        id: "admin-a",
+        empresaId: "tenant-a",
+        name: "Administrador",
+        email: "admin@example.test",
+        role: "tenant_admin",
+        status: "active",
+      }],
+    },
+  });
+  const service = new AdminService({ repository });
+  await assert.rejects(
+    service.update({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a", body: { role: "tenant_operator" } }),
+    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "role",
+  );
+  await assert.rejects(
+    service.remove({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a" }),
+    (error) => error.code === "VALIDATION_ERROR",
+  );
+  const secondAdmin = await service.create({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    resource: "users",
+    body: {
+      name: "Segundo Administrador",
+      email: "segundo@example.test",
+      role: "tenant_admin",
+      status: "active",
+      initialPassword: "senha-sintetica-forte",
+      permissions: ["contacts.read", "contacts.update"],
+    },
+  });
+  assert.deepEqual(secondAdmin.permissions, ["contacts.read", "contacts.update"]);
+  const updatedPermissions = await service.update({
+    auth: tenantAdmin,
+    empresaId: "tenant-a",
+    resource: "users",
+    id: secondAdmin.id,
+    body: { permissions: ["orders.read", "orders.update"] },
+  });
+  assert.deepEqual(updatedPermissions.permissions, ["orders.read", "orders.update"]);
+  assert.deepEqual(
+    await service.remove({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a" }),
+    { deleted: true },
+  );
 });
 
 test("onboarding exige administrador do tenant e ativação exige plataforma", async () => {

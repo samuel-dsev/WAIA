@@ -13,6 +13,7 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
     return csrf(request, _response, next);
   });
   router.get("/session", (request, response) => response.json(adminService.session(request.auth)));
+  router.get("/users/lookup", asyncRoute(async (request, response) => response.json(await adminService.lookupGlobalUser({ auth: request.auth, email: request.query.email }))));
   router.get("/tenants", asyncRoute(async (request, response) => response.json(await adminService.listTenants({ auth: request.auth, query: { ...request.query, limit: request.query.pageSize } }))));
   router.post("/tenants", asyncRoute(async (request, response) => response.status(201).json(await adminService.createTenant({ auth: request.auth, body: request.body }))));
   router.get("/tenants/:empresaId", asyncRoute(async (request, response) => response.json(await adminService.getTenant({ auth: request.auth, empresaId: request.params.empresaId }))));

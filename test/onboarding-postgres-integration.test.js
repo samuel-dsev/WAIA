@@ -114,13 +114,48 @@ test("PostgreSQL bloqueia tenant incompleto e ativa publicação pronta atomicam
        RETURNING id`,
       [tenantId, `phone-${suffix}`, `waba-${suffix}`, `+5511${String(Date.now()).slice(-8)}`],
     )).rows[0].id;
-    await owner.query(
+    const accessTokenCredentialId = (await owner.query(
       `INSERT INTO credenciais_empresa
          (empresa_id, provedor, finalidade, secret_ciphertext, secret_kdf_salt,
           secret_nonce, secret_tag, key_version, valor_mascarado, created_by)
        VALUES ($1,'meta',$2,decode(repeat('11',32),'hex'),decode(repeat('22',16),'hex'),
-               decode(repeat('33',12),'hex'),decode(repeat('44',16),'hex'),'v1','••••meta',$3)`,
+               decode(repeat('33',12),'hex'),decode(repeat('44',16),'hex'),'v1','••••meta',$3)
+       RETURNING id`,
       [tenantId, `whatsapp:${numberId}`, actorId],
+    )).rows[0].id;
+    const appCredentialIds = (await owner.query(
+      `INSERT INTO credenciais_empresa
+         (empresa_id, provedor, finalidade, secret_ciphertext, secret_kdf_salt,
+          secret_nonce, secret_tag, key_version, valor_mascarado, created_by)
+       VALUES
+         ($1,'meta','meta-app-secret',decode(repeat('55',32),'hex'),decode(repeat('66',16),'hex'),
+          decode(repeat('77',12),'hex'),decode(repeat('88',16),'hex'),'v1','••••app',$2),
+         ($1,'meta','meta-verify-token',decode(repeat('99',32),'hex'),decode(repeat('aa',16),'hex'),
+          decode(repeat('bb',12),'hex'),decode(repeat('cc',16),'hex'),'v1','••••verify',$2)
+       RETURNING id, finalidade`,
+      [tenantId, actorId],
+    )).rows;
+    const credentialByPurpose = Object.fromEntries(appCredentialIds.map((credential) => [credential.finalidade, credential.id]));
+    const metaApplicationId = (await owner.query(
+      `INSERT INTO aplicativos_meta
+         (empresa_id, nome, app_id, modo, estado, app_secret_credencial_id,
+          verify_token_credencial_id, created_by, updated_by)
+       VALUES ($1,'Aplicativo sintético',$2,'proprio','ativo',$3,$4,$5,$5)
+       RETURNING id`,
+      [
+        tenantId,
+        `app-${suffix}`,
+        credentialByPurpose["meta-app-secret"],
+        credentialByPurpose["meta-verify-token"],
+        actorId,
+      ],
+    )).rows[0].id;
+    await owner.query(
+      `UPDATE numeros_whatsapp
+          SET aplicativo_meta_id = $2,
+              access_token_credencial_id = $3
+        WHERE empresa_id = $1 AND id = $4`,
+      [tenantId, metaApplicationId, accessTokenCredentialId, numberId],
     );
     await owner.query(
       `INSERT INTO integracoes

@@ -36,6 +36,11 @@ const RESOURCES = Object.freeze({
   }),
   numbers: descriptor({
     table: "numeros_whatsapp", fields: { phoneNumberId: "phone_number_id", wabaId: "waba_id", numeroE164: "numero_e164", numeroMascarado: "numero_mascarado", nomeVerificado: "nome_verificado", status: "status", principal: "principal" },
+    select: {
+      metaAppId: "aplicativo_meta_id",
+      bindingRevision: "meta_binding_revision",
+      metaApplicationState: "(SELECT am.estado FROM aplicativos_meta am WHERE am.empresa_id = r.empresa_id AND am.id = r.aplicativo_meta_id AND am.deleted_at IS NULL LIMIT 1)",
+    },
     filters: { status: "status", principal: "principal" }, sorts: { createdAt: "created_at", status: "status", nomeVerificado: "nome_verificado" }, search: ["phone_number_id", "numero_mascarado", "nome_verificado"], softDelete: true,
   }),
   credentials: descriptor({
@@ -150,7 +155,11 @@ function outputRow(resource, row) {
   if (!row) return null;
   const result = { ...row };
   if (resource === "memberships") { result.role = fromMemberRole(result.role); result.status = fromMemberStatus(result.status); }
-  if (resource === "users") { result.status = fromUserStatus(result.status); result.role = fromMemberRole(result.role); }
+  if (resource === "users") {
+    result.status = fromUserStatus(result.status);
+    result.role = fromMemberRole(result.role);
+    if (result.membershipStatus) result.membershipStatus = fromMemberStatus(result.membershipStatus);
+  }
   return result;
 }
 function inputValue(resource, field, value) {
@@ -285,6 +294,20 @@ export class PostgresAdminRepository {
     });
   }
 
+  async lookupGlobalUser({ email }) {
+    return withPlatformTransaction(this.pool, {}, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT id, email::text, nome AS name, status,
+                created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM usuarios
+          WHERE lower(email::text) = lower($1) AND deleted_at IS NULL
+          LIMIT 1`,
+        [email],
+      )).rows[0];
+      return row ? { ...row, status: fromUserStatus(row.status) } : null;
+    });
+  }
+
   async getTenant({ empresaId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const row = (await client.query(`SELECT id, slug::text, nome AS "name", nome_exibicao AS "displayName", identidade AS identity, timezone, locale, status, retencao_mensagens_dias AS "messageRetentionDays", retencao_logs_dias AS "logRetentionDays", created_at AS "createdAt", updated_at AS "updatedAt" FROM empresas WHERE id = $1 AND deleted_at IS NULL`, [empresaId])).rows[0];
@@ -366,7 +389,7 @@ export class PostgresAdminRepository {
       const total = Number((await client.query(`SELECT count(*)::int total FROM ${definition.from} ${where}`, params)).rows[0]?.total || 0);
       const sortColumn = qualified("u", definition.sorts[sort] || definition.sorts.createdAt);
       params.push(limit, (page - 1) * limit);
-      const rows = (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM ${definition.from} ${where} ORDER BY ${sortColumn} ${direction === "asc" ? "ASC" : "DESC"}, u.id ${direction === "asc" ? "ASC" : "DESC"} LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows.map((row) => outputRow("users", row));
+      const rows = (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, ue.permissoes AS permissions, ue.status AS "membershipStatus", u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM ${definition.from} ${where} ORDER BY ${sortColumn} ${direction === "asc" ? "ASC" : "DESC"}, u.id ${direction === "asc" ? "ASC" : "DESC"} LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows.map((row) => outputRow("users", row));
       return { items: rows, pagination: paginationMeta(total, page, limit) };
     });
   }
@@ -389,7 +412,7 @@ export class PostgresAdminRepository {
 
   async get({ resource, empresaId, id }) {
     if (resource === "users") {
-      return withPlatformTransaction(this.pool, {}, async ({ client }) => outputRow("users", (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id WHERE ue.empresa_id = $1 AND u.id = $2 AND u.deleted_at IS NULL`, [empresaId, id])).rows[0]));
+      return withPlatformTransaction(this.pool, {}, async ({ client }) => outputRow("users", (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, ue.permissoes AS permissions, ue.status AS "membershipStatus", u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id WHERE ue.empresa_id = $1 AND u.id = $2 AND u.deleted_at IS NULL`, [empresaId, id])).rows[0]));
     }
     const definition = resourceDefinition(resource);
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
@@ -674,8 +697,8 @@ export class PostgresAdminRepository {
     const passwordHash = await hashPassword(data.initialPassword);
     return usePlatformTransaction(this.pool, { transaction }, async ({ client }) => {
       const row = (await client.query(`INSERT INTO usuarios (id, email, nome, password_hash, status) VALUES ($1,$2,$3,$4,$5) RETURNING id, email::text, nome AS name, status, created_at AS "createdAt", updated_at AS "updatedAt"`, [id, data.email, data.name, passwordHash, toUserStatus(data.status)])).rows[0];
-      await client.query(`INSERT INTO usuarios_empresas (empresa_id, usuario_id, papel, status) VALUES ($1,$2,$3,'ativo')`, [empresaId, id, toMemberRole(data.role)]);
-      return outputRow("users", { ...row, empresaId, role: toMemberRole(data.role) });
+      await client.query(`INSERT INTO usuarios_empresas (empresa_id, usuario_id, papel, status, permissoes) VALUES ($1,$2,$3,'ativo',$4)`, [empresaId, id, toMemberRole(data.role), data.permissions || []]);
+      return outputRow("users", { ...row, empresaId, role: toMemberRole(data.role), permissions: data.permissions || [] });
     });
   }
 
@@ -747,7 +770,12 @@ export class PostgresAdminRepository {
       const membership = await client.query("SELECT 1 FROM usuarios_empresas WHERE empresa_id = $1 AND usuario_id = $2", [empresaId, id]);
       if (!membership.rowCount) return null;
       const columns = { email: "email", name: "nome", status: "status" };
-      if (changes.role) await client.query("UPDATE usuarios_empresas SET papel = $3 WHERE empresa_id = $1 AND usuario_id = $2", [empresaId, id, toMemberRole(changes.role)]);
+      if (changes.role || changes.permissions) {
+        await client.query(
+          "UPDATE usuarios_empresas SET papel = COALESCE($3, papel), permissoes = COALESCE($4, permissoes) WHERE empresa_id = $1 AND usuario_id = $2",
+          [empresaId, id, changes.role ? toMemberRole(changes.role) : null, changes.permissions || null],
+        );
+      }
       const entries = Object.entries(changes).filter(([field]) => columns[field] || field === "initialPassword");
       const params = [id];
       const assignments = [];
@@ -756,7 +784,7 @@ export class PostgresAdminRepository {
         assignments.push(`${field === "initialPassword" ? "password_hash" : columns[field]} = $${params.length}`);
       }
       if (assignments.length) await client.query(`UPDATE usuarios SET ${assignments.join(", ")} WHERE id = $1 AND deleted_at IS NULL`, params);
-      return outputRow("users", (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id AND ue.empresa_id = $1 WHERE u.id = $2 AND u.deleted_at IS NULL`, [empresaId, id])).rows[0]);
+      return outputRow("users", (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, ue.permissoes AS permissions, ue.status AS "membershipStatus", u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id AND ue.empresa_id = $1 WHERE u.id = $2 AND u.deleted_at IS NULL`, [empresaId, id])).rows[0]);
     });
   }
 
@@ -767,6 +795,53 @@ export class PostgresAdminRepository {
         [userId, empresaId],
       )
     ).rowCount > 0);
+  }
+
+  async assertTenantAdminContinuity({ empresaId, userId, resource, changes = {}, remove = false, transaction }) {
+    const run = resource === "users" ? usePlatformTransaction : useTenantTransaction;
+    return run(this.pool, { empresaId, transaction }, async ({ client }) => {
+      const current = (await client.query(
+        `SELECT ue.papel AS role, ue.status AS membership_status, u.status AS user_status
+           FROM usuarios_empresas ue
+           JOIN usuarios u ON u.id = ue.usuario_id
+          WHERE ue.empresa_id = $1 AND ue.usuario_id = $2
+          FOR UPDATE OF ue, u`,
+        [empresaId, userId],
+      )).rows[0];
+      if (!current) return;
+      const currentlyActiveAdmin = current.role === "administrador"
+        && current.membership_status === "ativo"
+        && current.user_status === "ativo";
+      if (!currentlyActiveAdmin) return;
+      const nextRole = remove ? null : changes.role === undefined ? current.role : toMemberRole(changes.role);
+      const nextMembershipStatus = remove
+        ? null
+        : resource === "memberships" && changes.status !== undefined
+          ? toMemberStatus(changes.status)
+          : current.membership_status;
+      const nextUserStatus = remove
+        ? null
+        : resource === "users" && changes.status !== undefined
+          ? toUserStatus(changes.status)
+          : current.user_status;
+      if (nextRole === "administrador" && nextMembershipStatus === "ativo" && nextUserStatus === "ativo") return;
+      const activeAdmins = await client.query(
+        `SELECT ue.usuario_id
+           FROM usuarios_empresas ue
+           JOIN usuarios u ON u.id = ue.usuario_id
+          WHERE ue.empresa_id = $1
+            AND ue.papel = 'administrador'
+            AND ue.status = 'ativo'
+            AND u.status = 'ativo'
+          FOR UPDATE OF ue, u`,
+        [empresaId],
+      );
+      if (activeAdmins.rowCount <= 1) {
+        throw new AdminValidationError("A empresa precisa manter ao menos um administrador ativo.", {
+          field: changes.role !== undefined ? "role" : changes.status !== undefined ? "status" : undefined,
+        });
+      }
+    });
   }
 
   async remove({ resource, empresaId, id, transaction }) {

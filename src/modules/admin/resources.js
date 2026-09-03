@@ -12,7 +12,7 @@ const definitions = {
   users: {
     read: "admin",
     write: "admin",
-    fields: { email: "email", name: "string", role: "role", status: "string", initialPassword: "string" },
+    fields: { email: "email", name: "string", role: "role", status: "string", initialPassword: "string", permissions: "array?" },
     filters: ["status", "search"],
     sorts: ["name", "email", "createdAt"],
   },

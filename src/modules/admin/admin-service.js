@@ -21,7 +21,7 @@ const OPERATOR_ASSIGNABLE_PERMISSIONS = new Set([
   "orders.read", "orders.update", "appointments.read", "appointments.update",
 ]);
 const TENANT_MODULES = Object.freeze([
-  "catalog", "orders", "events", "appointments", "payments", "human_handoff", "ai_freeform", "external_integrations",
+  "catalog", "orders", "events", "appointments", "payments", "human_handoff", "ai_freeform", "external_integrations", "flows",
 ]);
 const ONBOARDING_RESOURCE = Object.freeze({ read: "admin", write: "admin" });
 const META_RESOURCE = Object.freeze({ read: "admin", write: "admin" });
@@ -339,6 +339,20 @@ export class AdminService {
     return this.repository.listTenants({ ...options, allowedIds });
   }
 
+  async lookupGlobalUser({ auth, email }) {
+    await this.#platform(auth, "user.global.lookup", "users");
+    if (typeof this.repository.lookupGlobalUser !== "function") {
+      throw new AdminValidationError("A consulta de usuário global não está configurada.");
+    }
+    const normalizedEmail = String(email || "").trim().toLocaleLowerCase("en-US");
+    if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalizedEmail)) {
+      throw new AdminValidationError("Informe o e-mail exato de um usuário existente.", { field: "email" });
+    }
+    const user = await this.repository.lookupGlobalUser({ email: normalizedEmail });
+    if (!user) throw new AdminNotFoundError();
+    return user;
+  }
+
   async getTenant({ auth, empresaId }) {
     await this.#tenant(auth, empresaId, { write: "admin" }, { action: "tenant.read", resource: "tenants" });
     const tenant = await this.repository.getTenant({ empresaId });
@@ -617,6 +631,15 @@ export class AdminService {
       empresaId,
       platform: resource === "users",
       mutate: async (transaction) => {
+        if (["users", "memberships"].includes(resource)) {
+          await this.repository.assertTenantAdminContinuity?.({
+            empresaId,
+            userId: recordId,
+            resource,
+            changes: payload,
+            transaction,
+          });
+        }
         const updated = await this.repository.update({ resource, empresaId, id: recordId, changes: payload, transaction });
         if (!updated) throw new AdminNotFoundError();
         return updated;
@@ -636,6 +659,15 @@ export class AdminService {
       empresaId,
       platform: resource === "users",
       mutate: async (transaction) => {
+        if (["users", "memberships"].includes(resource)) {
+          await this.repository.assertTenantAdminContinuity?.({
+            empresaId,
+            userId: recordId,
+            resource,
+            remove: true,
+            transaction,
+          });
+        }
         const removed = await this.repository.remove({ resource, empresaId, id: recordId, transaction });
         if (!removed) throw new AdminNotFoundError();
         return removed;

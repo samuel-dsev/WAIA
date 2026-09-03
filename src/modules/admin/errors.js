@@ -64,6 +64,19 @@ function publicConflictDetails(details) {
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+function publicValidationDetails(details) {
+  if (!details || typeof details !== "object") return undefined;
+  const field = typeof details.field === "string"
+    && /^[A-Za-z][A-Za-z0-9_.-]{0,199}$/u.test(details.field)
+    ? details.field
+    : null;
+  const path = typeof details.path === "string" && details.path.startsWith("/")
+    ? details.path.slice(0, 500)
+    : null;
+  if (!field && !path) return undefined;
+  return { ...(field ? { field } : {}), ...(path ? { path } : {}) };
+}
+
 function publicWorkflowError(error) {
   const issues = Array.isArray(error.issues) ? error.issues.map(publicIssue).filter(Boolean).slice(0, 200) : [];
   const details = publicConflictDetails(error.details);
@@ -86,7 +99,13 @@ function publicWorkflowError(error) {
 
 export function publicAdminError(error) {
   if (error instanceof AdminError) {
-    return { status: error.status, body: { error: { code: error.code, message: error.message } } };
+    const details = error instanceof AdminValidationError
+      ? publicValidationDetails(error.details)
+      : publicConflictDetails(error.details);
+    return {
+      status: error.status,
+      body: { error: { code: error.code, message: error.message, ...(details ? { details } : {}) } },
+    };
   }
   if (error instanceof VersionedConfigurationError || error instanceof OnboardingError) {
     return publicWorkflowError(error);

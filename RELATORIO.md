@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 5 do `PLAN.md`.
+Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 6 do `PLAN.md`, ainda aguardando aprovação para commit e push.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e a `dev` local partem de `6227959`, commit remoto da Fase 4 (`v1.5.0`).
-- A Fase 5 está no working tree, preparada na versão `1.6.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
+- `origin/dev` e o `HEAD` local permanecem em `88e37e6`, commit remoto da Fase 5 (`v1.6.0`).
+- A Fase 6 está no working tree, preparada na versão `1.7.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -73,6 +73,21 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O endpoint legado `/webhook` permanece disponível para o Capitão Mor.
 - Gate atingido: duas conexões com assinaturas, números, WABAs e credenciais diferentes foram testadas sem cruzamento, inclusive em PostgreSQL real.
 
+### Fase 6 — wizard do painel
+
+- O painel possui um wizard de dez etapas com empresa, módulos, atendimento, menus e roteamento, operação, fluxos, IA, WhatsApp/Meta, equipe e revisão.
+- O draft V2 é a fonte de verdade do wizard. Autosave e retomada usam `draftVersion` e `revision`; conflito HTTP 409 pausa novas gravações e exige recarga explícita, sem sobrescrever a revisão atual.
+- Trocas de tenant, navegação e logout aguardam o flush do rascunho; mutações de coleções são revertidas localmente quando o backend rejeita o draft, evitando perda silenciosa ou duplicação na tentativa seguinte.
+- O refresh periódico não recria o wizard nem fecha diálogos com alterações em andamento.
+- Dependências de módulos, menus, ações, parâmetros, serviços, horários, fluxos, credenciais, aplicativos Meta e usuários são escolhidos por rótulos; referências internas são geradas ou selecionadas sem digitação de UUIDs ou action keys.
+- O editor de fluxos usa somente etapas e condições allowlisted, com escolha visual dos destinos e campos coletados.
+- Chaves de IA, App Secret, verify token e access token seguem diretamente para o cofre. O draft, o DOM persistente e as respostas administrativas recebem somente referências ou valores mascarados.
+- A equipe pode criar usuários, vincular conta global por e-mail exato, editar permissões e remover vínculos; estados globais e do vínculo são tratados separadamente e o backend impede suspensão, remoção ou rebaixamento do último administrador ativo.
+- A revisão apresenta checks do backend, validação, publicação e ativação com a versão confirmada. O simulador permanece explicitamente indisponível até a Fase 7 e não finge uma execução.
+- Erros estruturados chegam aos campos do formulário e dos diálogos com foco e atributos acessíveis; o layout possui navegação por teclado, adaptação móvel e suporte a redução de movimento.
+- O Nginx do painel encaminha somente `/api/`, `/webhook` e `/webhook/` à API, permitindo usar a origem pública do painel no callback Meta sem expor outras rotas internas.
+- Gate atingido: a jornada da Fase 6 não exige IDs internos, SQL, `.env`, arquivo de tenant, alteração de código ou reinício por empresa.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -83,6 +98,20 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - PostgreSQL 16 real no `waia-test`: 19 migrações aplicadas; integração de dois aplicativos, números e credenciais Meta por tenant aprovada, incluindo bloqueio de vínculo cruzado.
 - API e worker do `waia-test` ficaram saudáveis; `/health/ready` respondeu HTTP 200 com estado `ready`.
 
+## Validação da Fase 6
+
+- `npm test`: 357 testes descobertos, 347 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- Testes focados do painel e do suporte administrativo: 48 aprovados e 0 falhas.
+- `node --check`: 200 arquivos JavaScript válidos.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- `docker compose -p waia-test config --quiet`: configuração válida; nenhum projeto Docker existente foi removido e nenhum projeto permanente por fase foi criado.
+- PostgreSQL 16 real no `waia-test`: 9 integrações aprovadas, cobrindo onboarding/ativação transacional, publicação versionada, fluxos, Meta multiaplicativo, RLS, mídia, outbox e Google Sheets.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências de resposta humana.
+- Jornada HTTP real pelo painel: login, criação de empresa sintética em `draft`, salvamento do draft V2, retomada na etapa 2, readiness bloqueada e conflito stale HTTP 409 sem overwrite.
+- Build final reconstruído no projeto existente `waia-test`; API, worker, PostgreSQL e Redis ficaram saudáveis, enquanto `db-init` e migrador concluíram com código zero.
+- Nginx validado com `nginx -t`; os assets finais `app.js` e `onboarding.js` responderam HTTP 200, o callback dinâmico foi encaminhado à API e `/health/live` e `/health/ready` responderam HTTP 200.
+- A navegação visual autenticada pelo navegador embutido não foi executada porque esse navegador não alcançou a rede local do Docker; a navegação real permanece também na matriz final da Fase 10.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -90,27 +119,23 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Configurações e revisões não armazenam segredos; apenas referências ao cofre são permitidas.
 - Fluxos não executam JavaScript, SQL, HTTP livre nem templates arbitrários.
 - O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
-- O painel ainda não expõe a gestão visual das conexões Meta; ele será implementado junto ao wizard na Fase 6.
+- O ambiente `waia-test` recebeu somente dados sintéticos de validação da Fase 6; a Empresa Beta Sintética planejada para a Fase 9 não foi criada.
 
-## Próxima fase planejada — Fase 6
+## Próxima fase planejada — Fase 7
 
-A Fase 6 — wizard do painel só pode começar após o commit e push confirmados da Fase 5 e uma nova autorização explícita do usuário.
+A Fase 7 — simulador e preflight só pode começar após o commit e push confirmados da Fase 6 e uma nova autorização explícita do usuário.
 
 Escopo previsto:
 
-- dez etapas do onboarding;
-- autosave e retomada com revisão otimista;
-- formulários condicionais e seletores sem IDs técnicos;
-- CRUDs completos da operação;
-- construtor visual de fluxos;
-- checklist, simulador e erros por campo;
-- acessibilidade do painel.
+- runtime local isolado com conversa e contato sintéticos;
+- IA e documentos simulados, sem chamadas Meta, OpenAI ou Google reais;
+- preflights externos auditados e sanitizados;
+- revisão final integrada ao wizard.
 
-Gate: nenhuma etapa pode exigir IDs internos, SQL ou edição de `.env`.
+Gate: simulação e runtime devem tomar decisões equivalentes.
 
 ## Pendências posteriores
 
-- Fase 7: simulador isolado e preflight externo auditado.
 - Fase 8: regressão integral do Capitão Mor.
 - Fase 9: Empresa Beta Sintética criada e ativada somente pelo painel, sem dados da Filaretti.
 - Fase 10: validação final com PostgreSQL, Redis, Docker, RLS, carga, auditoria, segredos e navegação real.
