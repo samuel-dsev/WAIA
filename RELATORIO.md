@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 2 de setembro de 2026 após a implementação e validação da Fase 7 do `PLAN.md`, ainda aguardando aprovação para commit e push.
+Atualizado em 3 de setembro de 2026 após a implementação e validação da Fase 8 do `PLAN.md`, ainda aguardando aprovação para commit e push.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o `HEAD` local permanecem em `7a96a0a`, commit remoto da Fase 6 (`v1.7.0`).
-- A Fase 7 está no working tree, preparada na versão `1.8.0`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
+- `origin/dev` e o `HEAD` local permanecem em `f5602e9`, commit remoto da Fase 7 (`v1.8.0`).
+- A Fase 8 está no working tree, preparada na versão `1.8.1`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -105,6 +105,16 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - A etapa de revisão do wizard agora executa preflight e abre um diálogo acessível do simulador, sem persistir histórico no navegador.
 - Gate atingido no escopo conversacional: simulador e runtime tomam as mesmas decisões usando o mesmo contrato compilado e a mesma fábrica de runtime. Efeitos externos continuam deliberadamente simulados e serão cobertos pela regressão operacional das Fases 8 a 10.
 
+### Fase 8 — regressão do Capitão Mor
+
+- A jornada conversacional cobre saudação, menu, cardápio, endereço, regras públicas, agenda, paginação, seleção de sexta e sábado, compra, preço atual, PIX sintético mascarado, comprovante e pedido pendente.
+- PIX e dados transacionais permanecem fora da IA; perguntas públicas usam somente o contexto permitido, e uma nova intenção interrompe com segurança a espera por comprovante.
+- Handoff, pausa da automação e resposta humana sobrevivem à reinstanciação dos serviços sem duplicar mensagens.
+- Outbox e exportação Google Sheets preservam referências mínimas, retry após indisponibilidade do Redis, contrato legado `Pedidos!A:G` e idempotência após reinício.
+- Status Meta evolui sem regressão, e mensagens, IDs Meta, IDs internos, filas, runtimes, IA e credenciais permanecem isolados por tenant mesmo quando os identificadores são repetidos.
+- O seed canônico do Capitão Mor foi carregado no PostgreSQL do `waia-test` com dados exclusivamente sintéticos e reaplicado de forma idempotente.
+- Gate atingido: nenhuma regressão funcional ou evidência de vazamento entre tenants foi encontrada na matriz da Fase 8.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -143,6 +153,19 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Após a recriação da API, o Nginx do painel precisou ser reiniciado para renovar o endereço do upstream; depois disso, o proxy voltou a responder normalmente. Nenhuma alteração de configuração ou novo projeto permanente foi necessária.
 - O painel e seus assets responderam HTTP 200 no `localhost` publicado temporariamente. O navegador embutido permaneceu sem acesso à rede local do Docker; o contêiner temporário foi encerrado e os projetos existentes foram preservados.
 
+## Validação da Fase 8
+
+- Os três lotes especializados de regressão somam 10 testes aprovados: 5 de conversa e compra, 3 de isolamento multiempresa e 2 de operação, reinício e idempotência.
+- `npm test`: 400 testes descobertos, 389 aprovados, 0 falhas e 11 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: os quatro arquivos JavaScript adicionados nesta fase possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas e com distribuição por tenant preservada.
+- O seed foi executado novamente no projeto `waia-test` e retornou `0 novo(s), 2 descoberto(s)`, comprovando reaplicação idempotente sem criar outro projeto Docker.
+- PostgreSQL 16 real no `waia-test`: 10 integrações aprovadas, incluindo a carga do Capitão Mor pelo papel restrito da aplicação, publicação versionada, onboarding, flows, Meta multiaplicativo, RLS, mídia, outbox e Google Sheets.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências da resposta humana.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores exclusivamente sintéticos; nenhum projeto permanente por fase foi criado ou removido.
+- API e worker foram reconstruídos na versão `1.8.1` e ficaram saudáveis; `db-init`, `media-init` e migrador concluíram com código zero, com 19 migrações descobertas e nenhuma nova nesta fase.
+- `/health/live` e `/health/ready` responderam HTTP 200 com estados `ok` e `ready`.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -150,24 +173,24 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Configurações e revisões não armazenam segredos; apenas referências ao cofre são permitidas.
 - Fluxos não executam JavaScript, SQL, HTTP livre nem templates arbitrários.
 - O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
-- O ambiente `waia-test` recebeu somente dados sintéticos de validação da Fase 6; a Empresa Beta Sintética planejada para a Fase 9 não foi criada.
+- O ambiente `waia-test` recebeu somente dados sintéticos de validação, incluindo o seed canônico do Capitão Mor; a Empresa Beta Sintética planejada para a Fase 9 não foi criada.
 
-## Próxima fase planejada — Fase 8
+## Próxima fase planejada — Fase 9
 
-A Fase 8 — regressão do Capitão Mor só pode começar após o commit e push confirmados da Fase 7 e uma nova autorização explícita do usuário.
+A Fase 9 — segunda empresa sintética só poderá começar após o commit e push confirmados da Fase 8 e uma nova autorização explícita do usuário.
 
 Escopo previsto:
 
-- saudação, menu, cardápio, agenda, eventos, paginação e compra;
-- preço atual, PIX privado, comprovante e pedido pendente;
-- Google Sheets, IA pública, troca de intenção e handoff;
-- status Meta, outbox, idempotência e isolamento entre tenants.
+- criar a Empresa Beta Sintética exclusivamente pelo painel;
+- configurar módulos, menu, respostas públicas, fluxo, agendamento, IA e Meta simuladas e usuários;
+- publicar e ativar sem operação manual de backend;
+- operar Capitão Mor e Beta simultaneamente com IDs repetidos e após reinício;
+- suspender a Beta sem alterar o Capitão Mor.
 
-Gate: nenhuma regressão funcional ou vazamento entre tenants.
+Gate: cadastro completo pelo painel, sem operação manual de backend e sem cruzamento entre tenants.
 
 ## Pendências posteriores
 
-- Fase 9: Empresa Beta Sintética criada e ativada somente pelo painel, sem dados da Filaretti.
 - Fase 10: validação final com PostgreSQL, Redis, Docker, RLS, carga, auditoria, segredos e navegação real.
 
 O teste de carga atual é uma regressão em memória; não mede capacidade de VPS, latência de rede nem limites de provedores externos.
