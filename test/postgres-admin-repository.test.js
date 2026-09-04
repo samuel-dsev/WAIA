@@ -44,6 +44,25 @@ test("configuração operacional consulta somente datas existentes na tabela", a
   assert.doesNotMatch(select, /r\.created_at/u);
 });
 
+test("recursos append-only não consultam coluna de atualização inexistente", async () => {
+  for (const [resource, table] of [
+    ["logs", "logs_operacionais"],
+    ["audit", "logs_auditoria"],
+    ["ai-usage", "uso_ia"],
+  ]) {
+    const { calls, pool } = fakePool();
+    const repository = new PostgresAdminRepository(pool);
+
+    await repository.list({ resource, empresaId: TENANT_ID, limit: 25, page: 1, sort: "occurredAt", direction: "desc", filters: {} });
+
+    const select = calls.find(({ sql }) => sql.includes(`FROM ${table} r`) && /AS "id"/u.test(sql))?.sql;
+    assert.ok(select, `consulta ausente para ${resource}`);
+    assert.match(select, /r\.created_at AS "createdAt"/u);
+    assert.match(select, /r\.occurred_at AS "occurredAt"/u);
+    assert.doesNotMatch(select, /r\.updated_at/u);
+  }
+});
+
 test("configuração de IA informa o estado da credencial própria", async () => {
   const { calls, pool } = fakePool();
   const repository = new PostgresAdminRepository(pool);

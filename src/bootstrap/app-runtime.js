@@ -213,6 +213,7 @@ export function createPostgresRuntime({
   }),
   redis = createRedisConnection({ url: config.redis.url }),
   logger = null,
+  metaHealthClient = null,
 } = {}) {
   const logSink = logger ? null : createPostgresOperationalLogSink(pool);
   const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
@@ -279,7 +280,7 @@ export function createPostgresRuntime({
     ? new MetaHealthService({
       repository: metaAppRepository,
       credentialVault,
-      client: new MetaGraphHealthClient({
+      client: metaHealthClient || new MetaGraphHealthClient({
         apiVersion: config.whatsapp.apiVersion,
         timeoutMs: config.whatsapp.requestTimeoutMs,
       }),

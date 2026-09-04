@@ -112,14 +112,17 @@ const RESOURCES = Object.freeze({
   }),
   logs: descriptor({
     table: "logs_operacionais", fields: {}, select: { severity: "severidade", category: "categoria", service: "servico", eventCode: "event_code", correlationId: "correlation_id", conversationId: "conversa_id", messageId: "mensagem_id", summary: "resumo_sanitizado", metadata: "metadata_sanitized", occurredAt: "occurred_at" },
+    dates: { createdAt: "created_at" },
     filters: { severity: "severidade", category: "categoria", service: "servico", correlationId: "correlation_id", conversationId: "conversa_id", messageId: "mensagem_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", severity: "severidade", createdAt: "created_at" },
   }),
   audit: descriptor({
     table: "logs_auditoria", fields: {}, select: { actorId: "ator_usuario_id", action: "acao", resource: "recurso_tipo", resourceId: "recurso_id", result: "resultado", changedFields: "campos_alterados_redigidos", correlationId: "correlation_id", occurredAt: "occurred_at" },
+    dates: { createdAt: "created_at" },
     filters: { action: "acao", result: "resultado", actorId: "ator_usuario_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", action: "acao", result: "resultado" },
   }),
   "ai-usage": descriptor({
     table: "uso_ia", fields: {}, select: { conversationId: "conversa_id", model: "modelo", keyType: "tipo_chave", inputTokens: "input_tokens", outputTokens: "output_tokens", totalTokens: "total_tokens", estimatedCost: "custo_estimado", success: "sucesso", error: "error_sanitized", occurredAt: "occurred_at" },
+    dates: { createdAt: "created_at" },
     filters: { model: "modelo", keyType: "tipo_chave", success: "sucesso", conversationId: "conversa_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", totalTokens: "total_tokens", estimatedCost: "custo_estimado" },
   }),
   integrations: descriptor({
