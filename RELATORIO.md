@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 4 de setembro de 2026 após a conclusão da matriz técnica e da navegação visual real da Fase 10 do `PLAN.md`.
+Atualizado em 4 de setembro de 2026 após a conclusão da Fase 10 e a elaboração do planejamento de produção e testes com empresas reais.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o último commit do `HEAD` permanecem em `e515152`, commit remoto da Fase 9 (`v1.8.2`).
-- A Fase 10 foi concluída na versão `1.8.3`, e seu commit e push na branch `dev` foram autorizados explicitamente pelo usuário.
+- `origin/dev` e o último commit do `HEAD` permanecem em `739ed4d`, commit remoto da Fase 10 (`v1.8.3`).
+- O novo planejamento pós-Fase 10 está no working tree em `implementações_finais.md`, preparado na versão `1.8.4`, sem commit ou push até confirmação explícita do usuário.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -250,3 +250,4 @@ O teste de carga atual é uma regressão em memória; não mede capacidade de VP
 ## Pendências operacionais
 
 - O `.env` local não deve ser usado para recriar o PostgreSQL persistente do `waia-test` sem antes alinhar as credenciais sintéticas já associadas ao volume.
+- O sistema está apto a avançar para correções finais, homologação limpa e piloto controlado, mas ainda não deve receber tráfego público de empresas reais antes dos gates de `implementações_finais.md`.
