@@ -8,7 +8,8 @@ coverage/
 dist/
 backups/
 *.log
-docs/
+docs/*
+!docs/OPERACAO_RELEASE.md
 PLAN.md
 RELATORIO.md
 AGENTS.md

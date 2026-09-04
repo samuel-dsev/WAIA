@@ -157,6 +157,9 @@ function decodeBoolean(value) {
 function outputRow(resource, row) {
   if (!row) return null;
   const result = { ...row };
+  if (resource === "numbers" && result.bindingRevision !== undefined) {
+    result.bindingRevision = Number(result.bindingRevision);
+  }
   if (resource === "memberships") { result.role = fromMemberRole(result.role); result.status = fromMemberStatus(result.status); }
   if (resource === "users") {
     result.status = fromUserStatus(result.status);

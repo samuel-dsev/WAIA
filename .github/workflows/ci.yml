@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm test
+      - run: find src scripts test -type f -name '*.js' -o -name '*.mjs' | sort | xargs -n1 node --check
+      - name: Validate Compose
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-owner-password
+          DATABASE_APP_PASSWORD: synthetic-ci-app-password
+        run: docker compose config --quiet
+      - name: Build immutable candidate
+        run: docker build --no-cache --tag waia:${GITHUB_SHA} .
+      - name: Record image digest
+        run: docker image inspect waia:${GITHUB_SHA} --format '{{index .RepoDigests 0}} {{.Id}}' || docker image inspect waia:${GITHUB_SHA} --format '{{.Id}}'

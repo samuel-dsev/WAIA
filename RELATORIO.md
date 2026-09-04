@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 4 de setembro de 2026 após a conclusão da Fase 10 e a elaboração do planejamento de produção e testes com empresas reais.
+Atualizado em 4 de setembro de 2026 após a implementação técnica dos bloqueadores da Fase 11 e seus ensaios locais e isolados.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o último commit do `HEAD` permanecem em `739ed4d`, commit remoto da Fase 10 (`v1.8.3`).
-- O novo planejamento pós-Fase 10 está no working tree em `implementações_finais.md`, preparado na versão `1.8.4`, sem commit ou push até confirmação explícita do usuário.
+- `origin/dev` e o último commit do `HEAD` permanecem em `d2605f3`, planejamento pós-Fase 10 (`v1.8.4`).
+- A Fase 11 está somente no working tree da branch `dev`, preparada na versão `1.9.0`, sem commit ou push até confirmação explícita do usuário.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -137,6 +137,18 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - A jornada visual revelou que os recursos append-only `logs`, `audit` e `ai-usage` tentavam selecionar `updated_at`, coluna inexistente nessas tabelas. Os descritores PostgreSQL agora consultam somente `created_at` e `occurred_at`, com teste de regressão dedicado; auditoria, logs e uso de IA foram revalidados no navegador sem erro.
 - O build padrão inicialmente parou em `npm ci --omit=dev` pela rede do BuildKit. Após confirmar o registry por `npm ping`, o mesmo Dockerfile foi executado com rede de build `host`, instalou 104 pacotes pelo lockfile e gerou API e worker sem reutilizar `node_modules` de outra imagem.
 
+### Fase 11 — bloqueadores técnicos implementados; gate externo pendente
+
+- O Caddy encaminha somente a rota exata `/metrics`; o monitor operacional interno consulta readiness, métricas, heartbeat, filas e falhas e envia transições sanitizadas a um webhook HTTPS configurado. Alertas de quota da IA compartilham o mesmo destino.
+- Backup e restore agora exigem projeto Compose explícito, alvo isolado e confirmação exata. O bundle contém dump PostgreSQL, mídia, manifesto, checksums e referência não secreta de custódia do keyring; o restore recompõe schema, dados, privilégios, migrações e mídia.
+- A migration 020 torna a guarda recursiva de segredos compatível com `pg_restore` sob `search_path` restrito. O procedimento também recupera dumps anteriores à migration e limpa de forma determinística apenas o banco confirmado.
+- As páginas de privacidade e exclusão foram generalizadas para a plataforma e exigem nome, contato e aviso de controladores aprovados; sem configuração respondem 503.
+- A dependência transitiva `qs` foi atualizada pelo caminho suportado. O audit de produção ficou sem vulnerabilidades conhecidas.
+- O painel ganhou troca autenticada de senha com verificação da senha atual, política forte, auditoria e revogação das demais sessões. Recuperação e MFA ficam formalmente mitigadas no piloto por credenciais individuais e allowlist IP/CIDR de todo o prefixo administrativo.
+- OpenAI usa por padrão o snapshot `gpt-4.1-mini-2025-04-14`, catálogo de preços versionado e substituível por configuração, `X-Client-Request-Id` correlacionado e registro somente do request ID técnico devolvido pelo provedor.
+- CI, build imutável por digest, promoção, rollback, custódia do keyring, restore e alertas foram documentados. O proxy temporário versionado em `.tmp/whatsapp-test` foi removido.
+- Nenhuma alteração por tenant foi adicionada a `.env`, SQL, seed, código ou reinício; o Capitão Mor permaneceu funcional nas integrações reais.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -223,6 +235,19 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - A navegação autenticada foi executada visualmente em uma aba integrada. A auditoria exibiu 22 registros da Beta; logs e uso de IA exibiram seus estados vazios sem erro; os diagnósticos mostraram PostgreSQL, Redis e worker saudáveis; o logout encerrou a sessão com segurança.
 - A porta e a rede bridge usadas somente para a inspeção visual foram removidas ao final. O painel voltou a expor apenas as portas internas do Compose, a rede temporária `waia-test-browser-public` está ausente e os demais serviços e projetos Docker foram preservados.
 
+## Validação da Fase 11
+
+- `npm test`: 414 testes descobertos, 402 aprovados, 0 falhas e 12 integrações opt-in ignoradas no host; a imagem limpa repetiu a suíte sem falhas com `NODE_ENV=test`.
+- PostgreSQL 16 e Redis reais no `waia-test`: 12 de 12 integrações aprovadas em execução serial, incluindo regressão do Capitão Mor, onboarding, fluxos, Meta multiaplicativo, RLS, mídia, outbox, Google Sheets, painel persistente e Redis.
+- A integração real encontrou e corrigiu a divergência de tipo de `bindingRevision` entre o repositório administrativo e o módulo Meta; o valor `bigint` agora sai como `number` em ambos.
+- `npm audit --omit=dev`: 0 vulnerabilidades. `docker compose -p waia-test config --quiet` e a validação nativa do Caddy passaram.
+- `node --check`: 220 arquivos JavaScript válidos. Build final limpo e sem `node_modules` externo concluído a partir de `node:22-alpine`; `npm ci --omit=dev` instalou 104 pacotes e encontrou 0 vulnerabilidades. A imagem local `waia:1.9.0-phase11` foi identificada pelo manifest list `sha256:ee62e513b1a37a875451d8d0519c0f407de628efacd18952a17d645d1055ef44`.
+- `/metrics`, `/privacy` e `/data-deletion` passaram via HTTPS e Caddy real em contêiner transitório sem portas publicadas. O Caddy persistente não foi iniciado porque as portas 80/443 já pertenciam a outro ambiente, que não foi alterado.
+- O ensaio de desastre criou bundle com checksums, restaurou dump e mídia em projeto Compose descartável, reaplicou privilégios e migrations e confirmou readiness, marcador de mídia e descriptografia de credencial sintética pelo keyring recuperado.
+- O primeiro restore revelou a função recursiva incompatível com o `search_path` do `pg_restore`; a migration 020 e o procedimento compatível com dumps históricos foram implementados e o ensaio completo foi repetido com sucesso.
+- O projeto descartável, seus volumes e os dois bundles temporários foram removidos após a validação. O `waia-test` permaneceu; a migration 020 foi aplicada nele e API, worker, PostgreSQL e Redis continuaram saudáveis.
+- Nenhuma credencial real, endpoint externo ou produção foi usado. Não houve commit, push, tag, merge ou deploy.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -250,4 +275,7 @@ O teste de carga atual é uma regressão em memória; não mede capacidade de VP
 ## Pendências operacionais
 
 - O `.env` local não deve ser usado para recriar o PostgreSQL persistente do `waia-test` sem antes alinhar as credenciais sintéticas já associadas ao volume.
-- O sistema está apto a avançar para correções finais, homologação limpa e piloto controlado, mas ainda não deve receber tráfego público de empresas reais antes dos gates de `implementações_finais.md`.
+- O responsável ainda precisa aprovar RPO/RTO, conteúdo jurídico, modelo/perímetro de acesso administrativo e responsável por incidentes.
+- Um destino HTTPS real de alertas precisa ser fornecido e receber os testes de disparo e recuperação; nenhum endpoint externo foi inferido ou acionado nesta fase.
+- MFA, convite e recuperação automatizada continuam posteriores ao piloto; o piloto só pode prosseguir após a allowlist/VPN real ser configurada e comprovada.
+- O gate integral da Fase 11 permanece aberto até esses itens humanos e externos serem aceitos formalmente. Não iniciar a Fase 12 nem tráfego público sem nova confirmação explícita.

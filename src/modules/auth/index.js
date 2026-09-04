@@ -1,6 +1,7 @@
 export * from "./auth-service.js";
 export * from "./errors.js";
 export * from "./http.js";
+export * from "./network-policy.js";
 export * from "./password.js";
 export * from "./permissions.js";
 export * from "./rate-limiter.js";

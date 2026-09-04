@@ -1,5 +1,5 @@
 import { AuthenticationRequiredError, AuthError, InvalidCredentialsError } from "./errors.js";
-import { DUMMY_PASSWORD_HASH, verifyPassword } from "./password.js";
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "./password.js";
 
 function requiredMethod(target, method, name) {
   if (typeof target?.[method] !== "function") throw new TypeError(`${name}.${method} é obrigatório.`);
@@ -63,7 +63,7 @@ export class AuthService {
   } = {}) {
     for (const method of [
       "findUserByEmail", "listMemberships", "createSession", "findSessionByTokenHash",
-      "revokeSession", "revokeByTokenHash", "touchSession",
+      "revokeSession", "revokeByTokenHash", "touchSession", "findUserById", "changePassword",
     ]) requiredMethod(repository, method, "repository");
     requiredMethod(tokenCodec, "issue", "tokenCodec");
     requiredMethod(tokenCodec, "hash", "tokenCodec");
@@ -176,6 +176,44 @@ export class AuthService {
       result: "success",
       ip,
       details: { sessionId },
+    });
+  }
+
+  async changePassword({ sessionId, userId, currentPassword, newPassword, ip = null } = {}) {
+    if (!sessionId || !userId) throw new AuthenticationRequiredError();
+    const user = await this.repository.findUserById(userId);
+    const currentValid = await verifyPassword(currentPassword, user?.passwordHash || this.dummyPasswordHash);
+    if (!user || user.status !== "active" || !currentValid) {
+      await this.#audit("auth.password_change_failed", {
+        actorUserId: user?.id || userId,
+        result: "denied",
+        ip,
+        details: { reason: "invalid_current_password" },
+      });
+      throw new InvalidCredentialsError();
+    }
+    if (await verifyPassword(newPassword, user.passwordHash)) {
+      throw new AuthError("A nova senha deve ser diferente da senha atual.", {
+        code: "PASSWORD_REUSE_NOT_ALLOWED",
+        status: 422,
+      });
+    }
+    let passwordHash;
+    try {
+      passwordHash = await hashPassword(newPassword);
+    } catch {
+      throw new AuthError("A nova senha deve possuir entre 12 e 256 caracteres.", {
+        code: "PASSWORD_POLICY_VIOLATION",
+        status: 422,
+      });
+    }
+    const changedAt = this.clock();
+    await this.repository.changePassword({ userId, passwordHash, keepSessionId: sessionId, changedAt });
+    await this.#audit("auth.password_changed", {
+      actorUserId: userId,
+      result: "success",
+      ip,
+      details: { sessionId, otherSessionsRevoked: true },
     });
   }
 

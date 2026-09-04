@@ -26,6 +26,8 @@ test("painel oferece superfícies administrativas reais e responsivas", async ()
   assert.match(js, /conversations\/\$\{encodeURIComponent\(conversationId\)\}\/messages/u);
   assert.match(js, /failed-jobs\/\$\{encodeURIComponent\(id\)\}\/\$\{action\}/u);
   assert.match(js, /Reenfileirar com segurança/u);
+  assert.match(html, /id="passwordButton"/u);
+  assert.match(js, /\/auth\/password/u);
   assert.match(html, /img-src 'self' data: blob:/u);
   assert.doesNotMatch(js, /\/numbers\/\$\{encodeURIComponent\(numberId\)\}\/credentials\/rotate/u);
   assert.doesNotMatch(`${html}${js}`, /sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,}/u);

@@ -313,10 +313,18 @@ export class ResponsesClientFactory {
 export class VersionedPricingCatalog {
   constructor(prices = {}) {
     const defaults = {
-      "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-08-29" },
-      "gpt-4.1-mini-2025-04-14": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-08-29" },
+      "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-09-04" },
+      "gpt-4.1-mini-2025-04-14": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-09-04" },
     };
-    this.prices = new Map(Object.entries({ ...defaults, ...prices }));
+    let overrides = prices;
+    if (typeof prices === "string") {
+      try { overrides = prices.trim() ? JSON.parse(prices) : {}; }
+      catch { throw new TypeError("OPENAI_PRICING_CATALOG deve conter JSON válido."); }
+    }
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+      throw new TypeError("Catalogo de precos OpenAI invalido.");
+    }
+    this.prices = new Map(Object.entries({ ...defaults, ...overrides }));
   }
   async get({ model }) { return this.prices.get(model) || null; }
 }

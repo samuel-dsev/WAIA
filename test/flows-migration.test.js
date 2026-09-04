@@ -60,3 +60,11 @@ test("migração 018 recusa segredos em definições e remove mídia na anonimiz
   assert.match(sql, /Submissoes terminais de fluxo nao podem ser reabertas/u);
   assert.match(sql, /CREATE TRIGGER fluxo_documentos_protect_state/u);
 });
+
+test("migração 020 mantém a guarda recursiva utilizável durante restore", async () => {
+  const sql = await readFile(new URL("../db/migrations/020_restore_safe_flow_guard.sql", import.meta.url), "utf8");
+
+  assert.match(sql, /SET search_path = pg_catalog/u);
+  assert.match(sql, /public\.flow_json_has_forbidden_key\(item\.value\)/u);
+  assert.match(sql, /public\.flow_json_has_forbidden_key\(child\)/u);
+});

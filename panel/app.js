@@ -234,7 +234,7 @@ const state = {
 
 const elements = Object.fromEntries([
   "loginView", "loginForm", "loginEmail", "loginPassword", "loginEmailError", "loginPasswordError", "loginError",
-  "appShell", "sidebar", "primaryNav", "menuToggle", "tenantSelect", "sessionUser", "logoutButton", "refreshToggle",
+  "appShell", "sidebar", "primaryNav", "menuToggle", "tenantSelect", "sessionUser", "passwordButton", "logoutButton", "refreshToggle",
   "mainContent", "viewEyebrow", "viewTitle", "viewDescription", "viewActions", "filterForm", "clearFilters",
   "contentState", "viewContent", "pagination", "previousPage", "nextPage", "pageSummary", "pageSize",
   "confirmDialog", "confirmTitle", "confirmMessage", "confirmCancel", "confirmAccept",
@@ -1465,6 +1465,25 @@ elements.logoutButton.addEventListener("click", async () => {
   if (!await disposeOnboardingWizard()) return;
   try { await apiFetch("/auth/logout", { method: "POST", body: {} }); } catch { /* sessão local será encerrada */ }
   showLogin("Sessão encerrada com segurança.");
+});
+
+elements.passwordButton.addEventListener("click", () => {
+  openFormDialog("Trocar senha", [
+    ["currentPassword", "Senha atual", "password", true],
+    ["newPassword", "Nova senha (12 a 256 caracteres)", "password", true],
+    ["confirmation", "Confirme a nova senha", "password", true],
+  ], async (values) => {
+    if (values.newPassword !== values.confirmation) throw new Error("As novas senhas não conferem.");
+    await apiFetch("/auth/password", {
+      method: "POST",
+      body: { currentPassword: values.currentPassword, newPassword: values.newPassword },
+    });
+    values.currentPassword = "";
+    values.newPassword = "";
+    values.confirmation = "";
+    toast("Senha alterada. As outras sessões foram encerradas.");
+  });
+  document.getElementById("dynamic-currentPassword").autocomplete = "current-password";
 });
 
 elements.primaryNav.addEventListener("click", (event) => {

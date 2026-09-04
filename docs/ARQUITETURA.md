@@ -38,7 +38,7 @@ Respostas humanas seguem o mesmo contrato assíncrono: o operador autenticado as
 
 Falhas finais permanecem em `jobs_falhos` como incidentes imutáveis quanto ao erro original. A API administrativa expõe somente campos explicitamente selecionados, nunca o payload bruto. Um retry manual encerra o incidente e cria outra outbox com novo ID, evitando colisão com o job falho retido no BullMQ; uma resolução simples encerra apenas o alerta. Motivo, ator, tipo de resolução e vínculo com o novo job ficam persistidos e a auditoria participa da mesma transação.
 
-Métricas de eventos são agregadas em um namespace Redis compartilhado pela API e pelo worker. O endpoint Prometheus combina esses contadores/resumos com gauges calculados no momento da coleta a partir do PostgreSQL, BullMQ e heartbeats. O contrato proíbe labels de alta cardinalidade; nomes de tenants e IDs operacionais nunca entram nas séries. `/metrics` usa um Bearer dedicado, comparação em tempo constante e falha fechado quando o token não está configurado.
+Métricas de eventos são agregadas em um namespace Redis compartilhado pela API e pelo worker. O endpoint Prometheus combina esses contadores/resumos com gauges calculados no momento da coleta a partir do PostgreSQL, BullMQ e heartbeats. O contrato proíbe labels de alta cardinalidade; nomes de tenants e IDs operacionais nunca entram nas séries. O Caddy encaminha somente a rota exata `/metrics`; a API exige Bearer dedicado, comparação em tempo constante e falha fechado quando o token não está configurado. O monitor interno consome essa rota e envia somente transições sanitizadas ao destino HTTPS configurado.
 
 ## Isolamento
 
@@ -56,7 +56,7 @@ Mídias recebidas não entram em Redis nem no contexto da IA. O worker resolve o
 
 Produção falha fechada se os segredos de validação do webhook ou a infraestrutura essencial estiverem ausentes. Desenvolvimento e testes podem usar adaptadores simulados explicitamente habilitados.
 
-Sessões administrativas são opacas, revogáveis e persistidas, com cookies `HttpOnly`, `Secure` em produção e `SameSite=Strict`. Mutações exigem CSRF e autorização no backend. A alteração principal e seu log de auditoria compartilham a mesma transação, inclusive para credenciais e mudanças de atendimento; sem auditoria persistida, a mutação é revertida.
+Sessões administrativas são opacas, revogáveis e persistidas, com cookies `HttpOnly`, `Secure` em produção e `SameSite=Strict`. Mutações exigem CSRF e autorização no backend. A allowlist de IP/CIDR pode restringir todo o prefixo administrativo; a troca de senha exige a senha atual e revoga as demais sessões. A alteração principal e seu log de auditoria compartilham a mesma transação, inclusive para credenciais e mudanças de atendimento; sem auditoria persistida, a mutação é revertida.
 
 O envio manual só é aceito em conversa aberta, no modo humano e pelo usuário atualmente responsável. Contatos bloqueados e números inativos falham antes da criação da mensagem. O texto não é enviado à IA e o Redis recebe apenas a referência persistida.
 

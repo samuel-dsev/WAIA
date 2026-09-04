@@ -34,6 +34,11 @@ export class PostgresAuthRepository {
       "SELECT * FROM usuarios WHERE email = $1 AND deleted_at IS NULL LIMIT 1", [email],
     )).rows[0]));
   }
+  findUserById(userId) {
+    return withPlatformTransaction(this.pool, { usuarioId: userId }, async ({ client }) => mapUser((await client.query(
+      "SELECT * FROM usuarios WHERE id = $1 AND deleted_at IS NULL LIMIT 1", [userId],
+    )).rows[0]));
+  }
   listMemberships(userId) {
     return withPlatformTransaction(this.pool, { usuarioId: userId }, async ({ client }) => (
       await client.query("SELECT * FROM usuarios_empresas WHERE usuario_id = $1", [userId])
@@ -80,6 +85,22 @@ export class PostgresAuthRepository {
       "UPDATE auth_sessions SET last_seen_at = $2 WHERE id = $1 AND revoked_at IS NULL", [id, seenAt],
     ));
   }
+  changePassword({ userId, passwordHash, keepSessionId, changedAt }) {
+    return withPlatformTransaction(this.pool, { usuarioId: userId }, async ({ client }) => {
+      const updated = await client.query(
+        "UPDATE usuarios SET password_hash = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL",
+        [userId, passwordHash, changedAt],
+      );
+      if (!updated.rowCount) return false;
+      await client.query(
+        `UPDATE auth_sessions
+            SET revoked_at = COALESCE(revoked_at, $3)
+          WHERE usuario_id = $1 AND id <> $2 AND revoked_at IS NULL`,
+        [userId, keepSessionId, changedAt],
+      );
+      return true;
+    });
+  }
 }
 
 export class MemoryAuthRepository {
@@ -90,6 +111,7 @@ export class MemoryAuthRepository {
     this.sessions = new Map();
   }
   async findUserByEmail(email) { return clone(this.users.get(email.toLowerCase()) || null); }
+  async findUserById(userId) { return clone([...this.users.values()].find((item) => item.id === userId) || null); }
   async listMemberships(userId) { return clone(this.memberships.filter((item) => item.userId === userId)); }
   async createSession(input) {
     const session = { id: randomUUID(), ...clone(input), lastSeenAt: input.createdAt, revokedAt: null };
@@ -105,4 +127,13 @@ export class MemoryAuthRepository {
   async revokeSession(id, { userId, revokedAt }) { const item = this.sessions.get(id); if (item?.userId === userId) item.revokedAt = revokedAt; }
   async revokeByTokenHash(hash, { revokedAt }) { for (const item of this.sessions.values()) if (Buffer.from(item.tokenHash).equals(Buffer.from(hash))) item.revokedAt = revokedAt; }
   async touchSession(id, { seenAt }) { const item = this.sessions.get(id); if (item) item.lastSeenAt = seenAt; }
+  async changePassword({ userId, passwordHash, keepSessionId, changedAt }) {
+    const user = [...this.users.values()].find((item) => item.id === userId);
+    if (!user) return false;
+    user.passwordHash = passwordHash;
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId && session.id !== keepSessionId && !session.revokedAt) session.revokedAt = changedAt;
+    }
+    return true;
+  }
 }

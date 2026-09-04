@@ -77,6 +77,8 @@ export function createOpenAiGateway({
           ...safeHistory,
           { role: "user", content: userMessage },
         ],
+      }, {
+        headers: context?.correlationId ? { "X-Client-Request-Id": String(context.correlationId).slice(0, 512) } : {},
       });
       const text = String(response.output_text || "").trim();
       if (!text) throw new IntegrationError("A OpenAI não retornou texto.", { code: "OPENAI_EMPTY_RESPONSE" });
@@ -91,6 +93,7 @@ export function createOpenAiGateway({
           outputTokens,
           totalTokens: Number(response.usage?.total_tokens || inputTokens + outputTokens),
         },
+        requestId: response?._request_id || null,
       };
     } catch (error) {
       safeIntegrationLog(logger, "warn", "openai_reply_failed", scoped.tenant, {
@@ -98,6 +101,7 @@ export function createOpenAiGateway({
         operation: "reply",
         status: error?.status,
         errorCode: error?.code || "OPENAI_UNAVAILABLE",
+        requestId: error?.requestID || null,
       });
       if (error instanceof IntegrationError) throw error;
       throw new IntegrationError("A OpenAI está indisponível.", {

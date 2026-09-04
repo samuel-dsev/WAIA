@@ -23,7 +23,7 @@ import {
 } from "../infra/postgres/repositories/webhook-repository.js";
 import { PostgresConversationRepository } from "../modules/conversations/index.js";
 import { PostgresAuthRepository, createSessionTokenCodec, MemoryAuthRateLimiter } from "../modules/auth/index.js";
-import { AuthService, authErrorMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
+import { AuthService, authErrorMiddleware, createAdminNetworkMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
 import { AdminService, PostgresAdminRepository, adminErrorMiddleware, createAdminRouter } from "../modules/admin/index.js";
 import {
   CAPABILITY_CATALOG_V2,
@@ -112,8 +112,9 @@ import {
   createOperationalMetricsCollector,
   recordMetric,
 } from "../operations/metrics.js";
+import { createLegalPageHandler } from "../legal/legal-pages.js";
+import { createConfiguredAlertSink } from "../operations/alert-sink.js";
 
-const publicDirectory = fileURLToPath(new URL("../../public", import.meta.url));
 const panelDirectory = fileURLToPath(new URL("../../panel", import.meta.url));
 
 export async function probeWorkerHeartbeats(redis) {
@@ -218,6 +219,7 @@ export function createPostgresRuntime({
   const logSink = logger ? null : createPostgresOperationalLogSink(pool);
   const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
   const metrics = new RedisMetricsRegistry(redis);
+  const alertSink = createConfiguredAlertSink(config.alerts);
   const conversationRepository = new PostgresConversationRepository(pool);
   const conversationService = new ConversationService({ repository: conversationRepository });
   const mediaStore = new PrivateMediaStore({ root: config.media.storageRoot, maxBytes: config.media.maxBytes });
@@ -365,7 +367,8 @@ export function createPostgresRuntime({
       credentialVault,
     }),
     ledger: new PostgresAiLedger(pool),
-    pricingCatalog: new VersionedPricingCatalog(),
+    pricingCatalog: new VersionedPricingCatalog(config.openai.pricingCatalog),
+    alertSink,
     logger: runtimeLogger,
   });
   const tenantDefinitionRepository = new PostgresTenantDefinitionRepository(pool, {
@@ -570,8 +573,8 @@ export function createApiApp({
   app.get("/metrics", metricsCollector
     ? createMetricsHandler({ collector: metricsCollector, token: config.metrics?.bearerToken })
     : (_request, response) => response.status(404).end());
-  app.get("/privacy", (_request, response) => response.sendFile("privacy.html", { root: publicDirectory }));
-  app.get("/data-deletion", (_request, response) => response.sendFile("data-deletion.html", { root: publicDirectory }));
+  app.get("/privacy", createLegalPageHandler({ file: "privacy.html", config: config.legal }));
+  app.get("/data-deletion", createLegalPageHandler({ file: "data-deletion.html", config: config.legal }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
   if (runtime.metaWebhookService) {
     app.get("/webhook/meta/:webhookPublicId", createMetaMultiAppVerificationHandler({ service: runtime.metaWebhookService }));
@@ -597,8 +600,9 @@ export function createApiApp({
     secureCookies: config.security.cookieSecure,
     sessionTtlMs: config.security.sessionTtlHours * 60 * 60_000,
   });
-  app.use("/api/admin/auth", authRouter);
-  app.use("/api/admin", createAdminRouter({
+  const adminNetwork = createAdminNetworkMiddleware({ allowlist: config.security.adminNetworkAllowlist });
+  app.use("/api/admin/auth", adminNetwork, authRouter);
+  app.use("/api/admin", adminNetwork, createAdminRouter({
     adminService: runtime.adminService,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),

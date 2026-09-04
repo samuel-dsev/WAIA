@@ -11,6 +11,7 @@ function fakePool() {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (/count\(\*\)/u.test(sql)) return { rows: [{ total: 1 }], rowCount: 1 };
+      if (/AS "bindingRevision"/u.test(sql)) return { rows: [{ id: "number-1", bindingRevision: "7" }], rowCount: 1 };
       if (/AS "id"/u.test(sql)) return { rows: [{ id: "contact-1", empresaId: TENANT_ID, name: "Contato" }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
@@ -79,7 +80,7 @@ test("números expõem vínculo Meta versionado para seletores do painel", async
   const { calls, pool } = fakePool();
   const repository = new PostgresAdminRepository(pool);
 
-  await repository.list({ resource: "numbers", empresaId: TENANT_ID, limit: 25, page: 1, sort: "createdAt", direction: "desc", filters: {} });
+  const result = await repository.list({ resource: "numbers", empresaId: TENANT_ID, limit: 25, page: 1, sort: "createdAt", direction: "desc", filters: {} });
 
   const select = calls.find(({ sql }) => /FROM numeros_whatsapp r/u.test(sql) && /AS "bindingRevision"/u.test(sql))?.sql;
   assert.ok(select);
@@ -87,6 +88,7 @@ test("números expõem vínculo Meta versionado para seletores do painel", async
   assert.match(select, /r\.meta_binding_revision AS "bindingRevision"/u);
   assert.match(select, /SELECT am\.estado FROM aplicativos_meta am/u);
   assert.doesNotMatch(select, /access_token_credencial_id/u);
+  assert.equal(result.items[0].bindingRevision, 7);
 });
 
 test("usuários distinguem o estado global do estado do vínculo com a empresa", async () => {
