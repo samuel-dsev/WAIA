@@ -150,7 +150,7 @@ function withConfiguredHandlers(baseDefinitions, { publicReplies, eventPresentat
   }
   return baseDefinitions.map((definition) => {
     const replies = repliesByModule.get(definition.key) || new Map();
-    const actions = [...definition.actions, ...replies.keys()];
+    const actions = [...new Set([...definition.actions, ...replies.keys()])];
     if (definition.key !== "events" && replies.size === 0) return definition;
     return {
       ...definition,

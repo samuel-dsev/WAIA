@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 3 de setembro de 2026 após a implementação e validação da Fase 8 do `PLAN.md`, ainda aguardando aprovação para commit e push.
+Atualizado em 3 de setembro de 2026 após a implementação e validação da Fase 9 do `PLAN.md`, ainda aguardando aprovação para commit e push.
 
 ## Objetivo vigente
 
@@ -13,8 +13,8 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o `HEAD` local permanecem em `f5602e9`, commit remoto da Fase 7 (`v1.8.0`).
-- A Fase 8 está no working tree, preparada na versão `1.8.1`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
+- `origin/dev` e o `HEAD` local permanecem em `cbb03c1`, commit remoto da Fase 8 (`v1.8.1`).
+- A Fase 9 está no working tree, preparada na versão `1.8.2`, mas ainda não foi commitada nem enviada porque depende de confirmação explícita.
 - Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
 
 ## Fases concluídas
@@ -115,6 +115,18 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O seed canônico do Capitão Mor foi carregado no PostgreSQL do `waia-test` com dados exclusivamente sintéticos e reaplicado de forma idempotente.
 - Gate atingido: nenhuma regressão funcional ou evidência de vazamento entre tenants foi encontrada na matriz da Fase 8.
 
+### Fase 9 — segunda empresa sintética
+
+- A jornada automatizada cria a Empresa Beta Sintética pelas mesmas rotas HTTP, autenticação, autorização e CSRF usadas pelo painel; nenhum tenant é criado por SQL, seed, arquivo ou alteração de `.env`.
+- A Beta recebe administrador e operador, configuração V2 com módulos, menu, respostas públicas, agendamento, fluxo declarativo e IA simulada; o simulador usa o draft corrente sem rede ou credenciais reais.
+- Meta é exercitada com aplicativo, número, vínculo e preflight completamente simulados e tenant-scoped, sem chamada ao Graph real nem uso de token real.
+- Publicação e ativação materializam revisões e versões de fluxo; a suspensão posterior bloqueia somente a Beta e mantém o Capitão Mor ativo.
+- Callbacks Meta simultâneos reutilizam IDs de mensagem, conversa, correlação e credencial entre Capitão Mor e Beta sem cruzar segredo, deduplicação, fila ou tenant.
+- A recriação lógica do worker preserva revisões, conversas e estados duráveis distintos: o Capitão Mor continua aguardando comprovante enquanto a Beta continua o agendamento.
+- A regressão da Beta revelou que uma resposta pública associada a uma ação canônica podia duplicar essa ação no registro do simulador. O runtime agora deduplica as chaves e mantém a resposta configurada como override.
+- O fluxo completo foi validado no harness administrativo isolado; a Beta não foi persistida no PostgreSQL do `waia-test`, e a navegação visual não foi declarada como executada porque nenhuma superfície de navegador estava disponível nesta sessão.
+- Gate atingido no escopo automatizado da Fase 9: cadastro completo pelas rotas do painel, operação simultânea, reinício lógico e suspensão sem operação manual de backend nem cruzamento entre tenants. A navegação visual e a matriz final persistente permanecem na Fase 10.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -166,6 +178,20 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - API e worker foram reconstruídos na versão `1.8.1` e ficaram saudáveis; `db-init`, `media-init` e migrador concluíram com código zero, com 19 migrações descobertas e nenhuma nova nesta fase.
 - `/health/live` e `/health/ready` responderam HTTP 200 com estados `ok` e `ready`.
 
+## Validação da Fase 9
+
+- Testes focados da Fase 9: 3 aprovados e 0 falhas, cobrindo jornada administrativa completa, callbacks repetidos e isolamento após recriação do worker.
+- `npm test`: 403 testes descobertos, 392 aprovados, 0 falhas e 11 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: o runtime corrigido e os dois novos arquivos de teste possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas e com distribuição por tenant preservada.
+- PostgreSQL 16 real no `waia-test`: 10 integrações aprovadas em grupos serializados, incluindo publicação versionada, onboarding transacional, flows, Meta multiaplicativo, RLS, agendamento, mídia, resposta humana, Google Sheets e regressão do Capitão Mor.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências da resposta humana.
+- `docker compose -p waia-test config --quiet`: configuração válida; o conjunto de credenciais sintéticas já associado ao volume precisou ser preservado para não divergir do `.env` local.
+- O primeiro build padrão com a correção concluiu normalmente. Após apenas a mudança de versão invalidar a camada de dependências, o registry deixou o `npm ci` sem progresso; o build final `1.8.2` reutilizou o `node_modules` da imagem já validada, pois nenhuma dependência mudou, e substituiu somente os arquivos do checkout.
+- API e worker foram recriados na versão `1.8.2`; `db-init` e migrador concluíram com código zero, PostgreSQL e Redis permaneceram saudáveis e o Nginx do painel teve o upstream renovado.
+- API e worker não contêm `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL`; `/health/live` e `/health/ready` responderam HTTP 200 com estados `ok` e `ready`.
+- Um proxy local e um administrador exclusivamente sintéticos foram criados para tentar a navegação visual; como não havia navegador disponível, ambos foram removidos ao final sem alterar os demais dados ou projetos Docker.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -175,22 +201,21 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
 - O ambiente `waia-test` recebeu somente dados sintéticos de validação, incluindo o seed canônico do Capitão Mor; a Empresa Beta Sintética planejada para a Fase 9 não foi criada.
 
-## Próxima fase planejada — Fase 9
+## Próxima fase planejada — Fase 10
 
-A Fase 9 — segunda empresa sintética só poderá começar após o commit e push confirmados da Fase 8 e uma nova autorização explícita do usuário.
+A Fase 10 — validação final só poderá começar após o commit e push confirmados da Fase 9 e uma nova autorização explícita do usuário.
 
 Escopo previsto:
 
-- criar a Empresa Beta Sintética exclusivamente pelo painel;
-- configurar módulos, menu, respostas públicas, fluxo, agendamento, IA e Meta simuladas e usuários;
-- publicar e ativar sem operação manual de backend;
-- operar Capitão Mor e Beta simultaneamente com IDs repetidos e após reinício;
-- suspender a Beta sem alterar o Capitão Mor.
-
-Gate: cadastro completo pelo painel, sem operação manual de backend e sem cruzamento entre tenants.
-
-## Pendências posteriores
-
-- Fase 10: validação final com PostgreSQL, Redis, Docker, RLS, carga, auditoria, segredos e navegação real.
+- suíte integral e build reproduzível;
+- PostgreSQL, Redis, Docker Compose, RLS, auditoria e inspeção de segredos;
+- carga e health/readiness;
+- jornada persistente e navegação visual real do painel;
+- consolidação final da documentação e do relatório.
 
 O teste de carga atual é uma regressão em memória; não mede capacidade de VPS, latência de rede nem limites de provedores externos.
+
+## Pendências operacionais
+
+- A navegação visual autenticada ainda depende de uma superfície de navegador capaz de alcançar o painel local.
+- O `.env` local não deve ser usado para recriar o PostgreSQL persistente do `waia-test` sem antes alinhar as credenciais sintéticas já associadas ao volume.
