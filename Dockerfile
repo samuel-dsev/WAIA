@@ -6,7 +6,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY . .
+COPY src ./src
+COPY scripts ./scripts
+COPY db ./db
+COPY panel ./panel
+COPY public ./public
 
 USER node
 EXPOSE 3001

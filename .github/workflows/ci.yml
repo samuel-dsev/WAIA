@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
-      - run: find src scripts test -type f -name '*.js' -o -name '*.mjs' | sort | xargs -n1 node --check
+      - run: find src scripts test -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | sort -z | xargs -0 -n1 node --check
       - name: Validate Compose
         env:
           POSTGRES_PASSWORD: synthetic-ci-owner-password
@@ -29,5 +29,20 @@ jobs:
         run: docker compose config --quiet
       - name: Build immutable candidate
         run: docker build --no-cache --tag waia:${GITHUB_SHA} .
-      - name: Record image digest
-        run: docker image inspect waia:${GITHUB_SHA} --format '{{index .RepoDigests 0}} {{.Id}}' || docker image inspect waia:${GITHUB_SHA} --format '{{.Id}}'
+      - name: Export immutable candidate
+        run: |
+          echo "WAIA_IMAGE=waia:${GITHUB_SHA}" > image-metadata.txt
+          docker image inspect waia:${GITHUB_SHA} --format 'IMAGE_ID={{.Id}}' >> image-metadata.txt
+          docker image inspect waia:${GITHUB_SHA} --format 'REPO_DIGEST={{index .RepoDigests 0}}' >> image-metadata.txt || true
+          docker save waia:${GITHUB_SHA} | gzip -1 > waia-image.tar.gz
+          sha256sum waia-image.tar.gz > waia-image.tar.gz.sha256
+          cat image-metadata.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waia-image-${{ github.sha }}
+          path: |
+            image-metadata.txt
+            waia-image.tar.gz
+            waia-image.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0

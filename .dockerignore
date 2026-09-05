@@ -7,7 +7,6 @@ backups
 npm-debug.log
 .env
 .env.*
-!.env.example
 .secrets
 .git
 .codex

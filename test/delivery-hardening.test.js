@@ -148,6 +148,8 @@ test("infra publica painel e separa migrador do papel restrito da aplicação", 
   ]);
   assert.match(nginx, /location \/api\/[^]*proxy_pass http:\/\/api:3001/u);
   assert.match(compose, /DATABASE_APP_USER/u);
+  assert.match(compose, /x-waia-image: &waia-image[^]*image: \$\{WAIA_IMAGE:-waia:local\}/u);
+  assert.equal((compose.match(/<<: \*waia-image/gu) || []).length, 4);
   assert.match(compose, /METRICS_BEARER_TOKEN/u);
   assert.match(compose, /DATABASE_MIGRATOR_URL: postgres:\/\/\$\{POSTGRES_USER/u);
   assert.match(compose, /media-init:[^]*chown -R 1000:1000 \/media/u);
@@ -176,6 +178,21 @@ test("runtime SaaS não aceita fallback global de credenciais Meta", async () =>
   assert.match(envExample, /METRICS_BEARER_TOKEN=/u);
   assert.match(configSource, /METRICS_BEARER_TOKEN>=32/u);
   assert.doesNotMatch(envExample, /^WHATSAPP_(?:ACCESS_TOKEN|PHONE_NUMBER_ID)=/mu);
+});
+
+test("imagem de produção contém somente os artefatos necessários ao runtime", async () => {
+  const [dockerfile, workflow] = await Promise.all([
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(dockerfile, /COPY \. \./u);
+  for (const directory of ["src", "scripts", "db", "panel", "public"]) {
+    assert.match(dockerfile, new RegExp(`COPY ${directory} \\.\\/${directory}`, "u"));
+  }
+  assert.match(workflow, /docker save waia:\$\{GITHUB_SHA\} \| gzip -1 > waia-image\.tar\.gz/u);
+  assert.match(workflow, /sha256sum waia-image\.tar\.gz > waia-image\.tar\.gz\.sha256/u);
+  assert.match(workflow, /path: \|[^]*waia-image\.tar\.gz[^]*waia-image\.tar\.gz\.sha256/u);
 });
 
 test("retenção percorre tenants isoladamente e continua após falha", async () => {

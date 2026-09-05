@@ -20,6 +20,21 @@ Este runbook descreve o caminho manual reproduzível até a homologação. Ele n
 4. Construir sem cache: `docker build --no-cache --tag waia:<versao>-<sha> .`.
 5. Registrar `docker image inspect waia:<versao>-<sha> --format '{{.Id}}'`, commit, versão, horário UTC e resultado dos testes. A Fase 12 deverá promover exatamente esse artefato ou um digest publicado, sem reconstrução.
 
+Defina `WAIA_IMAGE=waia:<versao>-<sha>` ao subir homologação e produção com `docker compose up --no-build`. API, worker, migrador e monitor referenciam essa mesma imagem; não reconstrua nenhum serviço durante a promoção.
+
+O workflow da branch `dev` exporta `waia-image.tar.gz`, seu checksum SHA-256 e `image-metadata.txt` no artefato `waia-image-<commit>`. Depois de baixar o artefato no alvo autorizado, execute `sha256sum --check waia-image.tar.gz.sha256`, `gzip -dc waia-image.tar.gz | docker load` e confira o image ID carregado contra `IMAGE_ID` antes de definir `WAIA_IMAGE`. Isso transporta a imagem aprovada sem reconstruí-la.
+
+## Homologação limpa
+
+1. Use um nome Compose exclusivo e temporário, diferente de `waia-test`, e volumes vazios.
+2. Gere senhas, `SESSION_PEPPER`, token de métricas e `MASTER_KEYRING` exclusivos; não copie `.env` de outro ambiente.
+3. Suba PostgreSQL, Redis, `db-init`, `media-init`, migrador, API, worker, painel e Caddy com `WAIA_IMAGE` e `--no-build`.
+4. Confirme as 20 migrações e crie o primeiro administrador com `docker compose run --rm -T api npm run admin:create`; informe a senha somente pela entrada padrão, nunca por argumento ou arquivo.
+5. Cadastre as duas empresas sintéticas pelas rotas consumidas pelo painel, sem SQL, seed ou alteração de configuração por tenant.
+6. Execute E2E, reinicie API e worker, suspenda uma empresa e confirme que a outra permanece isolada.
+7. Gere backup completo e restaure-o em outro alvo descartável usando os gates de confirmação documentados abaixo.
+8. Registre commit, versão, image ID/digest, horários, testes e resultado do restore. Remova o ambiente temporário somente depois de preservar o relatório sem segredos.
+
 ## Backup completo
 
 Definir explicitamente `WAIA_COMPOSE_PROJECT`, `KEYRING_CUSTODY_REFERENCE` e o diretório de backup. A referência de custódia identifica o segredo no cofre externo; nunca contém o keyring.

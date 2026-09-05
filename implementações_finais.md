@@ -184,7 +184,7 @@ Execução:
 - criar ambiente de homologação separado de `waia-test` e de produção;
 - gerar segredos exclusivamente para homologação;
 - instalar PostgreSQL, Redis, API, worker, painel e proxy em volumes vazios;
-- executar `db-init`, 19 migrações e criação interativa do primeiro administrador;
+- executar `db-init`, 20 migrações e criação interativa do primeiro administrador;
 - não executar seed de demonstração em produção;
 - cadastrar duas empresas sintéticas somente pelo painel;
 - executar E2E, reinício, suspensão, backup e restore;

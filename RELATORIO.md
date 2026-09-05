@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 4 de setembro de 2026 após a implementação técnica dos bloqueadores da Fase 11 e seus ensaios locais e isolados.
+Atualizado em 4 de setembro de 2026 após a homologação técnica limpa da Fase 12, ainda sem promoção da release candidate.
 
 ## Objetivo vigente
 
@@ -149,6 +149,17 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - CI, build imutável por digest, promoção, rollback, custódia do keyring, restore e alertas foram documentados. O proxy temporário versionado em `.tmp/whatsapp-test` foi removido.
 - Nenhuma alteração por tenant foi adicionada a `.env`, SQL, seed, código ou reinício; o Capitão Mor permaneceu funcional nas integrações reais.
 
+### Fase 12 — homologação técnica limpa executada; release candidate pendente
+
+- O Compose passou a aceitar `WAIA_IMAGE` em API, worker, migrador e monitor, permitindo promover o mesmo artefato com `--no-build`; o build local permanece apenas como fallback de desenvolvimento.
+- O CI corrige a descoberta de JavaScript, constrói uma imagem identificada pelo commit e preserva a imagem exportada, seu checksum SHA-256 e os metadados do artefato como resultado do workflow.
+- A imagem de produção copia somente `src`, `scripts`, `db`, `panel` e `public`; testes, relatórios, documentação e arquivos de ambiente não alteram mais o digest do runtime.
+- A homologação `waia-phase12-homolog` nasceu em volumes vazios, com credenciais exclusivamente sintéticas e sem seed. `db-init` concluiu e 20 de 20 migrations foram aplicadas.
+- O primeiro administrador foi criado pelo comando interativo, com senha apenas pelo stdin. Duas empresas sintéticas foram criadas pelas rotas autenticadas consumidas pelo painel, sem SQL, seed ou configuração manual por tenant; Alpha foi suspensa e Beta permaneceu em draft.
+- API e worker foram reiniciados e retomaram com readiness 200, preservando os dois tenants e seus estados.
+- Um backup completo da homologação foi restaurado no projeto descartável `waia-phase12-restore`; readiness, mídia e os estados acessados pelo painel foram recuperados.
+- A release candidate permanece sem commit/tag porque o fechamento Git depende da apresentação dos arquivos, testes, versão e mensagem ao usuário.
+
 ## Validação da Fase 5
 
 - `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
@@ -248,6 +259,21 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O projeto descartável, seus volumes e os dois bundles temporários foram removidos após a validação. O `waia-test` permaneceu; a migration 020 foi aplicada nele e API, worker, PostgreSQL e Redis continuaram saudáveis.
 - Nenhuma credencial real, endpoint externo ou produção foi usado. Não houve commit, push, tag, merge ou deploy.
 
+## Validação da Fase 12
+
+- Branch `dev` partiu limpa de `8740fa5`, sincronizado com `origin/dev`; `origin/main` permaneceu em `00a0a09`.
+- API, worker e migrador usaram o mesmo image ID `sha256:861616212b498b2cdd3e0bbcbebf988646895e830e8d67aabfd32e99324098ad` na homologação e no alvo de restore, sempre com `--no-build`.
+- Instalação vazia: 20 migrations novas de 20 descobertas e `/health/ready` HTTP 200.
+- Contrato HTTP do painel: login, CSRF, criação de Alpha e Beta, suspensão de Alpha e listagem isolada aprovados. A sessão não dispunha de navegador para repetir a navegação visual.
+- Integrações independentes de seed: 10 aprovadas com PostgreSQL e Redis reais. As duas regressões específicas do Capitão Mor confirmaram a ausência esperada do seed e não são aplicáveis a esta homologação limpa; continuam aprovadas no `waia-test` preservado.
+- Reinício: readiness recuperada e estados `Alpha=suspended` e `Beta=draft` preservados.
+- Backup/restore: checksums, PostgreSQL, mídia, privilégios e 20 migrations aprovados; o administrador restaurado autenticou e encontrou os mesmos estados dos tenants.
+- `npm test`: 415 testes descobertos, 403 aprovados, 0 falhas e 12 integrações opt-in ignoradas no host. `npm audit --omit=dev`: 0 vulnerabilidades.
+- Caddy em loopback HTTPS: painel, readiness, métricas autenticadas e página de privacidade responderam HTTP 200 com a imagem candidata final.
+- Os dois projetos Compose descartáveis, seus volumes e o bundle sintético de backup foram removidos após a validação; o projeto `waia-test` permaneceu preservado.
+- A exportação da imagem pelo GitHub Actions só poderá ser comprovada após o commit e push autorizados; localmente, a promoção sem rebuild e a identidade da imagem foram comprovadas nos dois ambientes descartáveis.
+- Nenhuma credencial real, seed, tráfego externo, produção, tag ou merge foi usado.
+
 ## Segurança e limites preservados
 
 - Nenhuma credencial real foi lida, registrada ou usada.
@@ -278,4 +304,5 @@ O teste de carga atual é uma regressão em memória; não mede capacidade de VP
 - O responsável ainda precisa aprovar RPO/RTO, conteúdo jurídico, modelo/perímetro de acesso administrativo e responsável por incidentes.
 - Um destino HTTPS real de alertas precisa ser fornecido e receber os testes de disparo e recuperação; nenhum endpoint externo foi inferido ou acionado nesta fase.
 - MFA, convite e recuperação automatizada continuam posteriores ao piloto; o piloto só pode prosseguir após a allowlist/VPN real ser configurada e comprovada.
-- O gate integral da Fase 11 permanece aberto até esses itens humanos e externos serem aceitos formalmente. Não iniciar a Fase 12 nem tráfego público sem nova confirmação explícita.
+- O gate integral da Fase 11 permanece aberto até esses itens humanos e externos serem aceitos formalmente; tráfego público e preparação de produção continuam proibidos.
+- A Fase 12 recebeu autorização explícita apenas para homologação sintética. O commit, a tag `v1.9.1-rc.1` e a promoção do candidato dependem da revisão final e de nova confirmação; a Fase 13 continua bloqueada.
