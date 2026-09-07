@@ -1,0 +1,86 @@
+# Overlay de produção na VPS que já executa EasyPanel/Traefik.
+# Usar após docker-compose.yml. Não habilitar o perfil standalone-caddy.
+# A publicação HTTPS e a allowlist são aplicadas pelo Traefik do EasyPanel.
+services:
+  caddy:
+    profiles: [standalone-caddy]
+    ports: !reset []
+
+  api:
+    image: ${WAIA_IMAGE:?Informe a imagem imutavel homologada}
+    build: !reset null
+    ports:
+      - "127.0.0.1:13001:3001"
+    mem_limit: 384m
+    cpus: "0.50"
+    pids_limit: 128
+    networks:
+      - internal
+      - egress
+      - easypanel
+    environment:
+      # O default reservado bloqueia administração se a allowlist real faltar.
+      ADMIN_NETWORK_ALLOWLIST: ${ADMIN_NETWORK_ALLOWLIST:-192.0.2.1/32}
+      DATABASE_POOL_MAX: "5"
+      NODE_OPTIONS: "--max-old-space-size=256"
+
+  worker:
+    image: ${WAIA_IMAGE:?Informe a imagem imutavel homologada}
+    build: !reset null
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 128
+    environment:
+      WORKER_CONCURRENCY: "1"
+      DATABASE_POOL_MAX: "5"
+      NODE_OPTIONS: "--max-old-space-size=384"
+
+  migrate:
+    image: ${WAIA_IMAGE:?Informe a imagem imutavel homologada}
+    build: !reset null
+    mem_limit: 256m
+    cpus: "0.50"
+    pids_limit: 128
+
+  monitor:
+    image: ${WAIA_IMAGE:?Informe a imagem imutavel homologada}
+    build: !reset null
+    mem_limit: 128m
+    cpus: "0.25"
+    pids_limit: 64
+
+  postgres:
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 128
+
+  redis:
+    mem_limit: 192m
+    cpus: "0.25"
+    pids_limit: 64
+    command: [redis-server, --appendonly, "yes", --save, "60", "1000", --maxmemory, 96mb, --maxmemory-policy, noeviction]
+
+  panel:
+    # Docker não publica portas em um contêiner ligado somente a rede internal.
+    networks:
+      - internal
+      - egress
+      - easypanel
+    ports:
+      - "127.0.0.1:18080:8080"
+    mem_limit: 64m
+    cpus: "0.25"
+    pids_limit: 64
+
+  db-init:
+    mem_limit: 128m
+    pids_limit: 64
+
+  media-init:
+    mem_limit: 32m
+    pids_limit: 32
+
+networks:
+  easypanel:
+    external: true
+    name: easypanel

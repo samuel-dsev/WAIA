@@ -1,0 +1,52 @@
+http:
+  routers:
+    waia-public-api:
+      rule: Host(`srv1513113.hstgr.cloud`) && (PathPrefix(`/webhook`) || PathPrefix(`/health`) || PathPrefix(`/privacy`) || PathPrefix(`/data-deletion`))
+      entryPoints: [https]
+      priority: 200
+      service: waia-api
+      tls:
+        certResolver: letsencrypt
+
+    waia-admin-api:
+      rule: Host(`srv1513113.hstgr.cloud`) && PathPrefix(`/api/admin`)
+      entryPoints: [https]
+      priority: 300
+      middlewares: [waia-admin-allowlist]
+      service: waia-api
+      tls:
+        certResolver: letsencrypt
+
+    waia-metrics:
+      rule: Host(`srv1513113.hstgr.cloud`) && Path(`/metrics`)
+      entryPoints: [https]
+      priority: 300
+      middlewares: [waia-admin-allowlist]
+      service: waia-api
+      tls:
+        certResolver: letsencrypt
+
+    waia-panel:
+      rule: Host(`srv1513113.hstgr.cloud`)
+      entryPoints: [https]
+      priority: 100
+      middlewares: [waia-admin-allowlist]
+      service: waia-panel
+      tls:
+        certResolver: letsencrypt
+
+  middlewares:
+    waia-admin-allowlist:
+      ipAllowList:
+        sourceRange:
+          - __ADMIN_SOURCE_RANGE__
+
+  services:
+    waia-api:
+      loadBalancer:
+        servers:
+          - url: http://waia-prod-api-1:3001
+    waia-panel:
+      loadBalancer:
+        servers:
+          - url: http://waia-prod-panel-1:8080

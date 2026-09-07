@@ -48,6 +48,27 @@ test("alerta por webhook envia somente payload sanitizado", async () => {
   assert.throws(() => new WebhookAlertSink({ url: "http://alerts.example.invalid" }), /HTTPS/u);
 });
 
+test("alerta Discord usa content limitado e desabilita mencoes", async () => {
+  let captured;
+  const sink = new WebhookAlertSink({
+    url: "https://discord.com/api/webhooks/synthetic/id",
+    format: "discord",
+    fetchImpl: async (_url, options) => { captured = options; return { ok: true, status: 204 }; },
+  });
+  await sink.notify({
+    eventCode: "worker_heartbeat_missing",
+    severity: "critical",
+    state: "triggered",
+    fields: { apiKey: "synthetic-secret-key", note: "@everyone" },
+  });
+  const payload = JSON.parse(captured.body);
+  assert.match(payload.content, /WAIA \| CRITICAL \| worker_heartbeat_missing/u);
+  assert.doesNotMatch(payload.content, /synthetic-secret-key/u);
+  assert.ok(payload.content.length <= 2_000);
+  assert.deepEqual(payload.allowed_mentions, { parse: [] });
+  assert.throws(() => new WebhookAlertSink({ url: "https://example.invalid", format: "unknown" }), /FORMAT/u);
+});
+
 test("monitor alerta na transição, evita duplicata e informa recuperação", async () => {
   const alerts = [];
   let failing = true;
@@ -85,9 +106,12 @@ test("cópia externa sintética do keyring recupera credencial cifrada após per
 
 test("scripts de recuperação exigem alvo explícito, checksum, mídia e custódia do keyring", async () => {
   const backup = await readFile(new URL("../scripts/backup-postgres.sh", import.meta.url), "utf8");
+  const offsite = await readFile(new URL("../scripts/backup-offsite.sh", import.meta.url), "utf8");
   const restore = await readFile(new URL("../scripts/restore-postgres.sh", import.meta.url), "utf8");
   assert.match(backup, /POSTGRES_USER=.*waia_owner/u);
   assert.match(backup, /media\.tar\.gz|KEYRING_CUSTODY_REFERENCE|checksums\.sha256/u);
   assert.match(restore, /RESTORE_ISOLATED|RESTORE:\$PROJECT:\$POSTGRES_DB|sha256sum -c/u);
   assert.match(restore, /media\.tar\.gz|\/app\/\.data\/media/u);
+  assert.match(offsite, /WAIA_OFFSITE_REMOTE|type = crypt|sha256sum -c|rclone cryptcheck/u);
+  assert.doesNotMatch(offsite, /rclone (?:sync|delete|purge)/u);
 });

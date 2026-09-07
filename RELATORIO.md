@@ -1,6 +1,6 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 4 de setembro de 2026 após a homologação técnica limpa da Fase 12, ainda sem promoção da release candidate.
+Atualizado em 6 de setembro de 2026 após a publicação controlada da candidata na Hostinger. A infraestrutura WAIA está saudável e acessível por HTTPS, mas continua sem empresas ou credenciais externas reais.
 
 ## Objetivo vigente
 
@@ -13,9 +13,11 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
 - `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
 - O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
-- `origin/dev` e o último commit do `HEAD` permanecem em `d2605f3`, planejamento pós-Fase 10 (`v1.8.4`).
-- A Fase 11 está somente no working tree da branch `dev`, preparada na versão `1.9.0`, sem commit ou push até confirmação explícita do usuário.
-- Nenhuma tag, merge em `main`, implantação ou publicação externa foi executada.
+- `HEAD` e a referência local `origin/dev` apontam para `baf4a8f`, fechamento da Fase 12 (`v1.9.1`), conforme inspeção local nesta retomada; não houve fetch para confirmar o remoto ao vivo.
+- A tag local anotada `v1.9.1-rc.1` resolve para `baf4a8f`. A presença da tag no remoto e a disponibilidade do artefato da CI ainda precisam ser verificadas.
+- A branch local `main` aponta para `f07e6dc`; a referência local `origin/main` aponta para `00a0a09`. Não presumir que sejam iguais e não modificar nenhuma delas nesta preparação.
+- Alterações locais anteriores em `AGENTS.md` e `RELATORIO.md` foram identificadas e preservadas.
+- A candidata foi instalada na VPS e depois publicada de forma controlada em 6 de setembro. Não houve credenciais de provedores, empresas reais ou operação com clientes.
 
 ## Fases concluídas
 
@@ -158,7 +160,7 @@ O provisionamento de número, WABA e permissões no Meta Business permanece exte
 - O primeiro administrador foi criado pelo comando interativo, com senha apenas pelo stdin. Duas empresas sintéticas foram criadas pelas rotas autenticadas consumidas pelo painel, sem SQL, seed ou configuração manual por tenant; Alpha foi suspensa e Beta permaneceu em draft.
 - API e worker foram reiniciados e retomaram com readiness 200, preservando os dois tenants e seus estados.
 - Um backup completo da homologação foi restaurado no projeto descartável `waia-phase12-restore`; readiness, mídia e os estados acessados pelo painel foram recuperados.
-- A release candidate permanece sem commit/tag porque o fechamento Git depende da apresentação dos arquivos, testes, versão e mensagem ao usuário.
+- O fechamento Git da Fase 12 já consta no commit `baf4a8f` e na tag local `v1.9.1-rc.1`; a promoção remota do artefato permanece pendente de verificação.
 
 ## Validação da Fase 5
 
@@ -301,8 +303,89 @@ O teste de carga atual é uma regressão em memória; não mede capacidade de VP
 ## Pendências operacionais
 
 - O `.env` local não deve ser usado para recriar o PostgreSQL persistente do `waia-test` sem antes alinhar as credenciais sintéticas já associadas ao volume.
-- O responsável ainda precisa aprovar RPO/RTO, conteúdo jurídico, modelo/perímetro de acesso administrativo e responsável por incidentes.
-- Um destino HTTPS real de alertas precisa ser fornecido e receber os testes de disparo e recuperação; nenhum endpoint externo foi inferido ou acionado nesta fase.
+- Em 7 de setembro, o usuário aprovou RPO de 24 horas e RTO de 4 horas e indicou Samuel Felipe (`samuelfelipeleao@gmail.com`) como responsável por incidentes. O perímetro administrativo por allowlist já está ativo e comprovado.
+- Google Drive foi escolhido para a cópia externa e Discord para alertas. O Drive usa cliente OAuth próprio do projeto `waia-production`; a cópia cifrada, o `cryptcheck` e o timer recorrente estão comprovados. O endpoint Discord respondeu HTTP 204 ao teste direto; falta promover a versão 1.10.0 e comprovar as transições de disparo/recuperação pelo monitor.
 - MFA, convite e recuperação automatizada continuam posteriores ao piloto; o piloto só pode prosseguir após a allowlist/VPN real ser configurada e comprovada.
-- O gate integral da Fase 11 permanece aberto até esses itens humanos e externos serem aceitos formalmente; tráfego público e preparação de produção continuam proibidos.
-- A Fase 12 recebeu autorização explícita apenas para homologação sintética. O commit, a tag `v1.9.1-rc.1` e a promoção do candidato dependem da revisão final e de nova confirmação; a Fase 13 continua bloqueada.
+- O gate integral da Fase 11 permanece aberto até esses itens humanos e externos serem aceitos formalmente. A solicitação de 5 de setembro autoriza a preparação assistida da Hostinger; não constitui aceite dos P0 nem autorização para clientes reais.
+- A preparação da Fase 13 foi solicitada pelo usuário nesta retomada. VPS, perímetro administrativo, DNS/TLS, backup externo, custódia do keyring fora da VPS, artefato imutável e smoke tests foram comprovados. A conclusão do gate ainda depende de promover a versão 1.10.0 e comprovar os alertas reais pelo monitor.
+
+## Retomada de 5 de setembro de 2026
+
+- Lidos `AGENTS.md`, `PLAN.md`, `implementações_finais.md`, relatório e runbooks de operação e integrações; inspecionados Compose, Caddy e workflow da CI.
+- O Compose já mantém PostgreSQL/Redis sem portas públicas, possui volumes persistentes, rotação de logs e monitor opcional. Isso é configuração local, não evidência de infraestrutura implantada.
+- Hostinger aberta no navegador visível. A página solicitou código de verificação por e-mail; o usuário deve concluí-lo diretamente no site. Nenhum código ou senha foi solicitado no chat.
+- O acesso inicial ao Docker local foi negado pelo sandbox. A consulta posterior com escalonamento autorizado encontrou a imagem homologada `waia:1.9.1-phase12-local`, que foi exportada sem rebuild. Nenhuma suíte integral ou integração foi reexecutada; resultados das fases anteriores acima são históricos.
+- Correções documentais desta retomada usam versão `1.9.2`; o alvo de implantação continua sendo a candidata `v1.9.1-rc.1`, sem reconstrução implícita.
+- Login concluído pelo usuário. VPS inspecionada: Ubuntu 24.04, Docker 29.3.0, Compose 5.1.0, 1 CPU/4 GB/50 GB, aproximadamente 37 GB livres e 2,5 GiB de memória disponível na leitura. EasyPanel/Traefik e dois n8n ativos foram preservados. Não houve reinício nem alteração de firewall.
+- Portas 80/443 já ocupadas pelo Traefik; porta 3000 do EasyPanel publicada, SSH root/senha habilitado, UFW inativo e política INPUT ACCEPT. O sistema informa atualizações e reinício pendentes. NTP está sincronizado; não há swap.
+- `waia.ia.br` não resolveu no DNS. Após a pergunta do usuário sobre endereço gratuito, a preparação passou a usar `srv1513113.hstgr.cloud`; os registros A/AAAA foram confirmados. O hostname foi posteriormente publicado com TLS válido, conforme a seção abaixo.
+- Adicionado overlay privado `infra/hostinger/compose.staging.yml`, com portas em loopback, limites de recursos e sem build/Caddy público. A validação com dados sintéticos no nome Compose `waia-test` comprovou essas invariantes, sem iniciar ou modificar contêineres.
+- Exportados localmente a imagem homologada e os arquivos de infraestrutura/painel da tag candidata; arquivos temporários desta preparação ficam ignorados no Git. O navegador sem sessão GitHub não permitiu conferir o artefato da CI.
+- O usuário instalou a chave temporária pelo Web console, com restrições de forwarding/PTY, expiração de duas horas e remoção agendada. As permissões da chave local foram ajustadas para a conta Samuel, permitindo a conexão SSH com identidade do servidor previamente conferida.
+- Os checksums dos artefatos foram conferidos na VPS. A candidata mantém o image ID homologado, sem rebuild; a validação também comprovou reconstrução byte a byte do arquivo usando camadas oficiais compartilhadas durante o diagnóstico da transferência lenta.
+
+## Instalação privada na Hostinger — 6 de setembro de 2026
+
+- Diretório: `/opt/waia/releases/v1.9.1-rc.1`; projeto Compose `waia-prod`, separado dos serviços existentes. Artefato `baf4a8f`/`v1.9.1-rc.1`, image ID `sha256:861616212b498b2cdd3e0bbcbebf988646895e830e8d67aabfd32e99324098ad`.
+- Segredos de infraestrutura novos foram gerados somente na VPS e armazenados no `.env` com permissão 600. Os campos Meta obrigatórios receberam valores aleatórios locais, sem aplicativo real conectado. Nenhum segredo foi impresso ou copiado para o relatório.
+- API e painel vinculados somente a `127.0.0.1:13001` e `127.0.0.1:18080`; banco e Redis sem portas publicadas. Caddy não foi iniciado. EasyPanel, Traefik e ambos os n8n foram preservados.
+- Corrigida a rede do painel: ele precisa também da rede egress para o Docker publicar a porta em loopback. Ajustada para 755 somente a pasta de assets públicos montada no Nginx; a extração segura com umask 077 havia deixado essa pasta inacessível ao worker.
+- API, worker, PostgreSQL e Redis saudáveis; painel em execução. Foram aplicadas 20 migrações. Banco com zero empresas, zero usuários e 48 tabelas com RLS habilitada e forçada.
+- Smoke tests: live/readiness, painel e asset HTTP 200; administração direta e via painel HTTP 403; métricas sem token HTTP 401; webhook sem assinatura HTTP 401; páginas legais HTTP 503 enquanto conteúdo aprovado permanece ausente.
+- API e worker reiniciados, com repetição dos smoke tests aprovada e persistência preservada. Não houve reinício da VPS nem dos serviços anteriores.
+- Backup local inicial em `/opt/waia/backups/waia-backup-20260906T170623Z`; dump, mídia e manifesto passaram nos checksums. O restore isolado foi posteriormente aprovado, conforme a seção abaixo. A cópia externa posterior ao deploy foi comprovada em um bundle mais recente; a custódia independente do keyring continua pendente.
+- Evidências sanitizadas `private-smoke.json`, `release-evidence.json` e `infra-images.json` preservadas na release e copiadas para a pasta temporária local ignorada no Git. Digests das imagens auxiliares registrados; elas vieram do registry oficial, enquanto o runtime permaneceu exatamente na candidata.
+- Versão local das correções de configuração/documentação: `1.9.2`; nenhuma alteração do runtime da candidata. Compose e invariantes de segurança validados; `git diff --check` aprovado. Não houve commit ou push.
+- Pendência para concluir a Fase 13: promover a versão 1.10.0 e comprovar alertas reais de disparo e recuperação pelo monitor. RPO/RTO, responsável por incidentes, backup externo, custódia do keyring e os destinos Google Drive/Discord foram definidos e comprovados em 7 de setembro.
+- A chave SSH temporária foi removida do servidor ao concluir a instalação privada, preservando as chaves anteriores. Uma nova tentativa autenticada foi rejeitada, comprovando a revogação. A chave privada temporária local também foi excluída.
+- Na continuação de 6 de setembro, uma nova chave temporária foi autorizada e instalada com expiração de duas horas. A stack privada permanecia saudável havia quatro horas.
+- Preparados e validados o ingresso pelo overlay `easypanel`, a rota Traefik para `srv1513113.hstgr.cloud` e a allowlist do IP administrativo atual. O desenho publica webhooks, health e páginas legais; restringe painel, `/api/admin` e `/metrics`, que também exige Bearer.
+- A aplicação da rota foi recusada pela revisão automática por representar exposição externa persistente sem autorização específica para publicar os endpoints. A verificação posterior confirmou rota ausente, API não recriada e HTTPS ainda respondendo 404. Nenhuma publicação parcial ocorreu.
+
+## Publicação HTTPS e restore drill — 6 de setembro de 2026
+
+- Após autorização explícita do usuário, API e painel foram conectados à rede attachable `easypanel` e somente esses dois contêineres foram recriados. PostgreSQL, Redis, worker, EasyPanel, Traefik e os dois n8n permaneceram ativos.
+- O Traefik passou a encaminhar `srv1513113.hstgr.cloud` com certificado Let's Encrypt válido e SAN correspondente. Health público retorna 200; as páginas legais retornam 503 até receberem conteúdo aprovado.
+- Painel e `/api/admin` exigem allowlist do IPv4 administrativo atual. A sessão sem login retorna 401 a partir do IP autorizado; painel e administração retornam 403 fora dele.
+- A rota exata `/metrics` foi corrigida após o primeiro teste revelar que o fallback do painel devolvia HTML 200. Agora ela segue para a API com allowlist e Bearer: 401 sem token no IP autorizado e 403 fora da allowlist.
+- O callback para um identificador inexistente retornou 404 sem persistir dados. PostgreSQL, Redis e as portas de loopback 13001/18080 permaneceram inacessíveis externamente. As portas 22, 80, 443 e 3000 ainda respondem externamente; 22 e 3000 dependem do firewall definitivo.
+- O bundle `/opt/waia/backups/waia-backup-20260906T170623Z` foi restaurado no projeto isolado `waia-restore-drill`, sem portas publicadas nem rota. Readiness, 20 migrações, zero tenants, 48 tabelas com RLS forçada e três entradas de mídia foram conferidos. Contêineres, redes e volumes descartáveis foram removidos; produção continuou com health 200.
+- A Hostinger possui dois backups automáticos semanais separados da VPS, ambos anteriores à instalação observada. O plano oferece upgrade pago para backup diário. Nenhum upgrade foi contratado e nenhum snapshot manual foi substituído sem autorização.
+- O painel publicado foi aberto no navegador e apresentou a tela de login. A VPS vence em 8 de setembro de 2026 e a renovação automática aparece ativa no hPanel; o alerta de renovação do plano de hospedagem deve ser tratado pelo titular.
+
+## Hardening, snapshot, atualização e reboot — 6 de setembro de 2026
+
+- Criado `waiaops` com chave Ed25519 dedicada, sudo sem senha e grupo Docker. A chave foi testada antes de qualquer alteração de rede. Sua parte privada permanece somente em `.secrets/hostinger-waiaops`, ignorada pelo Git.
+- SSH efetivo: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin without-password` e `PubkeyAuthentication yes`. A diretiva precisou ser instalada como `00-waia-hardening.conf`, pois `50-cloud-init.conf` definia senha como habilitada e o OpenSSH usa a primeira ocorrência aplicável.
+- O firewall Hostinger `WAIA producao` foi criado e ativado com cinco regras: aceitar TCP 22 e 3000 somente do IPv4 administrativo; aceitar TCP 80 e 443 de qualquer origem; recusar todo o restante. O acesso por chave, painel, health e métricas foi retestado a partir do IP autorizado.
+- Criado snapshot da VPS após a publicação, em 6 de setembro às 18:44, com expiração informada pela Hostinger em 7 de setembro. Os dois backups automáticos semanais anteriores continuam disponíveis. Nenhum upgrade pago foi contratado.
+- Atualizados 45 pacotes do Ubuntu, incluindo Docker 29.8.0, Compose 5.5.1, containerd, AppArmor, Python e componentes de rede. O provider mantém cloud-init e metapacotes de kernel em hold; esse bloqueio não foi removido. Após o reboot, `/var/run/reboot-required` não existe.
+- O upgrade do Docker reiniciou os contêineres e preservou WAIA. No reboot, os dois n8n ficaram `0/1` porque sua política `on-failure` não recriava tarefas encerradas de forma limpa. Ambos foram reativados e a política foi ajustada para `any`; ao final, EasyPanel, Traefik e os dois n8n estavam `1/1`.
+- Verificação pós-reboot: cinco contêineres WAIA saudáveis, 20 migrações, zero tenants, zero usuários, 48 tabelas com RLS forçada, health público 200, painel/métricas 403 fora da allowlist e painel 200/métricas 401 sem Bearer a partir do IP autorizado.
+- Instalado backup diário local via `waia-backup.timer`, às 03:15 UTC com atraso aleatório de até 15 minutos e retenção de sete dias. A execução inicial criou `waia-backup-20260906T215620Z`. O primeiro disparo realmente automático ocorreu em 7 de setembro às 03:17:36 UTC, criou `waia-backup-20260907T031736Z` e terminou com `Result=success`/`ExecMainStatus=0`; dump, mídia e manifesto passaram nos checksums. A referência permanece `server-env-only-external-custody-pending`, portanto cópia cifrada externa e custódia independente continuam abertas.
+- A segunda chave temporária de root foi removida por comentário exato, sua cópia pública foi apagada da pasta de entrada e a chave privada temporária local foi excluída. Root ficou sem chaves autorizadas; `waiaops` é o acesso SSH operacional.
+
+## Administrador inicial — 7 de setembro de 2026
+
+- A primeira tentativa de cadastro por `docker compose run` avaliou as dependências após a atualização para Compose 5.5.1 e recriou PostgreSQL e Redis. O comando foi interrompido antes de receber dados administrativos. Os volumes persistentes foram preservados; a verificação imediata confirmou cinco serviços ativos, readiness HTTP 200, 20 migrações, zero empresas, zero usuários e 48 tabelas com RLS forçada.
+- O cadastro foi repetido diretamente no contêiner ativo com `docker exec`, por sessão SSH interativa do usuário `waiaops`. O primeiro administrador foi criado sem passar a senha por argumento, arquivo ou chat.
+- A verificação posterior confirmou exatamente um usuário, zero empresas, 20 migrações, 48 tabelas com RLS forçada, cinco contêineres ativos e readiness HTTP 200. O primeiro login carregou a visão global da plataforma com o papel de administrador. O logout emitido pelo painel com o CSRF da sessão foi processado e registrado como `auth.logout`/`sucesso`, confirmando autenticação e CSRF reais sem criar ou alterar tenants.
+
+## Aceites e destinos externos — 7 de setembro de 2026
+
+- O usuário aprovou RPO de 24 horas e RTO de 4 horas e indicou Samuel Felipe (`samuelfelipeleao@gmail.com`) como responsável por incidentes.
+- Google Drive foi definido como destino da cópia externa. O rclone 1.75.1 foi obtido de fonte oficial, teve checksum conferido e foi instalado na VPS. A autorização OAuth foi concluída no navegador; o token ficou somente em arquivos ignorados pelo Git e a configuração foi instalada no servidor com modo 600. Uma consulta somente de leitura à API identificou a conta autorizada como `samuelfelipeleao@gmail.com`.
+- A configuração preparada usa um remote `crypt` dedicado sobre a pasta `WAIA Backups`, com criptografia de conteúdo, nomes de arquivos e nomes de diretórios. A rotina rejeita remote sem `type = crypt`, valida os checksums locais antes do envio e executa `rclone cryptcheck --one-way` após a cópia.
+- A autenticação atual usa temporariamente o cliente OAuth compartilhado do rclone. O rclone 1.75.1 avisou que esse cliente será retirado durante 2026 e recomendou um `client_id` próprio. O timer externo foi desabilitado antes do primeiro disparo; nenhum bundle foi enviado enquanto a conta específica e essa mitigação não forem confirmadas.
+- Discord foi definido como canal de alertas. O runtime local passou a suportar o payload exigido pelo webhook Discord, limita a mensagem a 2.000 caracteres, desativa menções e mantém a sanitização de dados. A URL fornecida em arquivo local ignorado pelo Git passou na validação estrutural e respondeu HTTP 204 a uma mensagem técnica sem dados de clientes. A instalação na VPS e as transições reais dependem da promoção da versão 1.10.0.
+- O usuário informou `Samuel Felipe Leão de Barros, pessoa física` como operador e forneceu o contato acima. Em seguida, declarou que assume a revisão jurídica e aprovou expressamente o texto integral e o aviso de controlador registrados em `docs/ACEITES_FASE_11.md`. A página de privacidade passou a registrar a aprovação em 7 de setembro de 2026.
+- Os três valores legais foram aplicados ao `.env` da produção e somente a API foi recriada. `/privacy` e `/data-deletion` passaram de 503 para 200 e foram conferidas pelo contato e nome aprovados.
+- Na primeira tentativa de aplicação, o usuário SSH não conseguiu entrar no diretório 700 da release; como o comando não falhou imediatamente, o Compose foi executado a partir do diretório pessoal sem carregar o `.env` de produção e a API respondeu 502. A correção foi aplicada em seguida por script `set -eu` executado como root dentro de `/opt/waia/current`, reutilizando o `.env` original. Ao final, API saudável, readiness privado/público 200 e os cinco contêineres WAIA ativos; banco, Redis, worker, painel e volumes não foram recriados.
+- O primeiro envio externo autorizado terminou com `Result=success` e `ExecMainStatus=0` para `waia-backup-20260907T031736Z`. O script validou checksums antes do envio e o `rclone cryptcheck --one-way` confirmou o conteúdo cifrado no remote `waia-drive-crypt:production`.
+- A criação do cliente OAuth próprio foi bloqueada pelo Google Cloud porque a conta ainda não possui verificação em duas etapas. Essa ativação de segurança exige ação manual do titular; até a troca, o cliente compartilhado permanece uma mitigação temporária sujeita à retirada anunciada pelo rclone.
+- O titular ativou a verificação em duas etapas. Após a primeira consulta ainda indicar propagação, a consulta seguinte liberou o Console; o projeto existente `Chatbot Capitao Mor` foi preservado e a página de criação de um projeto separado para o WAIA foi aberta. O timer externo permanece desabilitado porque a revisão automática recusou o uso recorrente do OAuth compartilhado sem um aceite separado desse fallback.
+- O usuário criou `WAIA Production` (`waia-production`) na conta correta `samuelfelipeleao@gmail.com` e informou que a conta `capitaomor4@gmail.com` foi removida. No projeto novo, a Google Drive API foi ativada e a Google Auth Platform configurada com app externo `WAIA Backup`, suporte e contato em `samuelfelipeleao@gmail.com`. O formulário do cliente desktop `WAIA Backup rclone` ficou completo, aguardando somente a confirmação imediatamente anterior à geração do ID e do segredo OAuth.
+- Após confirmação explícita, os dois clientes OAuth cujos segredos apareceram em saídas de diagnóstico foram revogados. Um terceiro cliente desktop foi criado; ID e segredo foram capturados separadamente em arquivos ignorados pelo Git, sem exibição dos valores, e combinados em material local de recuperação. A conta `samuelfelipeleao@gmail.com` foi adicionada como único usuário de teste.
+- O fluxo OAuth do cliente próprio foi concluído. A primeira troca do código falhou por bloqueio de rede do sandbox local e não gerou token; a repetição com rede autorizada terminou com token e refresh token válidos. Os logs temporários de autorização foram removidos após atualizar a configuração.
+- O cliente próprio acessou `WAIA Backups` e leu `waia-drive-crypt:production/waia-backup-20260907T031736Z`. A configuração foi instalada atomicamente em `/etc/waia/rclone.conf`; novo disparo de `waia-backup-offsite.service` terminou com `Result=success`/`ExecMainStatus=0`, incluindo `cryptcheck --one-way`. O timer externo foi habilitado e ficou ativo, com próximo disparo observado para 8 de setembro às 03:50:06 UTC, dentro da janela de 03:45 UTC mais atraso aleatório.
+- O `MASTER_KEYRING` foi copiado da VPS para a pasta local `.secrets`, normalizado sem alterar o valor lógico e validado com uma versão ativa recuperável. Keyring, chave SSH, configuração rclone, cliente OAuth e webhook receberam ACL restrita ao usuário Samuel e inventário local com tamanho e SHA-256. Esses arquivos permanecem ignorados pelo Git e constituem a cópia de custódia fora da VPS.

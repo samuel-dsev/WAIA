@@ -60,6 +60,7 @@ export const config = {
   alerts: {
     webhookUrl: process.env.ALERT_WEBHOOK_URL || "",
     authorization: process.env.ALERT_WEBHOOK_AUTHORIZATION || "",
+    format: process.env.ALERT_WEBHOOK_FORMAT || "generic",
     timeoutMs: numberFromEnv("ALERT_TIMEOUT_MS", 10_000),
   },
   whatsapp: {
