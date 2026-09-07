@@ -8,6 +8,19 @@ function checksum(sql) {
   return createHash('sha256').update(sql).digest('hex');
 }
 
+function sqlChecksums(sql) {
+  const canonicalSql = sql.replace(/\r\n?/gu, '\n');
+  const canonical = checksum(canonicalSql);
+  return {
+    canonical,
+    accepted: new Set([
+      canonical,
+      checksum(sql),
+      checksum(canonicalSql.replace(/\n/gu, '\r\n')),
+    ]),
+  };
+}
+
 function safeControlTable(table) {
   if (!/^[a-z][a-z0-9_]*$/.test(table)) throw new TypeError('Nome inválido para tabela de controle SQL.');
   return table;
@@ -22,7 +35,8 @@ export async function readSqlDirectory(directory) {
 
   return Promise.all(filenames.map(async (filename) => {
     const sql = await readFile(path.join(directory, filename), 'utf8');
-    return { filename, sql, checksum: checksum(sql) };
+    const checksums = sqlChecksums(sql);
+    return { filename, sql, checksum: checksums.canonical, acceptedChecksums: checksums.accepted };
   }));
 }
 
@@ -47,7 +61,7 @@ export async function runSqlDirectory({ pool, directory, controlTable, advisoryL
 
     for (const file of files) {
       if (applied.has(file.filename)) {
-        if (applied.get(file.filename) !== file.checksum) {
+        if (!file.acceptedChecksums.has(applied.get(file.filename))) {
           throw new Error(`O arquivo SQL já aplicado foi alterado: ${file.filename}.`);
         }
         continue;
