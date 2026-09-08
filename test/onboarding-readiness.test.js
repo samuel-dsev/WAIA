@@ -184,6 +184,84 @@ test("integração de pagamento não substitui a credencial exigida pelo runtime
   assert.equal(byCode(result, "RUNTIME_CONFIGURATION_COMPILES").state, "failed");
 });
 
+test("integração obrigatória do rascunho aceita conector saudável do mesmo tipo", () => {
+  const configuration = validConfiguration();
+  configuration.modules = ["external_integrations"];
+  configuration.integrations = [{
+    id: "google-sheets-capitao-mor",
+    type: "google_sheets",
+    name: "Google Sheets - Capitão Mor",
+    enabled: true,
+    required: true,
+    credentialRefs: [],
+  }];
+  const result = readiness().evaluate({
+    empresaId: TENANT_ID,
+    configuration,
+    snapshot: validSnapshot({
+      integrations: [{
+        id: "integration:00000000-0000-4000-8000-000000000001",
+        reference: "integration:00000000-0000-4000-8000-000000000001",
+        type: "google_sheets",
+        status: "healthy",
+      }],
+    }),
+  });
+  assert.equal(byCode(result, "REQUIRED_INTEGRATIONS_AVAILABLE").state, "passed");
+});
+
+test("integração obrigatória continua bloqueada quando o conector do mesmo tipo está indisponível", () => {
+  const configuration = validConfiguration();
+  configuration.modules = ["external_integrations"];
+  configuration.integrations = [{
+    id: "google-sheets-capitao-mor",
+    type: "google_sheets",
+    name: "Google Sheets - Capitão Mor",
+    enabled: true,
+    required: true,
+    credentialRefs: [],
+  }];
+  const result = readiness().evaluate({
+    empresaId: TENANT_ID,
+    configuration,
+    snapshot: validSnapshot({
+      integrations: [{
+        id: "integration:00000000-0000-4000-8000-000000000001",
+        reference: "integration:00000000-0000-4000-8000-000000000001",
+        type: "google_sheets",
+        status: "unavailable",
+      }],
+    }),
+  });
+  assert.equal(byCode(result, "REQUIRED_INTEGRATIONS_AVAILABLE").state, "failed");
+});
+
+test("um conector saudável não satisfaz duas integrações obrigatórias do mesmo tipo", () => {
+  const configuration = validConfiguration();
+  configuration.modules = ["external_integrations"];
+  configuration.integrations = ["agenda-principal", "agenda-secundaria"].map((id) => ({
+    id,
+    type: "google_sheets",
+    name: id,
+    enabled: true,
+    required: true,
+    credentialRefs: [],
+  }));
+  const result = readiness().evaluate({
+    empresaId: TENANT_ID,
+    configuration,
+    snapshot: validSnapshot({
+      integrations: [{
+        id: "integration:00000000-0000-4000-8000-000000000001",
+        reference: "integration:00000000-0000-4000-8000-000000000001",
+        type: "google_sheets",
+        status: "healthy",
+      }],
+    }),
+  });
+  assert.equal(byCode(result, "REQUIRED_INTEGRATIONS_AVAILABLE").state, "failed");
+});
+
 test("credencial ativa de outro provedor não satisfaz IA própria nem pagamento", () => {
   const reference = "credential:compartilhada-errada";
   const configuration = validConfiguration();

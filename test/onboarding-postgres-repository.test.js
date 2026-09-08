@@ -137,7 +137,7 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
       status: "active",
       configured: true,
     }],
-    integrations: [{ reference: "integration:00000000-0000-4000-8000-0000000000f1", status: "saudavel" }],
+    integrations: [{ reference: "integration:00000000-0000-4000-8000-0000000000f1", type: "google_sheets", status: "saudavel" }],
   };
   const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [row] }; } };
   const repository = new PostgresOnboardingRepository({ connect() {} }, {
@@ -163,6 +163,7 @@ test("snapshot de readiness é tenant-scoped e nunca seleciona payloads de crede
   assert.deepEqual(snapshot.integrations, [{
     id: "integration:00000000-0000-4000-8000-0000000000f1",
     reference: "integration:00000000-0000-4000-8000-0000000000f1",
+    type: "google_sheets",
     status: "healthy",
   }]);
   assert.equal(snapshot.environment, "production");

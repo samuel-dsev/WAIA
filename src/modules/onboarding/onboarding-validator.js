@@ -132,11 +132,34 @@ export function flowsAreReady(configuration) {
 }
 
 export function requiredIntegrationsAreAvailable(configuration, snapshot) {
-  const health = new Map(list(snapshot?.integrations).map((integration) => [integration.id, integration.status]));
+  const available = (integration) => integration?.status === "healthy"
+    || (integration?.status === "simulated" && snapshot?.environment === "test");
+  const integrations = list(snapshot?.integrations);
+  const matched = new Set();
   return list(configuration?.integrations)
     .filter((integration) => integration?.enabled !== false && integration?.required === true)
     .every((integration) => {
-      const status = health.get(integration.id);
-      return status === "healthy" || (status === "simulated" && snapshot?.environment === "test");
+      const logicalId = text(integration?.id);
+      const directIndex = integrations.findIndex((candidate, index) => !matched.has(index) && (
+        candidate?.id === logicalId
+        || candidate?.reference === logicalId
+        || candidate?.reference === `integration:${logicalId}`
+      ));
+      if (directIndex >= 0) {
+        matched.add(directIndex);
+        return available(integrations[directIndex]);
+      }
+      const type = typeof integration?.type === "string"
+        ? integration.type.trim().toLocaleLowerCase("pt-BR")
+        : "";
+      const typeIndex = type ? integrations.findIndex((candidate, index) => (
+        !matched.has(index)
+        && typeof candidate?.type === "string"
+        && candidate.type.trim().toLocaleLowerCase("pt-BR") === type
+        && available(candidate)
+      )) : -1;
+      if (typeIndex < 0) return false;
+      matched.add(typeIndex);
+      return true;
     });
 }

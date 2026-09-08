@@ -119,6 +119,7 @@ function mapReadiness(row, { environment, platformAiCredentialConfigured }) {
   const integrations = (row.integrations || []).map((integration) => Object.freeze({
     id: integration.reference,
     reference: integration.reference,
+    type: integration.type,
     status: integrationStatus(integration.status),
   }));
   const credentials = (row.credentials || []).map((credential) => Object.freeze({
@@ -324,6 +325,7 @@ export class PostgresOnboardingRepository {
          COALESCE((
            SELECT jsonb_agg(jsonb_build_object(
              'reference', 'integration:' || i.id::text,
+             'type', i.tipo,
              'status', i.status
            ) ORDER BY i.id)
              FROM integracoes i
