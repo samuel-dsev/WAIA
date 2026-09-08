@@ -1,6 +1,6 @@
 # Implementações finais — produção e testes com empresas reais
 
-Atualizado em 4 de setembro de 2026 a partir da versão `1.8.3`, commit `739ed4d`, após revisão do `PLAN.md`, `RELATORIO.md`, código, migrações, testes, Docker Compose, documentação operacional e contratos das integrações.
+Atualizado em 8 de setembro de 2026 durante o canário real do Capitão Mor, a partir da versão implantada `1.10.4` e da correção preparada `1.10.5`.
 
 ## 1. Objetivo deste plano
 
@@ -240,7 +240,7 @@ Gate:
 
 Objetivo: validar Meta, OpenAI e Google com credenciais reais, dados controlados e uma única empresa.
 
-Status em 8 de setembro de 2026: em andamento, com autorização explícita. A empresa real Capitão Mor permanece em rascunho; Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias. A versão `1.10.3` foi commitada, enviada e implantada com backup prévio e rollback preservado; o readiness estrutural passou. O preflight real aprovou a Meta, confirmou separadamente que o Google autentica e lê o range configurado, e revelou dois bloqueios: o agregador Google lia `health` embora o contrato real retorne `state`, e o projeto OpenAI autentica a chave mas expõe somente `gpt-4.1-mini`, enquanto o rascunho solicita o snapshot não autorizado `gpt-4.1-mini-2025-04-14`. A correção Google está preparada na versão `1.10.4`; o modelo deve ser habilitado no projeto OpenAI ou ajustado pelo painel antes da repetição do preflight e de qualquer ativação.
+Status em 8 de setembro de 2026: em andamento, com autorização explícita. Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias; o modelo foi ajustado para `gpt-4.1-mini`. A versão `1.10.4` foi commitada, enviada e implantada com backup local, cópia externa cifrada e rollback preservado. Readiness e preflight real aprovaram as três conexões, a revisão foi publicada e o Capitão Mor foi ativado. Os testes reais aprovaram menu e endereço. O teste de agenda revelou que o runtime versionado conservava a lista vazia da revisão, embora o cache PostgreSQL sincronizado possuísse dois eventos Google futuros e publicados. A correção `1.10.5` passa a materializar essa agenda operacional, com escopo do tenant e somente para revisão que habilite Google Sheets; ela está validada e aguarda commit, push e implantação antes da repetição do teste.
 
 Meta/WhatsApp:
 

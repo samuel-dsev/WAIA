@@ -105,6 +105,80 @@ test("loader versionado resolve exatamente a credencial de pagamento da revisão
   assert.equal(definition.runtime.payments.pix.recipient, "Recebedor Versionado");
 });
 
+test("loader versionado usa a agenda operacional sincronizada quando Google Sheets está habilitado", async () => {
+  const compiled = compileTenantRuntimeConfigV2({
+    ...minimalConfig(),
+    modules: ["events"],
+    menu: {
+      text: "Escolha uma opção:",
+      options: [{ id: "agenda", label: "Agenda", action: "events.list", params: {} }],
+    },
+    events: {
+      items: [{
+        id: "evento-estatico",
+        name: "Evento estático",
+        startsAt: "2026-09-10T20:00:00-03:00",
+        price: 10,
+      }],
+    },
+    integrations: [{
+      id: "agenda-google",
+      type: "google_sheets",
+      name: "Google Sheets",
+      enabled: true,
+      required: true,
+      credentialRefs: [],
+    }],
+  }, { empresaId: EMPRESA_ID, configVersion: 9, draftVersion: 5 });
+  const startsAt = new Date("2026-09-12T23:00:00.000Z");
+  const pool = fakePool(async (sql, params) => {
+    if (sql.includes("FROM empresas")) return { rows: [{
+      id: EMPRESA_ID,
+      configuracao_runtime_modo: "versionado",
+      configuracao_ativa_versao: 9,
+      versao_configuracao: 9,
+      timezone: "America/Sao_Paulo",
+    }] };
+    if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{
+      config_version: 9,
+      checksum: compiled.checksum,
+      configuracao_compilada: structuredClone(compiled),
+    }] };
+    if (sql.includes("e.origem_externa = 'google_sheets'")) {
+      assert.deepEqual(params, [EMPRESA_ID, "America/Sao_Paulo"]);
+      return { rows: [{
+        id: "00000000-0000-4000-8000-000000000298",
+        external_id: "evento-google",
+        nome: "Evento do Google",
+        atracoes: "Banda Google",
+        inicio_at: startsAt,
+        timezone: "America/Sao_Paulo",
+        local: "Local público",
+        regra_vip: "Regra pública",
+        observacoes: "Observação pública",
+        preco: "35.00",
+      }] };
+    }
+    assert.fail(`consulta inesperada: ${sql}`);
+  });
+
+  const definition = await new PostgresTenantDefinitionRepository(pool).load(EMPRESA_ID);
+
+  assert.deepEqual(definition.runtime.events.items, [{
+    id: "evento-google",
+    name: "Evento do Google",
+    attractions: "Banda Google",
+    description: "Observação pública",
+    startsAt: startsAt.toISOString(),
+    timezone: "America/Sao_Paulo",
+    vipRule: "Regra pública",
+    location: "Local público",
+    price: 35,
+    active: true,
+  }]);
+  assert.equal(pool.queries.some(({ sql }) => sql.includes("configuracoes_empresa")), false);
+});
+
 test("loader versionado falha fechado quando a credencial de pagamento não resolve", async () => {
   const compiled = compileTenantRuntimeConfigV2({
     ...minimalConfig(),

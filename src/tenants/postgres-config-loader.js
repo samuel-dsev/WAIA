@@ -18,6 +18,45 @@ function runtimeConfigurationError(code, message) {
   return new TenantRuntimeConfigurationError(code, message);
 }
 
+function usesGoogleSheetsAgenda(compiled) {
+  return compiled.configuration.modules.includes("events")
+    && compiled.configuration.integrations.some((integration) => (
+      integration.enabled === true && integration.type === "google_sheets"
+    ));
+}
+
+async function loadGoogleSheetsEvents(client, company, empresaId) {
+  const timezone = company.timezone || "America/Sao_Paulo";
+  const result = await client.query(
+    `SELECT e.id, e.external_id, e.nome, e.atracoes, e.inicio_at, e.timezone,
+            e.local, e.regra_vip, e.observacoes, price.preco
+       FROM eventos e JOIN LATERAL (
+         SELECT p.preco FROM eventos_produtos ep JOIN produtos_servicos p
+           ON p.empresa_id = ep.empresa_id AND p.id = ep.produto_servico_id
+          WHERE ep.empresa_id = e.empresa_id AND ep.evento_id = e.id
+            AND p.ativo AND p.deleted_at IS NULL
+          ORDER BY p.id LIMIT 1
+       ) price ON true
+      WHERE e.empresa_id = $1 AND e.origem_externa = 'google_sheets'
+        AND e.status = 'publicado' AND e.deleted_at IS NULL
+        AND e.inicio_at >= date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text
+      ORDER BY e.inicio_at, e.id`,
+    [empresaId, timezone],
+  );
+  return result.rows.map((row) => ({
+    id: row.external_id || row.id,
+    name: row.nome,
+    attractions: row.atracoes,
+    description: row.observacoes || undefined,
+    startsAt: row.inicio_at.toISOString(),
+    timezone: row.timezone || timezone,
+    vipRule: row.regra_vip || undefined,
+    location: row.local || undefined,
+    price: Number(row.preco),
+    active: true,
+  }));
+}
+
 async function loadVersionedDefinition(client, company, empresaId, paymentResolver) {
   if (!company.configuracao_ativa_versao) {
     throw runtimeConfigurationError(
@@ -68,13 +107,22 @@ async function loadVersionedDefinition(client, company, empresaId, paymentResolv
   if (paymentsEnabled && !payment) {
     throw runtimeConfigurationError("PAYMENT_CREDENTIAL_UNAVAILABLE", "A credencial de pagamento da revisão ativa não está disponível.");
   }
-  return materializeLegacyTenantDefinition(compiled, {
+  const definition = materializeLegacyTenantDefinition(compiled, {
     ...(paymentsEnabled ? { payment: {
       key: payment.value,
       recipient: payment.recipient,
       instructions: payment.instructions,
     } } : {}),
   });
+  if (!usesGoogleSheetsAgenda(compiled)) return definition;
+  const events = await loadGoogleSheetsEvents(client, company, empresaId);
+  return {
+    ...definition,
+    runtime: {
+      ...definition.runtime,
+      events: { items: events },
+    },
+  };
 }
 
 export class PostgresTenantDefinitionRepository {
