@@ -152,7 +152,7 @@ function referenceId(reference, prefix) {
   return value.startsWith(`${prefix}:`) ? value.slice(prefix.length + 1) : null;
 }
 
-function createOnboardingPreflightProbes({
+export function createOnboardingPreflightProbes({
   metaHealthService,
   googleSheetsIntegration,
   credentialVault,
@@ -163,7 +163,7 @@ function createOnboardingPreflightProbes({
   const integrationProbe = async ({ empresaId, target, signal }) => {
     if (signal.aborted || target.type !== "google_sheets") return { success: false };
     const result = await googleSheetsIntegration.health({ empresaId, signal });
-    return { success: !signal.aborted && result.health === "healthy" };
+    return { success: !signal.aborted && result.state === "healthy" };
   };
   return Object.freeze({
     meta: async ({ empresaId, target, signal, actorId, correlationId }) => {

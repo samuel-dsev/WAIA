@@ -240,7 +240,7 @@ Gate:
 
 Objetivo: validar Meta, OpenAI e Google com credenciais reais, dados controlados e uma única empresa.
 
-Status em 8 de setembro de 2026: em andamento, com autorização explícita. A empresa real Capitão Mor permanece em rascunho; Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias e sinais de saúde aprovados. O primeiro readiness real revelou que a integração obrigatória declarada no draft não reconhecia o conector saudável criado pelo painel por usar identificadores de namespaces diferentes. A correção está preparada na versão `1.10.3`, ainda pendente de commit, implantação e repetição do readiness/preflight antes de qualquer ativação.
+Status em 8 de setembro de 2026: em andamento, com autorização explícita. A empresa real Capitão Mor permanece em rascunho; Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias. A versão `1.10.3` foi commitada, enviada e implantada com backup prévio e rollback preservado; o readiness estrutural passou. O preflight real aprovou a Meta, confirmou separadamente que o Google autentica e lê o range configurado, e revelou dois bloqueios: o agregador Google lia `health` embora o contrato real retorne `state`, e o projeto OpenAI autentica a chave mas expõe somente `gpt-4.1-mini`, enquanto o rascunho solicita o snapshot não autorizado `gpt-4.1-mini-2025-04-14`. A correção Google está preparada na versão `1.10.4`; o modelo deve ser habilitado no projeto OpenAI ou ajustado pelo painel antes da repetição do preflight e de qualquer ativação.
 
 Meta/WhatsApp:
 
