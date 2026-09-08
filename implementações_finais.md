@@ -203,6 +203,8 @@ Gate:
 
 Objetivo: instalar a plataforma definitiva ainda sem conectar números reais.
 
+Status em 7 de setembro de 2026: concluída na versão implantada `1.10.1`/`18c0e14`. A produção permanece sem empresas e sem credenciais Meta, OpenAI ou Google Sheets de tenant. As evidências de imagem, migração, TLS, perímetro, monitor, Discord, backup local/externo, restore e rollback estão consolidadas em `RELATORIO.md` e `docs/OPERACAO_RELEASE.md`.
+
 Execução:
 
 - preparar VPS atualizada, usuário operacional não-root, SSH por chave, firewall e relógio sincronizado;
@@ -237,6 +239,8 @@ Gate:
 ### Fase 14 — integrações externas reais e primeiro canário
 
 Objetivo: validar Meta, OpenAI e Google com credenciais reais, dados controlados e uma única empresa.
+
+Status: não iniciada; depende de autorização explícita separada e dos dados reais enumerados abaixo.
 
 Meta/WhatsApp:
 
