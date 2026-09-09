@@ -699,8 +699,8 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       const payment = section("Pagamento", "Escolha uma credencial mascarada; o segredo não entra no rascunho.");
       const schema = [{ name: "credentialRef", path: "payments.credentialRef", label: "Credencial de pagamento", value: state.configuration.payments.credentialRef || "", type: "select", optional: true, options: [["", "Selecionar"], ...state.credentials.filter((item) => item.provider === "payment").map((item) => [`credential:${item.id}`, `${item.purpose} · ${item.maskedSecret || "mascarada"}`])] }];
       payment.append(stepForm(schema, (v) => { state.configuration.payments = v.credentialRef ? { credentialRef: v.credentialRef } : {}; }));
-      const addPaymentCredential = button("Cadastrar credencial de pagamento", "button button-secondary");
-      addPaymentCredential.addEventListener("click", () => makeDialog("Cadastrar dado protegido", [{ name: "purpose", label: "Finalidade", required: true, value: "pix" }, { name: "secret", label: "Valor protegido", type: "password", required: true }], {}, async (values) => { const id = await createCredential({ provider: "payment", purpose: values.purpose, secret: values.secret }); state.configuration.payments = { credentialRef: `credential:${id}` }; scheduleSave(); renderStep(); toast("Credencial cadastrada e selecionada."); }));
+      const addPaymentCredential = button("Cadastrar chave PIX", "button button-secondary");
+      addPaymentCredential.addEventListener("click", () => makeDialog("Cadastrar chave PIX", [{ name: "secret", label: "Chave PIX", type: "password", required: true, help: "Informe somente a chave: CPF/CNPJ, telefone com código do país, e-mail ou chave aleatória. Não inclua rótulos ou instruções." }], {}, async (values) => { const id = await createCredential({ provider: "payment", purpose: "pix", secret: values.secret }); state.configuration.payments = { credentialRef: `credential:${id}` }; scheduleSave(); renderStep(); toast("Chave PIX cadastrada e selecionada."); }));
       payment.append(addPaymentCredential);
       card.append(payment);
     }

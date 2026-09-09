@@ -81,6 +81,26 @@ test("middleware administrativo devolve apenas o corpo público", () => {
   assert.doesNotMatch(JSON.stringify(captured.body), /não pode vazar/u);
 });
 
+test("cofre administrativo aceita somente chave escalar em credencial PIX", async () => {
+  const repository = new MemoryAdminRepository({ environment: "test", tenants: [{ id: "tenant-a", name: "A", status: "active" }] });
+  const received = [];
+  const credentialVault = {
+    async createCredential(input) { received.push(input.secret); return { id: input.credentialId, maskedSecret: "••••8901", status: "active" }; },
+    async getCredentialMetadata() { return { provider: "payment", purpose: "pix" }; },
+    async rotateCredential(input) { received.push(input.newSecret); return { id: input.credentialId, maskedSecret: "••••8901", status: "active" }; },
+  };
+  const service = new AdminService({ repository, credentialVault, idGenerator: () => "credential-pix" });
+
+  await service.createCredential({ auth: tenantAdmin, empresaId: "tenant-a", body: { provider: "payment", purpose: "pix", secret: "123.456.789-01" } });
+  await service.rotateCredential({ auth: tenantAdmin, empresaId: "tenant-a", credentialId: "credential-pix", body: { secret: "12345678901" } });
+  assert.deepEqual(received, ["12345678901", "12345678901"]);
+
+  await assert.rejects(
+    service.createCredential({ auth: tenantAdmin, empresaId: "tenant-a", body: { provider: "payment", purpose: "pix", secret: "{ key: '12345678901' }" } }),
+    (error) => error instanceof AdminValidationError && error.details?.field === "secret",
+  );
+});
+
 test("middleware administrativo converte restrições PostgreSQL sem expor SQL", () => {
   const captured = {};
   const response = {

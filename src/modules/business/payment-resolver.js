@@ -1,4 +1,5 @@
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
+import { normalizePixKey } from "../secrets/payment-secret.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -33,8 +34,10 @@ export class PostgresPaymentResolver {
         || metadata?.status !== "active" || metadata?.configured !== true) return null;
     let value = await this.credentialVault.getCredentialForUse({ empresaId, credentialId: id });
     try {
+      const pixKey = normalizePixKey(value);
+      if (!pixKey) return null;
       return {
-        value,
+        value: pixKey,
         recipient: publicText(recipient, "Empresa configurada"),
         instructions: publicText(
           instructions,

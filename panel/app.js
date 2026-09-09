@@ -847,13 +847,13 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
     const row = node("div", "check-row");
     row.append(
       nodeWithText("span", `${credential.provider} · ${credential.purpose} · ${credential.maskedSecret || "mascarada"}`),
-      button("Rotacionar", () => openCredentialUpdate(credential.id), "button button-quiet button-small"),
+      button("Rotacionar", () => openCredentialUpdate(credential), "button button-quiet button-small"),
     );
     credentialsCard.append(row);
   }
   if (!listFrom(credentialPayload).length) credentialsCard.append(paragraph("Nenhuma credencial cadastrada."));
   credentialsCard.append(button("Cadastrar chave OpenAI", openOpenAiCredential, "button button-secondary"));
-  credentialsCard.append(button("Cadastrar dado de pagamento", openPaymentCredential, "button button-secondary"));
+  credentialsCard.append(button("Cadastrar chave PIX", openPaymentCredential, "button button-secondary"));
 
   wrapper.append(modulesCard, runtimeCard, aiCard, integrationsCard, credentialsCard);
   return wrapper;
@@ -907,10 +907,10 @@ function openOpenAiCredential() {
 }
 
 function openPaymentCredential() {
-  openFormDialog("Cadastrar dado de pagamento", [["purpose", "Finalidade (ex.: pix)", "text", true], ["secret", "Valor recuperável", "password", true]], async (values) => {
+  openFormDialog("Cadastrar chave PIX", [["secret", "Chave PIX (somente a chave)", "password", true]], async (values) => {
     await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials`, {
-      method: "POST", body: { provider: "payment", purpose: values.purpose, secret: values.secret },
-      success: "Dado cadastrado no cofre. O valor não será exibido novamente.",
+      method: "POST", body: { provider: "payment", purpose: "pix", secret: values.secret },
+      success: "Chave PIX cadastrada no cofre. O valor não será exibido novamente.",
     });
   });
 }
@@ -986,9 +986,10 @@ function openGoogleSheetsConfig(integration, credentials) {
   });
 }
 
-function openCredentialUpdate(credentialId) {
-  openFormDialog("Rotacionar credencial", [["secret", "Novo valor", "password", true]], async (values) => {
-    await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credentialId)}/rotate`, {
+function openCredentialUpdate(credential) {
+  const isPix = credential.provider === "payment" && credential.purpose === "pix";
+  openFormDialog(isPix ? "Rotacionar chave PIX" : "Rotacionar credencial", [["secret", isPix ? "Nova chave PIX (somente a chave)" : "Novo valor", "password", true]], async (values) => {
+    await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credential.id)}/rotate`, {
       method: "POST", body: { secret: values.secret }, success: "Credencial rotacionada.",
     });
   });

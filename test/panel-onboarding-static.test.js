@@ -100,6 +100,8 @@ test("seletores escondem referências internas e segredos seguem direto ao cofre
   assert.match(source, /\/users\/lookup\?email=/u);
   assert.match(source, /maskedSecret/u);
   assert.match(source, /createCredential/u);
+  assert.match(source, /Informe somente a chave/u);
+  assert.match(app, /Chave PIX \(somente a chave\)/u);
   assert.match(source, /Atender contatos e conversas/u);
   assert.match(source, /permissionsFrom/u);
   assert.match(source, /Campo que será avaliado/u);

@@ -1,6 +1,6 @@
 # Implementações finais — produção e testes com empresas reais
 
-Atualizado em 8 de setembro de 2026 durante o canário real do Capitão Mor, a partir da versão implantada `1.10.4` e da correção preparada `1.10.5`.
+Atualizado em 8 de setembro de 2026 durante o canário real do Capitão Mor, com a versão `1.10.5` implantada e a proteção da credencial PIX preparada para `1.10.6`.
 
 ## 1. Objetivo deste plano
 
@@ -240,7 +240,7 @@ Gate:
 
 Objetivo: validar Meta, OpenAI e Google com credenciais reais, dados controlados e uma única empresa.
 
-Status em 8 de setembro de 2026: em andamento, com autorização explícita. Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias; o modelo foi ajustado para `gpt-4.1-mini`. A versão `1.10.4` foi commitada, enviada e implantada com backup local, cópia externa cifrada e rollback preservado. Readiness e preflight real aprovaram as três conexões, a revisão foi publicada e o Capitão Mor foi ativado. Os testes reais aprovaram menu e endereço. O teste de agenda revelou que o runtime versionado conservava a lista vazia da revisão, embora o cache PostgreSQL sincronizado possuísse dois eventos Google futuros e publicados. A correção `1.10.5` passa a materializar essa agenda operacional, com escopo do tenant e somente para revisão que habilite Google Sheets; ela está validada e aguarda commit, push e implantação antes da repetição do teste.
+Status em 8 de setembro de 2026: em andamento, com autorização explícita. Meta/WhatsApp, OpenAI e Google Sheets foram configurados pelo painel com credenciais próprias; o modelo foi ajustado para `gpt-4.1-mini`. Readiness e preflight real aprovaram as três conexões, a revisão foi publicada e o Capitão Mor foi ativado. Os testes reais aprovaram menu, endereço e agenda após a implantação da versão `1.10.5`, que materializa no runtime versionado somente os eventos Google válidos do próprio tenant. O fluxo controlado de compra também registrou um pedido pendente com comprovante íntegro e exportação concluída ao Google Sheets. A resposta revelou que o campo genérico da credencial permitia cadastrar uma estrutura textual inteira no lugar da chave PIX; a correção `1.10.6` restringe o cadastro e a rotação a uma chave escalar válida e faz o runtime falhar fechado diante de conteúdo estruturado.
 
 Meta/WhatsApp:
 
@@ -282,6 +282,8 @@ Gate:
 ### Fase 15 — primeira empresa real pelo painel
 
 Objetivo: comprovar o onboarding completo de uma empresa real sem operação manual de backend.
+
+Status em 8 de setembro de 2026: em andamento no canário controlado do Capitão Mor. Cadastro, integrações, publicação e ativação foram executados pelo painel. Saudação, menu, endereço, agenda, seleção de evento, recebimento de imagem e criação de pedido pendente foram comprovados. A exportação do pedido ao Google Sheets terminou sem repetição nem job falho. O teste permanece controlado e sem pagamento real; a correção da apresentação da chave PIX deve ser implantada e a credencial rotacionada pelo painel antes de repetir a compra.
 
 Execução:
 

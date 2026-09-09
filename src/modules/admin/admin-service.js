@@ -12,6 +12,7 @@ import {
 } from "./authorization.js";
 import { ADMIN_RESOURCES, adminResource } from "./resources.js";
 import { isSensitiveKey, redactSensitive } from "../../security/redaction.js";
+import { normalizePixKey } from "../secrets/payment-secret.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
@@ -231,6 +232,18 @@ function sanitizedCredentialView(value) {
 
 function sanitizedAdminView(value) {
   return redactSensitive(value);
+}
+
+function credentialSecret({ provider, purpose, secret }) {
+  const normalized = requiredSecret(secret);
+  if (provider === "payment" && purpose.toLowerCase() === "pix") {
+    const pixKey = normalizePixKey(normalized);
+    if (!pixKey) {
+      throw new AdminValidationError("Informe somente uma chave PIX válida, sem rótulos, instruções ou estrutura JSON.", { field: "secret" });
+    }
+    return pixKey;
+  }
+  return normalized;
 }
 
 function assertOnlyFields(body, allowed) {
@@ -734,12 +747,14 @@ export class AdminService {
     assertTenantBody(empresaId, body);
     await this.#tenant(auth, empresaId, definition, { write: true, action: "credential.create", resource: "credentials" });
     if (!this.credentialVault?.createCredential) throw new AdminValidationError("Cofre de credenciais não configurado.");
+    const provider = requiredText(body.provider, "provider");
+    const purpose = requiredText(body.purpose, "purpose");
     const view = await this.credentialVault.createCredential({
       empresaId,
       credentialId: body.credentialId || this.idGenerator(),
-      provider: requiredText(body.provider, "provider"),
-      purpose: requiredText(body.purpose, "purpose"),
-      secret: requiredSecret(body.secret),
+      provider,
+      purpose,
+      secret: credentialSecret({ provider, purpose, secret: body.secret }),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     });
@@ -749,10 +764,14 @@ export class AdminService {
   async rotateCredential({ auth, empresaId, credentialId, body, correlationId }) {
     await this.#tenant(auth, empresaId, ADMIN_RESOURCES.credentials, { write: true, action: "credential.rotate", resource: "credentials" });
     if (!this.credentialVault?.rotateCredential) throw new AdminValidationError("Cofre de credenciais não configurado.");
+    const normalizedCredentialId = requiredText(credentialId, "credentialId");
+    const metadata = await this.credentialVault.getCredentialMetadata?.({ empresaId, credentialId: normalizedCredentialId });
     return sanitizedCredentialView(await this.credentialVault.rotateCredential({
       empresaId,
-      credentialId: requiredText(credentialId, "credentialId"),
-      newSecret: requiredSecret(body?.secret),
+      credentialId: normalizedCredentialId,
+      newSecret: metadata
+        ? credentialSecret({ provider: metadata.provider, purpose: metadata.purpose, secret: body?.secret })
+        : requiredSecret(body?.secret),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     }));

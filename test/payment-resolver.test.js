@@ -14,7 +14,7 @@ test("pagamento versionado resolve somente a referência tenant-scoped seleciona
     },
     async getCredentialForUse(input) {
       calls.push(["secret", input]);
-      return "pix-protegido";
+      return "teste@pix.invalid";
     },
   };
   const resolver = new PostgresPaymentResolver(null, { credentialVault });
@@ -30,9 +30,9 @@ test("pagamento versionado resolve somente a referência tenant-scoped seleciona
     ["metadata", { empresaId: TENANT_ID, credentialId: CREDENTIAL_ID }],
     ["secret", { empresaId: TENANT_ID, credentialId: CREDENTIAL_ID }],
   ]);
-  assert.equal(payment.value, "pix-protegido");
+  assert.equal(payment.value, "teste@pix.invalid");
   assert.equal(payment.recipient, "Empresa Sintética");
-  assert.doesNotMatch(JSON.stringify(calls), /pix-protegido/u);
+  assert.doesNotMatch(JSON.stringify(calls), /teste@pix\.invalid/u);
 });
 
 test("pagamento versionado falha fechado para referência ou provedor incompatível", async () => {
@@ -49,4 +49,23 @@ test("pagamento versionado falha fechado para referência ou provedor incompatí
   assert.equal(await resolver.resolve({ empresaId: TENANT_ID, type: "pix", credentialRef: "credential:slug" }), null);
   assert.equal(await resolver.resolve({ empresaId: TENANT_ID, type: "pix", credentialRef: `credential:${CREDENTIAL_ID}` }), null);
   assert.equal(secretCalls, 0);
+});
+
+test("pagamento versionado normaliza chaves PIX e rejeita estruturas protegidas", async () => {
+  let secret = "123.456.789-01";
+  const resolver = new PostgresPaymentResolver(null, {
+    credentialVault: {
+      async getCredentialMetadata() {
+        return { empresaId: TENANT_ID, provider: "payment", status: "active", configured: true };
+      },
+      async getCredentialForUse() { return secret; },
+    },
+  });
+  const input = { empresaId: TENANT_ID, type: "pix", credentialRef: `credential:${CREDENTIAL_ID}` };
+
+  assert.equal((await resolver.resolve(input)).value, "12345678901");
+  secret = "{ key: '12345678901', recipient: 'Empresa' }";
+  assert.equal(await resolver.resolve(input), null);
+  secret = "12345678901\nApós o pagamento, envie o comprovante.";
+  assert.equal(await resolver.resolve(input), null);
 });
