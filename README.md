@@ -1,5 +1,14 @@
 # WAIA - Plataforma multiempresa de atendimento WhatsApp
 
+## Documentação ativa
+
+- [WAIA 2.0.0: especificação completa](WAIA_2.0.0.md) — arquitetura e implementação planejadas para autoatendimento.
+- [Plano de fases](PLAN.md) — sequência, autorização e gates.
+- [Continuidade](RELATORIO.md) — estado confirmado, histórico resumido e pendências.
+- [Operação de release](docs/OPERACAO_RELEASE.md) — backup, restore, promoção e rollback.
+
+A base funcional inspecionada é v1.10.6; a revisão documental é v1.10.7. A 2.0.0 é alvo futuro. As descrições abaixo tratam da base existente, não de funcionalidades futuras já entregues.
+
 Este repositório evolui a demonstração do chatbot do Capitão Mor para uma plataforma SaaS multiempresa. A base continua em Node.js com ES Modules, Express, WhatsApp Cloud API e OpenAI Responses API, com API central, worker, painel administrativo, PostgreSQL e Redis. O Google Sheets está ligado ao runtime oficial por tenant para importar agenda/configurações públicas e exportar pedidos, mantendo PostgreSQL como fonte de verdade.
 
 O `src/server.js` permanece como entrada legada da demonstração. A operação oficial usa:
@@ -202,19 +211,9 @@ Rollback de aplicação promove o digest anterior. Restore de dados é último r
 
 ## Validação
 
-Comandos executados nesta continuidade:
+Resultados históricos foram consolidados em [RELATORIO.md](RELATORIO.md); não representam execução atual.
 
-- `npm test`: 182 testes descobertos; 176 aprovados, com 5 testes PostgreSQL e 1 teste Redis opcionais ignorados sem infraestrutura.
-- `npm run load:test`: cenários sintéticos de 5, 20 e 100 tenants, picos distribuídos e tenant volumoso.
-- `docker compose -p waia-today config --quiet`: configuração válida com segredos sintéticos.
-- Migrações e seed executados em PostgreSQL 16 real; 14 migrações descobertas.
-- Testes reais comprovaram que `waia_app` não executa DDL, não possui `CREATE`/`TEMP`/`BYPASSRLS`, respeita o tenant transacional e mantém a capacidade atômica da agenda.
-- Teste real comprovou escrita e leitura da mídia no volume compartilhado, metadados SHA-256 no PostgreSQL e isolamento pelo tenant.
-- Teste real comprovou resposta humana transacional, idempotente e auditada, com envio pelo número do tenant, retry e dead-letter; Redis real recebeu somente referências por ID.
-- Teste real comprovou gestão do dead-letter: consulta sanitizada, novo outbox job no retry, resolução sem falso sucesso da mensagem e auditoria transacional.
-- Endpoint Prometheus real recusou coleta sem token com HTTP 401 e retornou HTTP 200 com Bearer sintético, gauges PostgreSQL/BullMQ e heartbeat do worker; Redis real acumulou contadores e durações compartilhados.
-- Runtime, worker, parser e gateway interativo passaram em 36 testes dentro da imagem Docker; API e worker reconstruídos permaneceram saudáveis e a prontidão retornou HTTP 200.
-- API e worker iniciados em modo `production` com PostgreSQL/Redis reais; ambos saudáveis e `/health/ready` retornou `200`.
-- Cinco integrações PostgreSQL reais passaram na imagem, incluindo sincronização sintética da agenda Google com RLS e desativação de eventos removidos.
-
-As chamadas externas reais da Meta, OpenAI e Google não fizeram parte desta validação e continuam dependendo de ambiente e credenciais autorizados.
+- `npm test` executa a suite local; integrações reais exigem `RUN_POSTGRES_INTEGRATION=true` e `RUN_REDIS_INTEGRATION=true` em ambiente sintético autorizado.
+- `npm run load:test` mede cenários em memória, não capacidade da VPS ou latência dos provedores.
+- Validações Docker devem reutilizar `waia-test`, preservando projetos e volumes existentes.
+- Antes de promover uma release, seguir [o runbook](docs/OPERACAO_RELEASE.md), registrar resultados atuais e explicitar testes ignorados.

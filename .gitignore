@@ -12,7 +12,7 @@ backups/
 docs/*
 !docs/OPERACAO_RELEASE.md
 !docs/ACEITES_FASE_11.md
-PLAN.md
+!docs/ADR_001_PORTAL_IDENTIDADE.md
 RELATORIO.md
 AGENTS.md
 package-lock.json
