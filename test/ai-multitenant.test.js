@@ -104,6 +104,10 @@ test("prompt, contexto e histórico permanecem isolados por empresa", async () =
   assert.match(JSON.stringify(callB.input), /20h B|Histórico B/u);
   assert.deepEqual(setupAi.historyRequests.map(({ empresaId }) => empresaId).sort(), ["tenant-a", "tenant-b"]);
   assert.equal(callA.store, false);
+  assert.equal(
+    setupAi.clientFactory.requests.find(({ client }) => client.empresaId === "tenant-a").transportOptions.headers["X-Client-Request-Id"],
+    "tenant-a-correlation",
+  );
 });
 
 test("regras públicas do estabelecimento chegam ao contexto processado pelo modelo", async () => {
@@ -264,10 +268,18 @@ test("reservas concorrentes de quota são atômicas por tenant", async () => {
 });
 
 test("catálogo PostgreSQL possui preço versionado para o modelo padrão", async () => {
-  const pricing = await new VersionedPricingCatalog().get({ model: "gpt-4.1-mini" });
+  const pricing = await new VersionedPricingCatalog().get({ model: "gpt-4.1-mini-2025-04-14" });
   assert.deepEqual(pricing, {
     inputPerMillion: 0.4,
     outputPerMillion: 1.6,
-    version: "openai-2026-08-29",
+    version: "openai-2026-09-04",
   });
+});
+
+test("catálogo de preços aceita revisão versionada por configuração sem rebuild", async () => {
+  const pricing = await new VersionedPricingCatalog(JSON.stringify({
+    "avaliado-sintetico": { inputPerMillion: 1, outputPerMillion: 2, version: "review-2026-09" },
+  })).get({ model: "avaliado-sintetico" });
+  assert.deepEqual(pricing, { inputPerMillion: 1, outputPerMillion: 2, version: "review-2026-09" });
+  assert.throws(() => new VersionedPricingCatalog("{invalido"), /JSON válido/u);
 });

@@ -1,8 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSqlDirectory } from "../src/infra/postgres/sql-runner.js";
+
+test("checksum SQL é estável entre LF e CRLF e aceita o hash legado", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "waia-sql-checksum-"));
+  const filename = path.join(directory, "001_sample.sql");
+  const lf = "CREATE TABLE sample (id integer);\nSELECT 1;\n";
+  const crlf = lf.replace(/\n/gu, "\r\n");
+  try {
+    await writeFile(filename, lf, "utf8");
+    const [fromLf] = await readSqlDirectory(directory);
+    await writeFile(filename, crlf, "utf8");
+    const [fromCrlf] = await readSqlDirectory(directory);
+    const legacyCrlfChecksum = createHash("sha256").update(crlf).digest("hex");
+
+    assert.equal(fromLf.checksum, fromCrlf.checksum);
+    assert.ok(fromLf.acceptedChecksums.has(legacyCrlfChecksum));
+    assert.ok(fromCrlf.acceptedChecksums.has(legacyCrlfChecksum));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("migrações cobrem o domínio mínimo, isolamento e status Meta", async () => {
   const files = await readSqlDirectory(fileURLToPath(new URL("../db/migrations", import.meta.url)));

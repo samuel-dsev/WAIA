@@ -45,14 +45,12 @@
       <nav id="primaryNav">
         <button type="button" data-view="dashboard" data-permission="dashboard"><span aria-hidden="true">◫</span> Visão geral</button>
         <button type="button" data-view="companies" data-permission="platform"><span aria-hidden="true">◇</span> Empresas</button>
+        <button type="button" data-view="onboarding" data-permission="settings"><span aria-hidden="true">✓</span> Onboarding</button>
         <button type="button" data-view="numbers" data-permission="numbers"><span aria-hidden="true">#</span> Números WhatsApp</button>
         <button type="button" data-view="settings" data-permission="settings"><span aria-hidden="true">⚙</span> Módulos e configurações</button>
         <button type="button" data-view="catalog" data-permission="settings"><span aria-hidden="true">□</span> Catálogo e serviços</button>
         <button type="button" data-view="events" data-permission="settings"><span aria-hidden="true">◇</span> Eventos</button>
         <button type="button" data-view="menus" data-permission="settings"><span aria-hidden="true">≡</span> Menus</button>
-        <button type="button" data-view="menuItems" data-permission="settings"><span aria-hidden="true">+</span> Itens de menu</button>
-        <button type="button" data-view="payments" data-permission="settings"><span aria-hidden="true">$</span> Pagamentos</button>
-        <button type="button" data-view="availability" data-permission="settings"><span aria-hidden="true">◫</span> Disponibilidades</button>
         <button type="button" data-view="integrations" data-permission="settings"><span aria-hidden="true">↔</span> Integrações</button>
         <button type="button" data-view="contacts" data-permission="operations"><span aria-hidden="true">◎</span> Contatos</button>
         <button type="button" data-view="conversations" data-permission="operations"><span aria-hidden="true">◌</span> Conversas e mensagens</button>
@@ -80,6 +78,7 @@
           <button id="refreshToggle" class="button button-quiet" type="button" aria-pressed="true" title="Pausar atualização periódica">Atualização automática</button>
           <div class="user-menu">
             <span id="sessionUser" class="user-name"></span>
+            <button id="passwordButton" class="button button-secondary" type="button">Trocar senha</button>
             <button id="logoutButton" class="button button-secondary" type="button">Sair</button>
           </div>
         </div>

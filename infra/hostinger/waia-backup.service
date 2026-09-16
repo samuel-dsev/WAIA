@@ -1,0 +1,18 @@
+[Unit]
+Description=Backup diario do WAIA (PostgreSQL e midias)
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/waia/current
+Environment=COMPOSE_FILE=/opt/waia/current/docker-compose.yml:/opt/waia/current/infra/hostinger/compose.staging.yml
+Environment=WAIA_COMPOSE_PROJECT=waia-prod
+Environment=BACKUP_DIR=/opt/waia/backups
+Environment=BACKUP_RETENTION_DAYS=7
+EnvironmentFile=/etc/waia/backup.env
+UMask=0077
+ExecStart=/bin/sh /opt/waia/current/scripts/backup-postgres.sh
+
+[Install]
+WantedBy=multi-user.target

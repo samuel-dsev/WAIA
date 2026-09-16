@@ -5,7 +5,7 @@ const asyncRoute = (handler) => async (request, response, next) => {
   try { await handler(request, response); } catch (error) { next(error); }
 };
 
-export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
+export function createAdminRouter({ adminService, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
   const router = express.Router();
   router.use(authenticate);
   router.use((request, _response, next) => {
@@ -13,12 +13,54 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
     return csrf(request, _response, next);
   });
   router.get("/session", (request, response) => response.json(adminService.session(request.auth)));
+  router.get("/users/lookup", asyncRoute(async (request, response) => response.json(await adminService.lookupGlobalUser({ auth: request.auth, email: request.query.email }))));
   router.get("/tenants", asyncRoute(async (request, response) => response.json(await adminService.listTenants({ auth: request.auth, query: { ...request.query, limit: request.query.pageSize } }))));
   router.post("/tenants", asyncRoute(async (request, response) => response.status(201).json(await adminService.createTenant({ auth: request.auth, body: request.body }))));
   router.get("/tenants/:empresaId", asyncRoute(async (request, response) => response.json(await adminService.getTenant({ auth: request.auth, empresaId: request.params.empresaId }))));
   router.patch("/tenants/:empresaId", asyncRoute(async (request, response) => response.json(await adminService.updateTenant({ auth: request.auth, empresaId: request.params.empresaId, body: request.body }))));
-  router.post("/tenants/:empresaId/suspend", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId, suspended: true }))));
-  router.post("/tenants/:empresaId/activate", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId, suspended: false }))));
+  router.post("/tenants/:empresaId/suspend", asyncRoute(async (request, response) => response.json(await adminService.suspendTenant({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.get("/tenants/:empresaId/onboarding", asyncRoute(async (request, response) => response.json(await adminService.getOnboarding({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.patch("/tenants/:empresaId/onboarding/:step", asyncRoute(async (request, response) => response.json(await adminService.saveOnboardingStep({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    step: request.params.step,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.get("/tenants/:empresaId/action-catalog", asyncRoute(async (request, response) => response.json(await adminService.getActionCatalog({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.get("/tenants/:empresaId/configuration/draft", asyncRoute(async (request, response) => response.json(await adminService.readConfigurationDraft({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.put("/tenants/:empresaId/configuration/draft", asyncRoute(async (request, response) => response.json(await adminService.saveConfigurationDraft({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/configuration/validate", asyncRoute(async (request, response) => response.json(await adminService.validateConfiguration({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/configuration/publish", asyncRoute(async (request, response) => response.status(201).json(await adminService.publishConfiguration({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.get("/tenants/:empresaId/readiness", asyncRoute(async (request, response) => response.json(await adminService.configurationReadiness({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/preflight", sensitiveRateLimit, asyncRoute(async (request, response) => response.json(await adminService.preflightConfiguration({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/simulator/messages", sensitiveRateLimit, asyncRoute(async (request, response) => response.json(await adminService.simulateConfigurationMessage({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
+  router.post("/tenants/:empresaId/activate", asyncRoute(async (request, response) => response.json(await adminService.activateTenant({
+    auth: request.auth,
+    empresaId: request.params.empresaId,
+    body: request.body,
+    correlationId: request.context?.correlationId,
+  }))));
   router.get("/dashboard", asyncRoute(async (request, response) => response.json(await adminService.globalDashboard({ auth: request.auth, query: request.query }))));
   router.get("/diagnostics", asyncRoute(async (request, response) => response.json(await adminService.diagnostics({ auth: request.auth }))));
   router.get("/tenants/:empresaId/dashboard", asyncRoute(async (request, response) => response.json(await adminService.tenantDashboard({ auth: request.auth, empresaId: request.params.empresaId, query: request.query }))));
@@ -27,6 +69,12 @@ export function createAdminRouter({ adminService, authenticate, csrf } = {}) {
   router.post("/tenants/:empresaId/credentials", asyncRoute(async (request, response) => response.status(201).json(await adminService.createCredential({ auth: request.auth, empresaId: request.params.empresaId, body: request.body, correlationId: request.context?.correlationId }))));
   router.post("/tenants/:empresaId/credentials/:id/rotate", asyncRoute(async (request, response) => response.json(await adminService.rotateCredential({ auth: request.auth, empresaId: request.params.empresaId, credentialId: request.params.id, body: request.body, correlationId: request.context?.correlationId }))));
   router.post("/tenants/:empresaId/credentials/:id/revoke", asyncRoute(async (request, response) => response.json(await adminService.revokeCredential({ auth: request.auth, empresaId: request.params.empresaId, credentialId: request.params.id, correlationId: request.context?.correlationId }))));
+  router.get("/tenants/:empresaId/meta-applications", asyncRoute(async (request, response) => response.json(await adminService.listMetaApplications({ auth: request.auth, empresaId: request.params.empresaId }))));
+  router.post("/tenants/:empresaId/meta-applications", asyncRoute(async (request, response) => response.status(201).json(await adminService.createMetaApplication({ auth: request.auth, empresaId: request.params.empresaId, body: request.body, correlationId: request.context?.correlationId }))));
+  router.patch("/tenants/:empresaId/meta-applications/:appId", asyncRoute(async (request, response) => response.json(await adminService.updateMetaApplication({ auth: request.auth, empresaId: request.params.empresaId, appId: request.params.appId, body: request.body, correlationId: request.context?.correlationId }))));
+  router.post("/tenants/:empresaId/meta-applications/:appId/rotate-secret", asyncRoute(async (request, response) => response.json(await adminService.rotateMetaApplicationSecret({ auth: request.auth, empresaId: request.params.empresaId, appId: request.params.appId, body: request.body, correlationId: request.context?.correlationId }))));
+  router.post("/tenants/:empresaId/meta-applications/:appId/preflight", asyncRoute(async (request, response) => response.json(await adminService.preflightMetaApplication({ auth: request.auth, empresaId: request.params.empresaId, appId: request.params.appId, body: request.body, correlationId: request.context?.correlationId }))));
+  router.put("/tenants/:empresaId/numbers/:numberId/meta-binding", asyncRoute(async (request, response) => response.json(await adminService.bindMetaNumber({ auth: request.auth, empresaId: request.params.empresaId, numberId: request.params.numberId, body: request.body, correlationId: request.context?.correlationId }))));
   router.post("/tenants/:empresaId/integrations/google-sheets/sync", asyncRoute(async (request, response) => response.json(await adminService.syncGoogleSheets({ auth: request.auth, empresaId: request.params.empresaId, correlationId: request.context?.correlationId }))));
   for (const [path, mode] of [["assume", "human"], ["pause", "paused"], ["resume", "bot"]]) {
     router.post(`/tenants/:empresaId/conversations/:id/${path}`, asyncRoute(async (request, response) => response.json(await adminService.setConversationMode({ auth: request.auth, empresaId: request.params.empresaId, conversationId: request.params.id, mode, operatorId: mode === "human" ? request.auth.user.id : null }))));

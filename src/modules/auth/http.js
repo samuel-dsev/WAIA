@@ -71,6 +71,18 @@ export function createAuthRouter({ authService, secureCookies = false, sessionTt
     } catch (error) { next(error); }
   });
   router.get("/session", authenticate, (request, response) => response.json(publicPrincipal(request.auth)));
+  router.post("/password", authenticate, csrf, async (request, response, next) => {
+    try {
+      await authService.changePassword({
+        sessionId: request.auth.sessionId,
+        userId: request.auth.user.id,
+        currentPassword: request.body?.currentPassword,
+        newPassword: request.body?.newPassword,
+        ip: request.ip,
+      });
+      response.sendStatus(204);
+    } catch (error) { next(error); }
+  });
   router.post("/logout", authenticate, csrf, async (request, response, next) => {
     try {
       await authService.logout({ sessionId: request.auth.sessionId, userId: request.auth.user.id, ip: request.ip });

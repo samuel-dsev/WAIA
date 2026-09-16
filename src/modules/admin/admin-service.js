@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AdminConflictError,
   AdminForbiddenError,
   AdminNotFoundError,
   AdminValidationError,
@@ -11,6 +12,7 @@ import {
 } from "./authorization.js";
 import { ADMIN_RESOURCES, adminResource } from "./resources.js";
 import { isSensitiveKey, redactSensitive } from "../../security/redaction.js";
+import { normalizePixKey } from "../secrets/payment-secret.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
@@ -20,7 +22,18 @@ const OPERATOR_ASSIGNABLE_PERMISSIONS = new Set([
   "orders.read", "orders.update", "appointments.read", "appointments.update",
 ]);
 const TENANT_MODULES = Object.freeze([
-  "catalog", "orders", "events", "appointments", "payments", "human_handoff", "ai_freeform", "external_integrations",
+  "catalog", "orders", "events", "appointments", "payments", "human_handoff", "ai_freeform", "external_integrations", "flows",
+]);
+const ONBOARDING_RESOURCE = Object.freeze({ read: "admin", write: "admin" });
+const META_RESOURCE = Object.freeze({ read: "admin", write: "admin" });
+const META_PUBLIC_FIELDS = new Set([
+  "id", "empresaId", "name", "appId", "mode", "webhookPublicId", "state",
+  "appSecretCredentialId", "previousAppSecretCredentialId", "appSecretRotatedAt",
+  "previousAppSecretValidUntil", "verifyTokenCredentialId", "revision", "lastTestAt",
+  "lastWebhookValidAt", "lastErrorSanitized", "lastErrorExpiresAt", "createdAt", "updatedAt",
+  "phoneNumberId", "wabaId", "metaAppId", "accessTokenCredentialId", "bindingRevision",
+  "status", "primary", "success", "code", "message", "testedAt", "applicationId",
+  "numberId", "providerCode",
 ]);
 
 function slugFromName(value) {
@@ -221,15 +234,56 @@ function sanitizedAdminView(value) {
   return redactSensitive(value);
 }
 
+function credentialSecret({ provider, purpose, secret }) {
+  const normalized = requiredSecret(secret);
+  if (provider === "payment" && purpose.toLowerCase() === "pix") {
+    const pixKey = normalizePixKey(normalized);
+    if (!pixKey) {
+      throw new AdminValidationError("Informe somente uma chave PIX válida, sem rótulos, instruções ou estrutura JSON.", { field: "secret" });
+    }
+    return pixKey;
+  }
+  return normalized;
+}
+
+function assertOnlyFields(body, allowed) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new AdminValidationError("Corpo JSON inválido.");
+  }
+  const unknown = Object.keys(body).find((field) => !allowed.has(field));
+  if (unknown) throw new AdminValidationError(`Campo não permitido: ${unknown}.`, { field: unknown });
+}
+
+function sanitizedMetaView(value) {
+  if (Array.isArray(value)) return value.map(sanitizedMetaView);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => META_PUBLIC_FIELDS.has(key))
+    .map(([key, item]) => [key, key === "lastErrorSanitized" ? redactSensitive(item) : sanitizedAdminView(item)]));
+}
+
+function rethrowMetaError(error) {
+  const code = String(error?.code || "");
+  if (code.endsWith("_NOT_FOUND")) throw new AdminNotFoundError();
+  if (code.endsWith("_CONFLICT")) throw new AdminConflictError();
+  if (code.startsWith("META_") || error instanceof TypeError) {
+    throw new AdminValidationError("Os dados da conexão Meta são inválidos.");
+  }
+  throw error;
+}
+
 export class AdminService {
-  constructor({ repository, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, metaAppRepository, metaHealthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
+    this.onboardingService = onboardingService;
     this.credentialVault = credentialVault;
     this.conversationService = conversationService;
     this.healthService = healthService;
     this.mediaStore = mediaStore;
     this.googleSheetsIntegration = googleSheetsIntegration;
+    this.metaAppRepository = metaAppRepository;
+    this.metaHealthService = metaHealthService;
     this.clock = clock;
     this.idGenerator = idGenerator;
   }
@@ -306,6 +360,20 @@ export class AdminService {
     return this.repository.listTenants({ ...options, allowedIds });
   }
 
+  async lookupGlobalUser({ auth, email }) {
+    await this.#platform(auth, "user.global.lookup", "users");
+    if (typeof this.repository.lookupGlobalUser !== "function") {
+      throw new AdminValidationError("A consulta de usuário global não está configurada.");
+    }
+    const normalizedEmail = String(email || "").trim().toLocaleLowerCase("en-US");
+    if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalizedEmail)) {
+      throw new AdminValidationError("Informe o e-mail exato de um usuário existente.", { field: "email" });
+    }
+    const user = await this.repository.lookupGlobalUser({ email: normalizedEmail });
+    if (!user) throw new AdminNotFoundError();
+    return user;
+  }
+
   async getTenant({ auth, empresaId }) {
     await this.#tenant(auth, empresaId, { write: "admin" }, { action: "tenant.read", resource: "tenants" });
     const tenant = await this.repository.getTenant({ empresaId });
@@ -316,6 +384,9 @@ export class AdminService {
   async createTenant({ auth, body }) {
     await this.#platform(auth, "tenant.create", "tenants");
     const input = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+    if (Object.hasOwn(input, "status")) {
+      throw new AdminValidationError("O status é controlado pelo fluxo de onboarding.", { field: "status" });
+    }
     const payload = validatedPayload("tenants", {
       slug: input.slug || slugFromName(input.name),
       name: input.name,
@@ -323,7 +394,7 @@ export class AdminService {
       identity: input.identity == null || input.identity === "" ? null : input.identity,
       timezone: input.timezone || "America/Sao_Paulo",
       locale: input.locale || "pt-BR",
-      status: input.status || "draft",
+      status: "draft",
       messageRetentionDays: input.messageRetentionDays ?? 365,
       logRetentionDays: input.logRetentionDays ?? 90,
     });
@@ -340,6 +411,9 @@ export class AdminService {
   async updateTenant({ auth, empresaId, body }) {
     await this.#platform(auth, "tenant.update", "tenants");
     assertTenantBody(empresaId, body);
+    if (body && typeof body === "object" && Object.hasOwn(body, "status")) {
+      throw new AdminValidationError("O status é controlado pelo fluxo de onboarding.", { field: "status" });
+    }
     const payload = validatedPayload("tenants", body, { partial: true });
     return this.#auditedMutation({
       auth,
@@ -354,18 +428,162 @@ export class AdminService {
     });
   }
 
-  async suspendTenant({ auth, empresaId, suspended = true }) {
-    await this.#platform(auth, suspended ? "tenant.suspend" : "tenant.activate", "tenants");
+  async suspendTenant({ auth, empresaId }) {
+    await this.#platform(auth, "tenant.suspend", "tenants");
     return this.#auditedMutation({
       auth,
       empresaId,
       platform: true,
       mutate: async (transaction) => {
-        const tenant = await this.repository.updateTenant({ empresaId, changes: { status: suspended ? "suspended" : "active" }, transaction });
+        const tenant = await this.repository.updateTenant({ empresaId, changes: { status: "suspended" }, transaction });
         if (!tenant) throw new AdminNotFoundError();
         return tenant;
       },
-      audit: { action: suspended ? "tenant.suspend" : "tenant.activate", resource: "tenants", resourceId: empresaId, fields: ["status"] },
+      audit: { action: "tenant.suspend", resource: "tenants", resourceId: empresaId, fields: ["status"] },
+    });
+  }
+
+  #requiredOnboardingService() {
+    if (!this.onboardingService) throw new TypeError("onboardingService não está configurado.");
+    return this.onboardingService;
+  }
+
+  async getOnboarding({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().getProgress({ empresaId });
+  }
+
+  async saveOnboardingStep({ auth, empresaId, step, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.step.update",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().saveProgressStep({
+      empresaId,
+      expectedRevision: body?.revision,
+      currentStep: Number(step),
+      completedSteps: body?.completedSteps,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async getActionCatalog({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.action_catalog.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().getActionCatalog();
+  }
+
+  async readConfigurationDraft({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "configuration.draft.read",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().readDraft({ empresaId });
+  }
+
+  async saveConfigurationDraft({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "configuration.draft.update",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().saveDraft({
+      empresaId,
+      configuration: body?.configuration,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async validateConfiguration({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "configuration.validate",
+      resource: "configuration_draft",
+    });
+    return this.#requiredOnboardingService().validate({ empresaId });
+  }
+
+  async configurationReadiness({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      action: "onboarding.readiness.read",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().readiness({ empresaId });
+  }
+
+  async simulateConfigurationMessage({ auth, empresaId, body, correlationId = null }) {
+    assertTenantBody(empresaId, body);
+    assertOnlyFields(body, new Set(["draftVersion", "sessionId", "sessionRevision", "message"]));
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.simulator.message",
+      resource: "onboarding_simulation",
+    });
+    const result = await this.#requiredOnboardingService().simulateMessage({
+      empresaId,
+      expectedDraftVersion: body.draftVersion,
+      sessionId: body.sessionId,
+      expectedSessionRevision: body.sessionRevision ?? 0,
+      message: body.message,
+      actorId: identity.actorId,
+    });
+    await this.#audit({
+      auth,
+      empresaId,
+      action: "onboarding.simulator.message",
+      resource: "onboarding_simulation",
+      resourceId: result.sessionId,
+      fields: ["draft_version", "session_revision", "message_type"],
+      correlationId,
+    });
+    return result;
+  }
+
+  async preflightConfiguration({ auth, empresaId, body, correlationId = null }) {
+    assertTenantBody(empresaId, body);
+    assertOnlyFields(body, new Set(["draftVersion"]));
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "onboarding.preflight",
+      resource: "onboarding",
+    });
+    return this.#requiredOnboardingService().preflight({
+      empresaId,
+      expectedDraftVersion: body.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async publishConfiguration({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#tenant(auth, empresaId, ONBOARDING_RESOURCE, {
+      write: true,
+      action: "configuration.publish",
+      resource: "configuration_revision",
+    });
+    return this.#requiredOnboardingService().publish({
+      empresaId,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
+    });
+  }
+
+  async activateTenant({ auth, empresaId, body, correlationId = null }) {
+    const identity = await this.#platform(auth, "tenant.activate", "tenants");
+    return this.#requiredOnboardingService().activate({
+      empresaId,
+      expectedDraftVersion: body?.draftVersion,
+      actorId: identity.actorId,
+      correlationId,
     });
   }
 
@@ -478,6 +696,15 @@ export class AdminService {
       empresaId,
       platform: resource === "users",
       mutate: async (transaction) => {
+        if (["users", "memberships"].includes(resource)) {
+          await this.repository.assertTenantAdminContinuity?.({
+            empresaId,
+            userId: recordId,
+            resource,
+            changes: payload,
+            transaction,
+          });
+        }
         const updated = await this.repository.update({ resource, empresaId, id: recordId, changes: payload, transaction });
         if (!updated) throw new AdminNotFoundError();
         return updated;
@@ -497,6 +724,15 @@ export class AdminService {
       empresaId,
       platform: resource === "users",
       mutate: async (transaction) => {
+        if (["users", "memberships"].includes(resource)) {
+          await this.repository.assertTenantAdminContinuity?.({
+            empresaId,
+            userId: recordId,
+            resource,
+            remove: true,
+            transaction,
+          });
+        }
         const removed = await this.repository.remove({ resource, empresaId, id: recordId, transaction });
         if (!removed) throw new AdminNotFoundError();
         return removed;
@@ -511,12 +747,14 @@ export class AdminService {
     assertTenantBody(empresaId, body);
     await this.#tenant(auth, empresaId, definition, { write: true, action: "credential.create", resource: "credentials" });
     if (!this.credentialVault?.createCredential) throw new AdminValidationError("Cofre de credenciais não configurado.");
+    const provider = requiredText(body.provider, "provider");
+    const purpose = requiredText(body.purpose, "purpose");
     const view = await this.credentialVault.createCredential({
       empresaId,
       credentialId: body.credentialId || this.idGenerator(),
-      provider: requiredText(body.provider, "provider"),
-      purpose: requiredText(body.purpose, "purpose"),
-      secret: requiredSecret(body.secret),
+      provider,
+      purpose,
+      secret: credentialSecret({ provider, purpose, secret: body.secret }),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     });
@@ -526,10 +764,14 @@ export class AdminService {
   async rotateCredential({ auth, empresaId, credentialId, body, correlationId }) {
     await this.#tenant(auth, empresaId, ADMIN_RESOURCES.credentials, { write: true, action: "credential.rotate", resource: "credentials" });
     if (!this.credentialVault?.rotateCredential) throw new AdminValidationError("Cofre de credenciais não configurado.");
+    const normalizedCredentialId = requiredText(credentialId, "credentialId");
+    const metadata = await this.credentialVault.getCredentialMetadata?.({ empresaId, credentialId: normalizedCredentialId });
     return sanitizedCredentialView(await this.credentialVault.rotateCredential({
       empresaId,
-      credentialId: requiredText(credentialId, "credentialId"),
-      newSecret: requiredSecret(body?.secret),
+      credentialId: normalizedCredentialId,
+      newSecret: metadata
+        ? credentialSecret({ provider: metadata.provider, purpose: metadata.purpose, secret: body?.secret })
+        : requiredSecret(body?.secret),
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     }));
@@ -544,6 +786,134 @@ export class AdminService {
       actorId: normalizedAdminAuth(auth).actorId,
       correlationId,
     }));
+  }
+
+  async listMetaApplications({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, META_RESOURCE, { action: "meta.app.list", resource: "meta-applications" });
+    if (typeof this.metaAppRepository?.listApps !== "function") throw new AdminValidationError("Aplicativos Meta não configurados no runtime.");
+    return sanitizedMetaView(await this.metaAppRepository.listApps({ empresaId }));
+  }
+
+  async createMetaApplication({ auth, empresaId, body, correlationId }) {
+    assertTenantBody(empresaId, body);
+    await this.#tenant(auth, empresaId, META_RESOURCE, { write: true, action: "meta.app.create", resource: "meta-applications" });
+    if (typeof this.metaAppRepository?.createApp !== "function") throw new AdminValidationError("Aplicativos Meta não configurados no runtime.");
+    if (body?.state != null) throw new AdminValidationError("O estado do aplicativo é controlado pelo preflight.", { field: "state" });
+    try {
+      return sanitizedMetaView(await this.metaAppRepository.createApp({
+        empresaId,
+        name: body?.name,
+        metaAppId: body?.metaAppId,
+        mode: body?.mode || "own",
+        appSecretCredentialId: body?.appSecretCredentialId || null,
+        verifyTokenCredentialId: body?.verifyTokenCredentialId || null,
+        actorId: normalizedAdminAuth(auth).actorId,
+        correlationId,
+        createdAt: this.clock(),
+      }));
+    } catch (error) {
+      return rethrowMetaError(error);
+    }
+  }
+
+  async updateMetaApplication({ auth, empresaId, appId, body, correlationId }) {
+    assertTenantBody(empresaId, body);
+    await this.#tenant(auth, empresaId, META_RESOURCE, { write: true, action: "meta.app.update", resource: "meta-applications" });
+    if (typeof this.metaAppRepository?.updateApp !== "function") throw new AdminValidationError("Aplicativos Meta não configurados no runtime.");
+    if (["active", "failed"].includes(body?.state)) {
+      throw new AdminValidationError("Ativação e falha são controladas pelo preflight.", { field: "state" });
+    }
+    const allowed = ["name", "metaAppId", "mode", "state", "appSecretCredentialId", "verifyTokenCredentialId"];
+    const changes = Object.fromEntries(allowed.filter((field) => Object.hasOwn(body || {}, field)).map((field) => [field, body[field]]));
+    if (Object.keys(changes).length === 0) {
+      throw new AdminValidationError("Informe ao menos um campo do aplicativo Meta para atualizar.");
+    }
+    try {
+      return sanitizedMetaView(await this.metaAppRepository.updateApp({
+        empresaId,
+        id: appId,
+        expectedRevision: Number(body?.expectedRevision),
+        actorId: normalizedAdminAuth(auth).actorId,
+        correlationId,
+        updatedAt: this.clock(),
+        ...changes,
+      }));
+    } catch (error) {
+      return rethrowMetaError(error);
+    }
+  }
+
+  async rotateMetaApplicationSecret({ auth, empresaId, appId, body, correlationId }) {
+    assertTenantBody(empresaId, body);
+    await this.#tenant(auth, empresaId, META_RESOURCE, { write: true, action: "meta.app.secret.rotate", resource: "meta-applications" });
+    if (typeof this.metaAppRepository?.findAppById !== "function" || typeof this.metaAppRepository?.updateApp !== "function") {
+      throw new AdminValidationError("Aplicativos Meta não configurados no runtime.");
+    }
+    const rotationWindowSeconds = body?.rotationWindowSeconds == null ? 900 : Number(body.rotationWindowSeconds);
+    if (!Number.isSafeInteger(rotationWindowSeconds) || rotationWindowSeconds < 60 || rotationWindowSeconds > 3_600) {
+      throw new AdminValidationError("rotationWindowSeconds deve estar entre 60 e 3600.", { field: "rotationWindowSeconds" });
+    }
+    try {
+      const current = await this.metaAppRepository.findAppById({ empresaId, appId });
+      if (!current) throw Object.assign(new Error(), { code: "META_APP_NOT_FOUND" });
+      if (current.mode !== "own" || !current.appSecretCredentialId) {
+        throw new AdminValidationError("Somente aplicativo próprio configurado aceita rotação de App Secret.");
+      }
+      const rotatedAt = this.clock();
+      return sanitizedMetaView(await this.metaAppRepository.updateApp({
+        empresaId,
+        id: appId,
+        expectedRevision: Number(body?.expectedRevision),
+        appSecretCredentialId: body?.newAppSecretCredentialId,
+        previousAppSecretCredentialId: current.appSecretCredentialId,
+        appSecretRotatedAt: rotatedAt,
+        previousAppSecretValidUntil: new Date(rotatedAt.getTime() + rotationWindowSeconds * 1_000),
+        state: "pending",
+        actorId: normalizedAdminAuth(auth).actorId,
+        correlationId,
+        updatedAt: rotatedAt,
+      }));
+    } catch (error) {
+      if (error instanceof AdminValidationError) throw error;
+      return rethrowMetaError(error);
+    }
+  }
+
+  async bindMetaNumber({ auth, empresaId, numberId, body, correlationId }) {
+    assertTenantBody(empresaId, body);
+    await this.#tenant(auth, empresaId, META_RESOURCE, { write: true, action: "meta.number.bind", resource: "meta-applications" });
+    if (typeof this.metaAppRepository?.bindNumber !== "function") throw new AdminValidationError("Aplicativos Meta não configurados no runtime.");
+    try {
+      return sanitizedMetaView(await this.metaAppRepository.bindNumber({
+        empresaId,
+        numberId,
+        metaAppId: body?.metaAppId,
+        accessTokenCredentialId: body?.accessTokenCredentialId,
+        expectedRevision: Number(body?.expectedRevision),
+        actorId: normalizedAdminAuth(auth).actorId,
+        correlationId,
+        updatedAt: this.clock(),
+      }));
+    } catch (error) {
+      return rethrowMetaError(error);
+    }
+  }
+
+  async preflightMetaApplication({ auth, empresaId, appId, body, correlationId }) {
+    assertTenantBody(empresaId, body);
+    await this.#tenant(auth, empresaId, META_RESOURCE, { write: true, action: "meta.app.preflight", resource: "meta-applications" });
+    if (typeof this.metaHealthService?.run !== "function") throw new AdminValidationError("Preflight Meta não configurado no runtime.");
+    try {
+      return sanitizedMetaView(await this.metaHealthService.run({
+        empresaId,
+        appId,
+        numberId: body?.numberId,
+        actorId: normalizedAdminAuth(auth).actorId,
+        correlationId,
+      }));
+    } catch (error) {
+      return rethrowMetaError(error);
+    }
   }
 
   async syncGoogleSheets({ auth, empresaId, correlationId }) {

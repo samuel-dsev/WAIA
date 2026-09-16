@@ -1,0 +1,11 @@
+[Unit]
+Description=Agenda a copia cifrada externa do backup WAIA
+
+[Timer]
+OnCalendar=*-*-* 03:45:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+Unit=waia-backup-offsite.service
+
+[Install]
+WantedBy=timers.target

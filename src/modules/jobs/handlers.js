@@ -260,6 +260,7 @@ export function createWorkerHandlers({
   orderRepository,
   appointmentRepository,
   handoffRepository,
+  flowRepository,
   mediaStore,
   googleSheetsIntegration,
   logger = console,
@@ -362,6 +363,7 @@ export function createWorkerHandlers({
           orderRepository,
           appointmentRepository,
           handoffRepository,
+          flowRepository,
           aiHandler: aiService
             ? async ({ config, input }) => ({
               reply: await aiService.reply({
@@ -395,6 +397,12 @@ export function createWorkerHandlers({
           text: message.text,
           selectionId: message.type === "interactive" ? message.text : undefined,
           mediaId: message.mediaId,
+          messageId: message.id,
+          correlationId: message.correlationId,
+          mediaStorageKey: message.mediaStorageKey,
+          mediaMimeType: message.mediaMimeType,
+          mediaSizeBytes: message.mediaSizeBytes,
+          mediaSha256: message.mediaSha256,
         });
       }
       if (repository.prepareReply) {

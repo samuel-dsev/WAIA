@@ -41,14 +41,27 @@ export const config = {
       : process.env.NODE_ENV === "production",
     sessionTtlHours: numberFromEnv("SESSION_TTL_HOURS", 12),
     allowedPanelOrigin: process.env.PANEL_ORIGIN || "http://localhost:3000",
+    adminNetworkAllowlist: process.env.ADMIN_NETWORK_ALLOWLIST || "",
+  },
+  legal: {
+    platformName: process.env.LEGAL_PLATFORM_NAME || "",
+    privacyEmail: process.env.LEGAL_PRIVACY_EMAIL || "",
+    controllerNotice: process.env.LEGAL_CONTROLLER_NOTICE || "",
   },
   metrics: {
     bearerToken: process.env.METRICS_BEARER_TOKEN || "",
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    model: process.env.OPENAI_MODEL || "gpt-4.1-mini-2025-04-14",
     maxOutputTokens: numberFromEnv("OPENAI_MAX_OUTPUT_TOKENS", 300),
+    pricingCatalog: process.env.OPENAI_PRICING_CATALOG || "",
+  },
+  alerts: {
+    webhookUrl: process.env.ALERT_WEBHOOK_URL || "",
+    authorization: process.env.ALERT_WEBHOOK_AUTHORIZATION || "",
+    format: process.env.ALERT_WEBHOOK_FORMAT || "generic",
+    timeoutMs: numberFromEnv("ALERT_TIMEOUT_MS", 10_000),
   },
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN,

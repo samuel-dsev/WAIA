@@ -34,6 +34,7 @@ export async function cleanupExpiredLogs(pool, { empresaId, batchSize = 500 }) {
 export function createRetentionRunner({
   pool,
   conversationService,
+  flowRepository = null,
   batchSize = 500,
   policies = () => listRetentionPolicies(pool),
   cleanupLogs = (policy) => cleanupExpiredLogs(pool, { empresaId: policy.empresa_id, batchSize }),
@@ -62,7 +63,30 @@ export function createRetentionRunner({
             }
           }
           const deletedLogs = await cleanupLogs(policy);
-          results.push({ empresaId: policy.empresa_id, anonymizedMessages: messages.anonymized, deletedMedia, deletedLogs });
+          const flows = flowRepository?.anonymizeExpired
+            ? await flowRepository.anonymizeExpired({
+              empresaId: policy.empresa_id,
+              before: new Date(),
+              limit: batchSize,
+            })
+            : { submissionIds: [], storageKeys: [], documentCount: 0 };
+          for (const storageKey of flows.storageKeys || []) {
+            if (typeof mediaStore?.delete !== "function") continue;
+            try {
+              await mediaStore.delete({ empresaId: policy.empresa_id, storageKey });
+              deletedMedia += 1;
+            } catch (error) {
+              logger.error?.("tenant_flow_media_retention_failed", { empresaId: policy.empresa_id, storageKey, error });
+            }
+          }
+          results.push({
+            empresaId: policy.empresa_id,
+            anonymizedMessages: messages.anonymized,
+            anonymizedFlowSubmissions: flows.submissionIds.length,
+            anonymizedFlowDocuments: flows.documentCount,
+            deletedMedia,
+            deletedLogs,
+          });
         } catch (error) {
           logger.error?.("tenant_retention_failed", { empresaId: policy.empresa_id, error });
         }

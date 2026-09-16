@@ -34,7 +34,7 @@ function timeoutError() {
   return error;
 }
 
-async function responseWithTimeout(client, request, timeoutMs) {
+async function responseWithTimeout(client, request, timeoutMs, requestOptions = {}) {
   const controller = new AbortController();
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -45,7 +45,7 @@ async function responseWithTimeout(client, request, timeoutMs) {
   });
   try {
     return await Promise.race([
-      client.responses.create(request, { signal: controller.signal }),
+      client.responses.create(request, { ...requestOptions, signal: controller.signal }),
       timeout,
     ]);
   } finally {
@@ -177,7 +177,9 @@ export class MultiTenantAiService {
         max_output_tokens: config.maxOutputTokens,
         instructions,
         input: inputMessages,
-      }, this.timeoutMs);
+      }, this.timeoutMs, {
+        headers: { "X-Client-Request-Id": String(request.correlationId).slice(0, 512) },
+      });
       const text = String(response?.output_text || "").trim();
       if (!text) {
         const error = new Error("A IA não retornou texto.");
@@ -203,6 +205,14 @@ export class MultiTenantAiService {
         occurredAt,
       });
       await this.#notifyAlert(config, request, finalized);
+      this.logger.info?.("ai_request_completed", {
+        empresaId: request.empresaId,
+        conversationId: request.conversationId,
+        correlationId: request.correlationId,
+        openAiRequestId: response?._request_id || null,
+        model: config.model,
+        pricingVersion: pricing.version,
+      });
       return Object.freeze({
         text,
         source: "ai",
@@ -245,6 +255,9 @@ export class MultiTenantAiService {
     if (!finalized?.alertTriggered || typeof this.alertSink?.notify !== "function") return;
     try {
       await this.alertSink.notify({
+        eventCode: "ai_quota_threshold",
+        severity: "warn",
+        state: "triggered",
         empresaId: request.empresaId,
         period: finalized.usage.period,
         usage: finalized.usage,
@@ -263,6 +276,7 @@ export class MultiTenantAiService {
       conversationId: request.conversationId,
       correlationId: request.correlationId,
       code: sanitized.code || fallbackCode,
+      openAiRequestId: error?.requestID || error?._request_id || null,
     });
   }
 }

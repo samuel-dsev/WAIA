@@ -1,3 +1,5 @@
+import { createOnboardingWizard } from "./onboarding.js";
+
 const API_BASE = "/api/admin";
 const REFRESH_INTERVAL_MS = 30_000;
 const ROLE_LABELS = {
@@ -35,6 +37,13 @@ const VIEW_DEFINITIONS = {
       ["name", "Empresa"], ["status", "Estado"], ["numbersCount", "Números"],
       ["configurationVersion", "Versão"], ["updatedAt", "Atualização"],
     ],
+  },
+  onboarding: {
+    title: "Onboarding",
+    eyebrow: "Configuração guiada",
+    description: "Configure, revise e publique uma empresa sem editar código ou infraestrutura.",
+    permission: "settings",
+    filters: false,
   },
   numbers: {
     title: "Números WhatsApp",
@@ -204,7 +213,7 @@ const MODULES = [
   ["catalog", "Catálogo"], ["orders", "Pedidos"], ["events", "Agenda de eventos"],
   ["appointments", "Agendamentos"], ["payments", "Pagamentos"],
   ["human_handoff", "Atendimento humano"], ["ai_freeform", "IA para perguntas livres"],
-  ["external_integrations", "Integrações externas"],
+  ["external_integrations", "Integrações externas"], ["flows", "Fluxos configuráveis"],
 ];
 
 const state = {
@@ -220,16 +229,30 @@ const state = {
   refreshTimer: null,
   requestController: null,
   receiptObjectUrl: null,
+  onboardingWizard: null,
 };
 
 const elements = Object.fromEntries([
   "loginView", "loginForm", "loginEmail", "loginPassword", "loginEmailError", "loginPasswordError", "loginError",
-  "appShell", "sidebar", "primaryNav", "menuToggle", "tenantSelect", "sessionUser", "logoutButton", "refreshToggle",
+  "appShell", "sidebar", "primaryNav", "menuToggle", "tenantSelect", "sessionUser", "passwordButton", "logoutButton", "refreshToggle",
   "mainContent", "viewEyebrow", "viewTitle", "viewDescription", "viewActions", "filterForm", "clearFilters",
   "contentState", "viewContent", "pagination", "previousPage", "nextPage", "pageSummary", "pageSize",
   "confirmDialog", "confirmTitle", "confirmMessage", "confirmCancel", "confirmAccept",
   "detailDialog", "detailTitle", "detailContent", "detailClose", "toastRegion",
 ].map((id) => [id, document.getElementById(id)]));
+
+const mobileSidebarQuery = window.matchMedia("(max-width: 820px)");
+
+function setSidebarOpen(open, { restoreFocus = false } = {}) {
+  const mobile = mobileSidebarQuery.matches;
+  const expanded = mobile && open;
+  elements.sidebar.classList.toggle("is-open", expanded);
+  elements.menuToggle.setAttribute("aria-expanded", String(expanded));
+  elements.sidebar.inert = mobile && !expanded;
+  if (mobile && !expanded) elements.sidebar.setAttribute("aria-hidden", "true");
+  else elements.sidebar.removeAttribute("aria-hidden");
+  if (restoreFocus) elements.menuToggle.focus();
+}
 
 function roleForCurrentContext() {
   if (state.session?.platformRole === "platform_admin") return "platform_admin";
@@ -272,6 +295,11 @@ async function apiFetch(path, { method = "GET", body, signal, headers = {} } = {
       || (typeof payload?.error === "string" ? payload.error : "Não foi possível concluir a solicitação."));
     error.status = response.status;
     error.code = payload?.code || nestedError?.code || "ADMIN_API_ERROR";
+    error.details = payload?.details || nestedError?.details || {};
+    error.path = payload?.path || nestedError?.path || error.details?.path || null;
+    error.field = payload?.field || nestedError?.field || error.details?.field || null;
+    error.issues = payload?.issues || nestedError?.issues || error.details?.issues || [];
+    error.checks = payload?.checks || nestedError?.checks || error.details?.checks || [];
     throw error;
   }
   return payload;
@@ -298,6 +326,8 @@ function normalizedSession(payload) {
 
 function showLogin(message = "") {
   stopRefresh();
+  state.onboardingWizard?.abort?.();
+  state.onboardingWizard = null;
   state.session = null;
   state.csrfToken = "";
   elements.appShell.hidden = true;
@@ -434,6 +464,7 @@ async function navigate(view, { updateHash = true } = {}) {
     toast("Você não possui permissão para essa área.");
     return;
   }
+  if (state.currentView === "onboarding" && next !== "onboarding" && !await disposeOnboardingWizard()) return;
   state.currentView = next;
   state.page = 1;
   resetViewFilters(definition);
@@ -444,8 +475,7 @@ async function navigate(view, { updateHash = true } = {}) {
   elements.filterForm.hidden = definition.filters === false;
   elements.viewActions.replaceChildren();
   elements.pagination.hidden = true;
-  elements.sidebar.classList.remove("is-open");
-  elements.menuToggle.setAttribute("aria-expanded", "false");
+  setSidebarOpen(false);
   renderNavigation();
   addViewActions(next);
   await loadCurrentView();
@@ -462,7 +492,7 @@ function addViewActions(view) {
   if (view === "users" && allowed("users") && state.selectedEmpresaId) {
     elements.viewActions.append(button("Adicionar usuário", () => openUserForm(), "button button-primary"));
   }
-  if (["catalog", "events", "menus", "menuItems", "payments", "availability", "integrations"].includes(view)
+  if (["catalog", "events", "menus", "integrations"].includes(view)
     && allowed("settings") && state.selectedEmpresaId) {
     elements.viewActions.append(button("Adicionar", () => openResourceCreate(view), "button button-primary"));
   }
@@ -473,11 +503,12 @@ async function loadCurrentView({ silent = false } = {}) {
   const definition = VIEW_DEFINITIONS[state.currentView];
   state.requestController?.abort();
   state.requestController = new AbortController();
-  if (!silent) {
+  if (!silent && !(state.currentView === "onboarding" && state.onboardingWizard)) {
     elements.viewContent.replaceChildren();
     setContentState("loading", `Carregando ${definition.title.toLocaleLowerCase("pt-BR")}…`);
   }
   try {
+    if (state.currentView === "onboarding") return await loadOnboarding(state.requestController.signal);
     if (state.currentView === "settings") return await loadSettings(state.requestController.signal);
     const endpoint = endpointFor(definition);
     if (!endpoint) {
@@ -499,6 +530,42 @@ async function loadCurrentView({ silent = false } = {}) {
     elements.pagination.hidden = true;
     setContentState("error", error.message || "Não foi possível carregar os dados.", { retry: true });
   }
+}
+
+async function disposeOnboardingWizard() {
+  if (!state.onboardingWizard) return true;
+  try {
+    await state.onboardingWizard.dispose();
+    state.onboardingWizard = null;
+    return true;
+  } catch (error) {
+    toast(error.message || "Aguarde o salvamento do onboarding antes de continuar.");
+    return false;
+  }
+}
+
+async function loadOnboarding(signal) {
+  if (!state.selectedEmpresaId) {
+    elements.viewContent.replaceChildren();
+    elements.pagination.hidden = true;
+    setContentState("empty", "Selecione uma empresa para iniciar ou retomar o onboarding.");
+    return;
+  }
+  if (!await disposeOnboardingWizard()) return;
+  state.onboardingWizard = createOnboardingWizard({
+    apiFetch,
+    confirmAction,
+    toast,
+    onSessionExpired: () => showLogin("Sua sessão expirou. Entre novamente."),
+    canActivate: () => roleForCurrentContext() === "platform_admin",
+  });
+  await state.onboardingWizard.render({
+    empresaId: state.selectedEmpresaId,
+    mount: elements.viewContent,
+    signal,
+  });
+  elements.pagination.hidden = true;
+  setContentState(null);
 }
 
 function renderDashboard(payload = {}) {
@@ -748,7 +815,7 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
     nodeWithText("dt", "Limite mensal"), valueNode(ai.monthlyTokenLimit),
     nodeWithText("dt", "Credencial"), valueNode(ai.credentialStatus || "not_configured", "status"),
   );
-  aiCard.append(aiList, button("Editar IA", () => openAiConfig(ai), "button button-secondary"));
+  aiCard.append(aiList, button("Editar IA", () => openAiConfig(ai, listFrom(credentialPayload)), "button button-secondary"));
 
   const integrationsCard = node("section", "panel-card");
   integrationsCard.append(nodeWithText("h2", "Integrações"));
@@ -779,14 +846,14 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   for (const credential of listFrom(credentialPayload)) {
     const row = node("div", "check-row");
     row.append(
-      nodeWithText("span", `${credential.provider} · ${credential.purpose} · ${credential.maskedSecret || "mascarada"} · ID ${credential.id}`),
-      button("Rotacionar", () => openCredentialUpdate(credential.id), "button button-quiet button-small"),
+      nodeWithText("span", `${credential.provider} · ${credential.purpose} · ${credential.maskedSecret || "mascarada"}`),
+      button("Rotacionar", () => openCredentialUpdate(credential), "button button-quiet button-small"),
     );
     credentialsCard.append(row);
   }
   if (!listFrom(credentialPayload).length) credentialsCard.append(paragraph("Nenhuma credencial cadastrada."));
   credentialsCard.append(button("Cadastrar chave OpenAI", openOpenAiCredential, "button button-secondary"));
-  credentialsCard.append(button("Cadastrar dado de pagamento", openPaymentCredential, "button button-secondary"));
+  credentialsCard.append(button("Cadastrar chave PIX", openPaymentCredential, "button button-secondary"));
 
   wrapper.append(modulesCard, runtimeCard, aiCard, integrationsCard, credentialsCard);
   return wrapper;
@@ -804,14 +871,14 @@ function openRuntimeConfig(current) {
   }), current);
 }
 
-function openAiConfig(current) {
+function openAiConfig(current, credentials = []) {
   openFormDialog("Configuração da IA", [
     ["enabled", "IA habilitada", "select", true, [["false", "Não"], ["true", "Sim"]]],
     ["provider", "Provedor", "select", true, [["openai", "OpenAI"], ["simulado", "Simulado (desenvolvimento)"]]],
     ["model", "Modelo", "text", true], ["prompt", "Prompt", "text", false],
     ["personality", "Personalidade", "text", false],
     ["keyType", "Tipo de chave", "select", true, [["compartilhada", "Compartilhada"], ["propria", "Própria"]]],
-    ["ownCredentialId", "ID da credencial própria", "text", false],
+    ["ownCredentialId", "Credencial própria", "select", false, [["", "Selecionar"], ...credentials.filter((credential) => credential.provider === "openai").map((credential) => [credential.id, `${credential.purpose} · ${credential.maskedSecret || "mascarada"}`])]],
     ["monthlyTokenLimit", "Limite mensal de tokens", "number", false],
     ["alertPercent", "Alerta percentual", "number", true],
     ["maxHistoryMessages", "Mensagens no histórico", "number", true],
@@ -840,10 +907,10 @@ function openOpenAiCredential() {
 }
 
 function openPaymentCredential() {
-  openFormDialog("Cadastrar dado de pagamento", [["purpose", "Finalidade (ex.: pix)", "text", true], ["secret", "Valor recuperável", "password", true]], async (values) => {
+  openFormDialog("Cadastrar chave PIX", [["secret", "Chave PIX (somente a chave)", "password", true]], async (values) => {
     await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials`, {
-      method: "POST", body: { provider: "payment", purpose: values.purpose, secret: values.secret },
-      success: "Dado cadastrado no cofre. O valor não será exibido novamente.",
+      method: "POST", body: { provider: "payment", purpose: "pix", secret: values.secret },
+      success: "Chave PIX cadastrada no cofre. O valor não será exibido novamente.",
     });
   });
 }
@@ -919,9 +986,10 @@ function openGoogleSheetsConfig(integration, credentials) {
   });
 }
 
-function openCredentialUpdate(credentialId) {
-  openFormDialog("Rotacionar credencial", [["secret", "Novo valor", "password", true]], async (values) => {
-    await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credentialId)}/rotate`, {
+function openCredentialUpdate(credential) {
+  const isPix = credential.provider === "payment" && credential.purpose === "pix";
+  openFormDialog(isPix ? "Rotacionar chave PIX" : "Rotacionar credencial", [["secret", isPix ? "Nova chave PIX (somente a chave)" : "Novo valor", "password", true]], async (values) => {
+    await performMutation(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credential.id)}/rotate`, {
       method: "POST", body: { secret: values.secret }, success: "Credencial rotacionada.",
     });
   });
@@ -1115,9 +1183,6 @@ function openResourceCreate(view) {
       ["capacity", "Capacidade", "number", false], ["status", "Estado", "select", true, [["rascunho", "Rascunho"], ["publicado", "Publicado"], ["cancelado", "Cancelado"]]],
     ],
     menus: [["menuKey", "Chave", "text", true], ["title", "Título", "text", true], ["message", "Mensagem", "text", true], ["active", "Ativo", "select", true, [["true", "Sim"], ["false", "Não"]]], ["version", "Versão", "number", true]],
-    menuItems: [["menuId", "ID do menu", "text", true], ["position", "Posição", "number", true], ["title", "Título", "text", true], ["actionType", "Tipo de ação", "select", true, [["fluxo", "Fluxo"], ["menu", "Menu"], ["url", "URL"], ["atendimento_humano", "Atendimento humano"]]], ["actionKey", "Ação (ex.: catalog.list)", "text", true], ["enabled", "Ativo", "select", true, [["true", "Sim"], ["false", "Não"]]]],
-    payments: [["type", "Tipo", "select", true, [["pix", "PIX"], ["dinheiro", "Dinheiro"], ["cartao", "Cartão"], ["outro", "Outro"]]], ["name", "Nome", "text", true], ["maskedIdentifier", "Identificador mascarado", "text", false], ["recipient", "Favorecido", "text", false], ["instructions", "Instruções", "text", false], ["credentialId", "ID da credencial no cofre", "text", false], ["enabled", "Ativo", "select", true, [["true", "Sim"], ["false", "Não"]]]],
-    availability: [["productServiceId", "ID do serviço", "text", true], ["startsAt", "Início", "datetime-local", true], ["endsAt", "Fim", "datetime-local", true], ["capacity", "Capacidade", "number", true], ["reserved", "Reservados", "number", true], ["status", "Estado", "select", true, [["disponivel", "Disponível"], ["indisponivel", "Indisponível"], ["encerrado", "Encerrado"]]]],
     integrations: [["type", "Tipo", "select", true, [["google_sheets", "Google Sheets"], ["meta", "Meta"], ["openai", "OpenAI"], ["webhook", "Webhook"], ["outro", "Outro"]]], ["name", "Nome", "text", true], ["enabled", "Ativa", "select", true, [["false", "Não"], ["true", "Sim"]]], ["requiredForConfirmation", "Obrigatória para confirmação", "select", true, [["false", "Não"], ["true", "Sim"]]], ["status", "Estado", "select", true, [["nao_configurada", "Não configurada"], ["saudavel", "Saudável"], ["indisponivel", "Indisponível"], ["desabilitada", "Desabilitada"]]]],
   };
   const defaults = { currency: "BRL", stockControl: "nao_controlado", active: "true", enabled: "true", version: 1, timezone: "America/Sao_Paulo", reserved: 0, configuration: {} };
@@ -1218,6 +1283,13 @@ function openFormDialog(title, fields, onSubmit, initialValues = {}) {
 
 async function changeTenantStatus(id, status, name) {
   const verb = status === "suspended" ? "suspender" : "ativar";
+  if (status === "active") {
+    state.selectedEmpresaId = String(id);
+    elements.tenantSelect.value = state.selectedEmpresaId;
+    toast(`Revise a prontidão de ${name || "esta empresa"} antes de ativar.`);
+    await navigate("onboarding");
+    return;
+  }
   if (!await confirmAction(`Deseja ${verb} ${name || "esta empresa"}? A ação será auditada e afetará somente este tenant.`, `${verb[0].toUpperCase()}${verb.slice(1)} empresa`)) return;
   const action = status === "suspended" ? "suspend" : "activate";
   await performMutation(`/tenants/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {}, success: "Estado da empresa atualizado." });
@@ -1344,10 +1416,18 @@ function startRefresh() {
   stopRefresh();
   if (!state.refreshEnabled) return;
   state.refreshTimer = setInterval(() => {
-    if (document.visibilityState === "visible" && !elements.appShell.hidden && !elements.detailDialog.open) {
+    if (canAutoRefreshCurrentView()) {
       loadCurrentView({ silent: true });
     }
   }, REFRESH_INTERVAL_MS);
+}
+
+function canAutoRefreshCurrentView() {
+  return document.visibilityState === "visible"
+    && !elements.appShell.hidden
+    && state.currentView !== "onboarding"
+    && !elements.detailDialog.open
+    && !document.querySelector("dialog.wizard-dialog[open]");
 }
 
 function stopRefresh() {
@@ -1383,8 +1463,28 @@ elements.loginForm.addEventListener("submit", async (event) => {
 });
 
 elements.logoutButton.addEventListener("click", async () => {
+  if (!await disposeOnboardingWizard()) return;
   try { await apiFetch("/auth/logout", { method: "POST", body: {} }); } catch { /* sessão local será encerrada */ }
   showLogin("Sessão encerrada com segurança.");
+});
+
+elements.passwordButton.addEventListener("click", () => {
+  openFormDialog("Trocar senha", [
+    ["currentPassword", "Senha atual", "password", true],
+    ["newPassword", "Nova senha (12 a 256 caracteres)", "password", true],
+    ["confirmation", "Confirme a nova senha", "password", true],
+  ], async (values) => {
+    if (values.newPassword !== values.confirmation) throw new Error("As novas senhas não conferem.");
+    await apiFetch("/auth/password", {
+      method: "POST",
+      body: { currentPassword: values.currentPassword, newPassword: values.newPassword },
+    });
+    values.currentPassword = "";
+    values.newPassword = "";
+    values.confirmation = "";
+    toast("Senha alterada. As outras sessões foram encerradas.");
+  });
+  document.getElementById("dynamic-currentPassword").autocomplete = "current-password";
 });
 
 elements.primaryNav.addEventListener("click", (event) => {
@@ -1393,7 +1493,13 @@ elements.primaryNav.addEventListener("click", (event) => {
 });
 
 elements.tenantSelect.addEventListener("change", async () => {
-  state.selectedEmpresaId = elements.tenantSelect.value;
+  const previousTenantId = state.selectedEmpresaId;
+  const nextTenantId = elements.tenantSelect.value;
+  if (!await disposeOnboardingWizard()) {
+    elements.tenantSelect.value = previousTenantId;
+    return;
+  }
+  state.selectedEmpresaId = nextTenantId;
   state.page = 1;
   elements.sessionUser.textContent = `${state.session.user.name} · ${ROLE_LABELS[roleForCurrentContext()] || "Sem acesso"}`;
   renderNavigation();
@@ -1421,8 +1527,13 @@ elements.nextPage.addEventListener("click", () => { state.page += 1; loadCurrent
 elements.pageSize.addEventListener("change", () => { state.pageSize = Number(elements.pageSize.value); state.page = 1; loadCurrentView(); });
 elements.menuToggle.addEventListener("click", () => {
   const expanded = elements.menuToggle.getAttribute("aria-expanded") === "true";
-  elements.menuToggle.setAttribute("aria-expanded", String(!expanded));
-  elements.sidebar.classList.toggle("is-open", !expanded);
+  setSidebarOpen(!expanded);
+});
+mobileSidebarQuery.addEventListener("change", () => setSidebarOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && elements.menuToggle.getAttribute("aria-expanded") === "true") {
+    setSidebarOpen(false, { restoreFocus: true });
+  }
 });
 elements.refreshToggle.addEventListener("click", () => {
   state.refreshEnabled = !state.refreshEnabled;
@@ -1437,6 +1548,9 @@ elements.detailDialog.addEventListener("close", () => {
   state.receiptObjectUrl = null;
 });
 window.addEventListener("hashchange", () => state.session && navigate(location.hash.slice(1), { updateHash: false }));
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && state.refreshEnabled && state.session) loadCurrentView({ silent: true }); });
+document.addEventListener("visibilitychange", () => {
+  if (state.refreshEnabled && state.session && canAutoRefreshCurrentView()) loadCurrentView({ silent: true });
+});
 
+setSidebarOpen(false);
 loadSession();

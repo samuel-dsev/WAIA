@@ -4,6 +4,11 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+x-waia-image: &waia-image
+  image: ${WAIA_IMAGE:-waia:local}
+  build:
+    context: .
+
 x-runtime-environment: &runtime-environment
   NODE_ENV: production
   INFRASTRUCTURE_MODE: postgres
@@ -26,9 +31,18 @@ x-runtime-environment: &runtime-environment
   MASTER_KEYRING: "${MASTER_KEYRING:-}"
   SESSION_PEPPER: ${SESSION_PEPPER:-}
   SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+  ADMIN_NETWORK_ALLOWLIST: ${ADMIN_NETWORK_ALLOWLIST:-}
+  LEGAL_PLATFORM_NAME: ${LEGAL_PLATFORM_NAME:-}
+  LEGAL_PRIVACY_EMAIL: ${LEGAL_PRIVACY_EMAIL:-}
+  LEGAL_CONTROLLER_NOTICE: ${LEGAL_CONTROLLER_NOTICE:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini-2025-04-14}
   OPENAI_MAX_OUTPUT_TOKENS: ${OPENAI_MAX_OUTPUT_TOKENS:-300}
+  OPENAI_PRICING_CATALOG: ${OPENAI_PRICING_CATALOG:-}
+  ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+  ALERT_WEBHOOK_AUTHORIZATION: ${ALERT_WEBHOOK_AUTHORIZATION:-}
+  ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+  ALERT_TIMEOUT_MS: ${ALERT_TIMEOUT_MS:-10000}
   WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
   WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v26.0}
   META_APP_SECRET: ${META_APP_SECRET:-}
@@ -64,7 +78,7 @@ services:
     logging: *default-logging
 
   api:
-    build: .
+    <<: *waia-image
     restart: unless-stopped
     command: npm run start:api
     environment:
@@ -98,7 +112,7 @@ services:
     logging: *default-logging
 
   worker:
-    build: .
+    <<: *waia-image
     restart: unless-stopped
     command: npm run start:worker
     environment:
@@ -146,6 +160,29 @@ services:
       - internal
     logging: *default-logging
 
+  monitor:
+    profiles: ["operations"]
+    <<: *waia-image
+    restart: unless-stopped
+    command: npm run start:monitor
+    environment:
+      NODE_ENV: production
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_AUTHORIZATION: ${ALERT_WEBHOOK_AUTHORIZATION:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      ALERT_TIMEOUT_MS: ${ALERT_TIMEOUT_MS:-10000}
+      ALERT_MONITOR_INTERVAL_MS: ${ALERT_MONITOR_INTERVAL_MS:-60000}
+      ALERT_QUEUE_WAITING_THRESHOLD: ${ALERT_QUEUE_WAITING_THRESHOLD:-100}
+      MONITOR_API_URL: http://api:3001
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+    logging: *default-logging
+
   media-init:
     image: alpine:3.22
     restart: "no"
@@ -158,7 +195,7 @@ services:
     logging: *default-logging
 
   migrate:
-    build: .
+    <<: *waia-image
     restart: "no"
     command: npm run db:migrate
     environment:

@@ -1,4 +1,5 @@
 node_modules/
+.tmp/hostinger-staging/
 .data/
 .env
 .env.*
@@ -8,4 +9,10 @@ coverage/
 dist/
 backups/
 *.log
-
+docs/*
+!docs/OPERACAO_RELEASE.md
+!docs/ACEITES_FASE_11.md
+PLAN.md
+RELATORIO.md
+AGENTS.md
+package-lock.json

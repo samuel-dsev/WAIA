@@ -1,0 +1,13 @@
+# Terceiro overlay, usado somente em restore drill descartavel na mesma VPS.
+# Mantem o alvo sem portas publicadas e sem rota no Traefik/EasyPanel.
+services:
+  api:
+    ports: !reset []
+
+  panel:
+    profiles: [restore-drill-panel]
+    ports: !reset []
+
+  caddy:
+    profiles: [standalone-caddy]
+    ports: !reset []

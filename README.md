@@ -70,6 +70,12 @@ Principais variáveis:
 - `POSTGRES_PASSWORD`
 - `MEDIA_STORAGE_ROOT`: diretório absoluto privado ao executar fora do Compose
 - `MEDIA_MAX_BYTES`: limite por arquivo; padrão de 10 MB
+- `ADMIN_NETWORK_ALLOWLIST`: IPs ou redes IPv4/CIDR da VPN/perímetro autorizados a acessar `/api/admin`
+- `LEGAL_PLATFORM_NAME`, `LEGAL_PRIVACY_EMAIL` e `LEGAL_CONTROLLER_NOTICE`: conteúdo aprovado das páginas legais; sem eles as páginas respondem 503
+- `METRICS_BEARER_TOKEN`: segredo dedicado de pelo menos 32 caracteres
+- `ALERT_WEBHOOK_URL`: destino HTTPS dos alertas de infraestrutura e quota; a autorização opcional fica em `ALERT_WEBHOOK_AUTHORIZATION`
+- `OPENAI_MODEL`: usar o snapshot avaliado; o padrão atual é `gpt-4.1-mini-2025-04-14`
+- `OPENAI_PRICING_CATALOG`: JSON versionado para revisar preços sem reconstruir a imagem
 
 `MASTER_KEYRING` deve ser um JSON com versão ativa e chaves base64, por exemplo com valores gerados fora do repositório:
 
@@ -98,6 +104,7 @@ Serviços:
 - `postgres`: volume persistente, sem porta pública.
 - `redis`: volume persistente, sem porta pública.
 - `media-init`: prepara exclusivamente o volume privado para o usuário não privilegiado da API e do worker.
+- `monitor`: perfil `operations`; coleta health/métricas pela rede interna e envia mudanças de estado ao webhook HTTPS configurado.
 
 O Compose não repassa `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL` à API ou ao worker. O serviço `db-init` mantém a propriedade do banco e dos objetos com o owner, remove `CREATE`, `TEMP`, superusuário e bypass de RLS do papel da aplicação, e concede somente privilégios operacionais.
 
@@ -107,7 +114,7 @@ No atendimento humano, o operador precisa assumir uma conversa antes de responde
 
 Administradores da empresa também possuem uma área própria para `jobs_falhos`. A listagem e o detalhe expõem somente campos sanitizados. Reenfileirar encerra o incidente original e cria um novo outbox job com outro ID; marcar como resolvido apenas encerra o alerta, sem alterar o estado final da mensagem. As duas decisões exigem motivo, CSRF, autorização por tenant e auditoria na mesma transação.
 
-Métricas operacionais são publicadas em `/metrics` no formato Prometheus e exigem `Authorization: Bearer <METRICS_BEARER_TOKEN>`. O token é obrigatório em produção e precisa ter pelo menos 32 caracteres. API e worker acumulam contadores e durações agregados no Redis; o scrape complementa esses dados com gauges do PostgreSQL, BullMQ e heartbeat dos workers. Não existem labels com tenant, usuário, conversa, mensagem ou correlação.
+Métricas operacionais são encaminhadas pelo Caddy somente na rota exata `/metrics`, no formato Prometheus, e exigem `Authorization: Bearer <METRICS_BEARER_TOKEN>`. O token é obrigatório em produção e precisa ter pelo menos 32 caracteres. API e worker acumulam contadores e durações agregados no Redis; o scrape complementa esses dados com gauges do PostgreSQL, BullMQ e heartbeat dos workers. Não existem labels com tenant, usuário, conversa, mensagem ou correlação.
 
 Endpoints esperados:
 
@@ -155,32 +162,36 @@ Não há condicionais por nome de empresa no núcleo multiempresa.
 
 ## Operação
 
-Backup PostgreSQL no host da VPS:
+Backup consistente do PostgreSQL e do volume `media_data`, com manifesto, checksums e referência não secreta da custódia externa do keyring:
 
 ```bash
+WAIA_COMPOSE_PROJECT=waia-test \
+KEYRING_CUSTODY_REFERENCE='vault://waia/keyring/<versao>' \
 sh scripts/backup-postgres.sh
 ```
 
-Restauração:
+Restauração exclusivamente em ambiente isolado e com confirmação vinculada ao projeto/banco:
 
 ```bash
-sh scripts/restore-postgres.sh ./backups/waia-postgres-YYYYMMDDTHHMMSSZ.dump
+WAIA_COMPOSE_PROJECT=<projeto-isolado> \
+RESTORE_ISOLATED=true \
+RESTORE_CONFIRM='RESTORE:<projeto-isolado>:waia' \
+sh scripts/restore-postgres.sh ./backups/waia-backup-YYYYMMDDTHHMMSSZ
 ```
 
-Atualização:
+O procedimento completo de build identificado, backup, validação, promoção e rollback está em `docs/OPERACAO_RELEASE.md`. O monitor é iniciado somente após configurar e testar o destino real:
 
 ```bash
-docker compose pull
-docker compose up -d --build
-docker compose run --rm migrate
+docker compose --profile operations up -d monitor
 ```
 
-Rollback: restaurar a imagem/commit anterior, subir a stack anterior e restaurar backup se a migração aplicada não for compatível.
+Rollback de aplicação promove o digest anterior. Restore de dados é último recurso e exige autorização específica, alvo confirmado e ensaio prévio isolado.
 
 ## Segurança
 
 - Validação de assinatura Meta preservada.
 - Sessões administrativas opacas, cookies `HttpOnly`, `Secure` em produção e CSRF em mutações.
+- Troca autenticada de senha revoga as demais sessões; para o piloto, recuperação/MFA dependem de credencial individual forte e painel restrito por VPN/allowlist.
 - Autorização aplicada no backend por papel e vínculo com empresa.
 - RLS habilitado no PostgreSQL com contexto transacional; o papel da aplicação não possui DDL, propriedade dos objetos, `CREATE`, `TEMP` ou `BYPASSRLS`.
 - Mutações administrativas e auditoria são atômicas; falha ao auditar reverte a alteração principal.

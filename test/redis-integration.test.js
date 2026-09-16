@@ -19,6 +19,7 @@ test("Redis real recebe somente referências da resposta humana", { skip: !enabl
     conversationId: randomUUID(),
     messageId: randomUUID(),
     statusEventId: null,
+    orderId: null,
     type: "send_human_message",
     correlationId: randomUUID(),
     payloadVersion: 1,
@@ -30,7 +31,7 @@ test("Redis real recebe somente referências da resposta humana", { skip: !enabl
     assert.deepEqual(job.data, reference);
     assert.deepEqual(Object.keys(job.data).sort(), [
       "conversationId", "correlationId", "empresaId", "jobId", "messageId",
-      "payloadVersion", "statusEventId", "type",
+      "orderId", "payloadVersion", "statusEventId", "type",
     ]);
     await job.remove();
     await queue.queue.obliterate({ force: true });

@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { createApiApp, probeWorkerHeartbeats } from "../src/bootstrap/app-runtime.js";
+import {
+  createApiApp,
+  createOnboardingPreflightProbes,
+  probeWorkerHeartbeats,
+} from "../src/bootstrap/app-runtime.js";
 import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 
 const tenantDefinition = Object.freeze({
@@ -93,6 +97,31 @@ test("diagnóstico do worker percorre todo o SCAN antes de declarar heartbeat", 
     },
   };
   assert.deepEqual(await probeWorkerHeartbeats(withHeartbeat), { state: "healthy" });
+});
+
+test("preflight reconhece o contrato state do health real do Google Sheets", async () => {
+  const probes = createOnboardingPreflightProbes({
+    googleSheetsIntegration: {
+      async health({ empresaId, signal }) {
+        assert.equal(empresaId, "tenant-a");
+        assert.equal(signal.aborted, false);
+        return { state: "healthy", integration: "google_sheets" };
+      },
+    },
+    environment: "test",
+  });
+  const controller = new AbortController();
+
+  assert.deepEqual(await probes.integrations({
+    empresaId: "tenant-a",
+    target: { type: "google_sheets" },
+    signal: controller.signal,
+  }), { success: true });
+  assert.deepEqual(await probes.integrations({
+    empresaId: "tenant-a",
+    target: { type: "outro" },
+    signal: controller.signal,
+  }), { success: false });
 });
 
 test("worker handler processa mensagem persistida por referencia e registra resposta", async () => {

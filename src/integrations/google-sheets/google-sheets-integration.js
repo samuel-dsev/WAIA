@@ -175,8 +175,8 @@ export function createGoogleSheetsIntegration({
     try {
       const scoped = await resolve(context);
       if (!scoped.config || !scoped.credentials) return integrationHealth("not_configured", { integration: "google_sheets" });
-      if (typeof scoped.client.checkHealth === "function") await scoped.client.checkHealth();
-      else if (scoped.config.healthRange) await scoped.client.getValues(scoped.config.healthRange);
+      if (typeof scoped.client.checkHealth === "function") await scoped.client.checkHealth({ signal: context.signal });
+      else if (scoped.config.healthRange) await scoped.client.getValues(scoped.config.healthRange, { signal: context.signal });
       else throw new IntegrationError("Range de diagnóstico não configurado.", { code: "GOOGLE_HEALTH_NOT_CONFIGURED", retryable: false });
       return integrationHealth("healthy", { integration: "google_sheets" });
     } catch (error) {

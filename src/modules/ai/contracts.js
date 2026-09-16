@@ -71,7 +71,7 @@ export function normalizeAiConfig(input, empresaId) {
     empresaId,
     enabled: input.enabled === true,
     provider,
-    model: requiredText(input.model || "gpt-4.1-mini", "model", 200),
+    model: requiredText(input.model || "gpt-4.1-mini-2025-04-14", "model", 200),
     prompt: optionalText(input.prompt, "prompt", 20_000),
     personality: optionalText(input.personality, "personality", 5_000),
     keyType,

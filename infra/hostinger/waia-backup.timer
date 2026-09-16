@@ -1,0 +1,11 @@
+[Unit]
+Description=Agenda o backup diario do WAIA
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=waia-backup.service
+
+[Install]
+WantedBy=timers.target

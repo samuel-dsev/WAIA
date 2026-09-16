@@ -124,7 +124,11 @@ function parseExtensions(definition, config, moduleDefinitions) {
       normalized(requiredText(term, `${path}.terms[${termIndex}]`, 160))
     ));
     if (terms.length === 0) throw new TypeError(`${path}.terms deve conter ao menos um termo.`);
-    return Object.freeze({ action, terms: Object.freeze(terms) });
+    const payload = entry.payload == null ? {} : entry.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new TypeError(`${path}.payload deve ser um objeto.`);
+    }
+    return Object.freeze({ action, terms: Object.freeze(terms), payload: Object.freeze(structuredClone(payload)) });
   });
 
   const greetings = new Set(list(definition.routing?.greetings, "routing.greetings").map(normalized));
@@ -146,7 +150,7 @@ function withConfiguredHandlers(baseDefinitions, { publicReplies, eventPresentat
   }
   return baseDefinitions.map((definition) => {
     const replies = repliesByModule.get(definition.key) || new Map();
-    const actions = [...definition.actions, ...replies.keys()];
+    const actions = [...new Set([...definition.actions, ...replies.keys()])];
     if (definition.key !== "events" && replies.size === 0) return definition;
     return {
       ...definition,
@@ -268,7 +272,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
       });
     }
     const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
-    if (alias) return router.handle({ ...input, action: alias.action });
+    if (alias) return router.handle({ ...input, action: alias.action, payload: alias.payload });
     if (extensions.fallbackAction) {
       return router.handle({ ...input, action: extensions.fallbackAction, actionSource: "fallback" });
     }

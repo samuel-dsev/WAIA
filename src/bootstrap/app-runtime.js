@@ -23,8 +23,23 @@ import {
 } from "../infra/postgres/repositories/webhook-repository.js";
 import { PostgresConversationRepository } from "../modules/conversations/index.js";
 import { PostgresAuthRepository, createSessionTokenCodec, MemoryAuthRateLimiter } from "../modules/auth/index.js";
-import { AuthService, authErrorMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
+import { AuthService, authErrorMiddleware, createAdminNetworkMiddleware, createAuthMiddleware, createAuthRouter, requireCsrf } from "../modules/auth/index.js";
 import { AdminService, PostgresAdminRepository, adminErrorMiddleware, createAdminRouter } from "../modules/admin/index.js";
+import {
+  CAPABILITY_CATALOG_V2,
+  PostgresVersionedConfigurationRepository,
+  VersionedConfigurationService,
+  actionOwnerV2,
+  compileTenantRuntimeConfigV2,
+  validateActionParamsV2,
+} from "../modules/configuration/index.js";
+import {
+  OnboardingService,
+  PostgresOnboardingRepository,
+  PreflightService,
+  PreviewService,
+  ReadinessService,
+} from "../modules/onboarding/index.js";
 import {
   CredentialVaultService,
   PostgresCredentialRepository,
@@ -40,11 +55,22 @@ import {
 import { MultiTenantAiService } from "../modules/ai/index.js";
 import { PostgresTenantDefinitionRepository } from "../tenants/postgres-config-loader.js";
 import { ConversationService } from "../modules/conversations/index.js";
+import { PostgresFlowRepository } from "../modules/flows/index.js";
+import {
+  MetaHealthService,
+  MetaWebhookConnectionResolver,
+  MetaWebhookCredentialResolver,
+  PostgresMetaAppRepository,
+  createMetaMultiAppIngestionHandler,
+  createMetaMultiAppVerificationHandler,
+  createMetaMultiAppWebhookService,
+} from "../modules/meta/index.js";
 import {
   ConversationHandoffRepository,
   PostgresAppointmentRepository,
   PostgresOrderRepository,
 } from "../modules/business/repositories.js";
+import { PostgresPaymentResolver } from "../modules/business/payment-resolver.js";
 import {
   PostgresJobHandlerRepository,
   createWorkerHandlers,
@@ -71,6 +97,7 @@ import {
   createGoogleSheetsIntegration,
   createGoogleSheetsSyncRunner,
   createMetaGateway,
+  MetaGraphHealthClient,
   legacyCapitaoMorOrderRow,
   startGoogleSheetsSyncScheduler,
 } from "../integrations/index.js";
@@ -85,8 +112,9 @@ import {
   createOperationalMetricsCollector,
   recordMetric,
 } from "../operations/metrics.js";
+import { createLegalPageHandler } from "../legal/legal-pages.js";
+import { createConfiguredAlertSink } from "../operations/alert-sink.js";
 
-const publicDirectory = fileURLToPath(new URL("../../public", import.meta.url));
 const panelDirectory = fileURLToPath(new URL("../../panel", import.meta.url));
 
 export async function probeWorkerHeartbeats(redis) {
@@ -119,6 +147,64 @@ function firstMetaMessageId(result) {
   return result?.messages?.[0]?.id || result?.id || null;
 }
 
+function referenceId(reference, prefix) {
+  const value = String(reference || "").trim();
+  return value.startsWith(`${prefix}:`) ? value.slice(prefix.length + 1) : null;
+}
+
+export function createOnboardingPreflightProbes({
+  metaHealthService,
+  googleSheetsIntegration,
+  credentialVault,
+  sharedOpenAiKey,
+  environment,
+}) {
+  const aiClients = new ResponsesClientFactory({ environment });
+  const integrationProbe = async ({ empresaId, target, signal }) => {
+    if (signal.aborted || target.type !== "google_sheets") return { success: false };
+    const result = await googleSheetsIntegration.health({ empresaId, signal });
+    return { success: !signal.aborted && result.state === "healthy" };
+  };
+  return Object.freeze({
+    meta: async ({ empresaId, target, signal, actorId, correlationId }) => {
+      if (signal.aborted || !metaHealthService) return { success: false };
+      const result = await metaHealthService.run({
+        empresaId,
+        appId: target.applicationId,
+        numberId: target.numberId,
+        actorId,
+        correlationId,
+        signal,
+      });
+      return { success: !signal.aborted && result.success === true };
+    },
+    ai: async ({ empresaId, target, signal }) => {
+      if (signal.aborted || target.provider !== "openai" || !target.model) return { success: false };
+      let apiKey = target.keyMode === "shared" ? sharedOpenAiKey : null;
+      if (target.keyMode === "own") {
+        const credentialId = referenceId(target.credentialRef, "credential");
+        if (!credentialVault || !credentialId) return { success: false };
+        const metadata = await credentialVault.getCredentialMetadata({ empresaId, credentialId });
+        if (metadata?.empresaId !== empresaId || metadata?.provider !== target.provider
+            || metadata?.status !== "active" || metadata?.configured !== true) return { success: false };
+        apiKey = await credentialVault.getCredentialForUse({ empresaId, credentialId });
+      }
+      if (!apiKey || signal.aborted) return { success: false };
+      try {
+        const client = await aiClients.create({ provider: target.provider, apiKey });
+        if (typeof client.models?.retrieve !== "function") return { success: false };
+        await client.models.retrieve(target.model, { signal });
+        return { success: !signal.aborted };
+      } finally {
+        apiKey = null;
+      }
+    },
+    payments: integrationProbe,
+    appointments: integrationProbe,
+    integrations: integrationProbe,
+  });
+}
+
 export function createPostgresRuntime({
   config = defaultConfig,
   pool = createPostgresPool({
@@ -128,10 +214,12 @@ export function createPostgresRuntime({
   }),
   redis = createRedisConnection({ url: config.redis.url }),
   logger = null,
+  metaHealthClient = null,
 } = {}) {
   const logSink = logger ? null : createPostgresOperationalLogSink(pool);
   const runtimeLogger = logger || createStructuredLogger({ level: config.logLevel, service: "waia", sink: logSink });
   const metrics = new RedisMetricsRegistry(redis);
+  const alertSink = createConfiguredAlertSink(config.alerts);
   const conversationRepository = new PostgresConversationRepository(pool);
   const conversationService = new ConversationService({ repository: conversationRepository });
   const mediaStore = new PrivateMediaStore({ root: config.media.storageRoot, maxBytes: config.media.maxBytes });
@@ -140,6 +228,21 @@ export function createPostgresRuntime({
     : null;
   const credentialRepository = new PostgresCredentialRepository(pool);
   const adminRepository = new PostgresAdminRepository(pool);
+  const configurationRepository = new PostgresVersionedConfigurationRepository(pool);
+  const configurationService = new VersionedConfigurationService(configurationRepository);
+  const flowRepository = new PostgresFlowRepository(pool);
+  const metaAppRepository = new PostgresMetaAppRepository(pool);
+  const onboardingRepository = new PostgresOnboardingRepository(pool, {
+    environment: config.environment,
+    platformAiCredentialConfigured: Boolean(config.openai.apiKey),
+  });
+  const readinessService = new ReadinessService({
+    compiler: compileTenantRuntimeConfigV2,
+    capabilityCatalog: CAPABILITY_CATALOG_V2,
+    actionOwner: actionOwnerV2,
+    validateActionParams: validateActionParamsV2,
+    flowRuntimeAvailable: true,
+  });
   const health = createHealthService({
     database: { health: () => pool.query("SELECT 1").then(() => ({ state: "healthy" })) },
     redis: { health: () => redis.ping().then(() => ({ state: "healthy" })) },
@@ -175,6 +278,53 @@ export function createPostgresRuntime({
     orderRowMapper: legacyCapitaoMorOrderRow,
     logger: runtimeLogger,
   });
+  const metaHealthService = credentialVault
+    ? new MetaHealthService({
+      repository: metaAppRepository,
+      credentialVault,
+      client: metaHealthClient || new MetaGraphHealthClient({
+        apiVersion: config.whatsapp.apiVersion,
+        timeoutMs: config.whatsapp.requestTimeoutMs,
+      }),
+    })
+    : null;
+  const previewService = new PreviewService({
+    configurationVersionResolver: async ({ empresaId }) => {
+      const snapshot = await onboardingRepository.readReadinessSnapshot({ empresaId });
+      if (!snapshot) throw new Error("Empresa não encontrada para simulação.");
+      return snapshot.nextConfigurationVersion;
+    },
+  });
+  const preflightService = new PreflightService({
+    probes: createOnboardingPreflightProbes({
+      metaHealthService,
+      googleSheetsIntegration,
+      credentialVault,
+      sharedOpenAiKey: config.openai.apiKey,
+      environment: config.environment,
+    }),
+    timeoutMs: Math.min(60_000, Math.max(10_000, Number(config.whatsapp.requestTimeoutMs || 10_000) + 2_000)),
+    auditWriter: (event) => adminRepository.writeAudit({
+      id: randomUUID(),
+      empresaId: event.empresaId,
+      actorId: event.actorId,
+      action: event.action,
+      resource: event.resource,
+      resourceId: event.resourceId,
+      result: event.result,
+      changedFields: (event.details?.checks || []).map((check) => check.code),
+      correlationId: event.correlationId,
+      occurredAt: event.occurredAt,
+    }),
+  });
+  const onboardingService = new OnboardingService({
+    repository: onboardingRepository,
+    configurationService,
+    readinessService,
+    flowPublisher: flowRepository,
+    previewService,
+    preflightService,
+  });
   const authRepository = new PostgresAuthRepository(pool);
   const tokenCodec = createSessionTokenCodec({
     pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
@@ -198,11 +348,15 @@ export function createPostgresRuntime({
   });
   const adminService = new AdminService({
     repository: adminRepository,
+    onboardingService,
     credentialVault,
     conversationService,
+    flowRepository,
     healthService: health,
     mediaStore,
     googleSheetsIntegration,
+    metaAppRepository,
+    metaHealthService,
   });
   const aiService = new MultiTenantAiService({
     configResolver: new PostgresAiConfigResolver(pool),
@@ -213,7 +367,8 @@ export function createPostgresRuntime({
       credentialVault,
     }),
     ledger: new PostgresAiLedger(pool),
-    pricingCatalog: new VersionedPricingCatalog(),
+    pricingCatalog: new VersionedPricingCatalog(config.openai.pricingCatalog),
+    alertSink,
     logger: runtimeLogger,
   });
   const tenantDefinitionRepository = new PostgresTenantDefinitionRepository(pool, {
@@ -228,6 +383,34 @@ export function createPostgresRuntime({
     timeoutMs: config.whatsapp.requestTimeoutMs,
     logger: runtimeLogger,
   });
+  const webhookIngestionService = createWebhookIngestionService({
+    tenantResolver: new PostgresTenantResolver(pool),
+    repository: new PostgresWebhookRepository(pool),
+    outbox: new PostgresOutboxRepository(),
+    logger: runtimeLogger,
+    metrics,
+  });
+  const metaWebhookService = createMetaMultiAppWebhookService({
+    connectionResolver: new MetaWebhookConnectionResolver({ repository: metaAppRepository }),
+    credentialVault: new MetaWebhookCredentialResolver({
+      credentialVault,
+      sharedAppSecret: config.whatsapp.appSecret,
+      sharedVerifyToken: config.whatsapp.verifyToken,
+    }),
+    ingestionService: {
+      async ingestEvents(events, context) {
+        const results = await webhookIngestionService.ingestEvents(events, {
+          correlationId: context?.correlationId,
+        });
+        await metaAppRepository.recordValidWebhook({
+          empresaId: context.metaContext.empresaId,
+          appId: context.metaContext.metaApplicationId,
+        });
+        return results;
+      },
+    },
+    logger: runtimeLogger,
+  });
   const queue = new BullMqJobQueue({
     connection: redis,
     queueName: config.redis.queueName,
@@ -238,12 +421,17 @@ export function createPostgresRuntime({
     logger: runtimeLogger,
     logSink,
     conversationService,
+    flowRepository,
     mediaStore,
     adminService,
+    onboardingService,
     authService,
     aiService,
     tenantDefinitionRepository,
     metaGateway,
+    metaAppRepository,
+    metaHealthService,
+    metaWebhookService,
     queue,
     health,
     metrics,
@@ -279,44 +467,41 @@ class RedisAuthRateLimiter {
   }
 }
 
-class PostgresPaymentResolver {
-  constructor(pool, { credentialVault } = {}) {
-    this.pool = pool;
-    this.credentialVault = credentialVault;
-  }
-
-  async resolve({ empresaId, type }) {
-    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const result = await client.query(
-        `SELECT tipo, nome, identificador_mascarado, favorecido, instrucoes, credencial_id
-           FROM formas_pagamento
-          WHERE empresa_id = $1 AND tipo = $2 AND ativa AND deleted_at IS NULL
-          ORDER BY created_at DESC, id DESC
-          LIMIT 1`,
-        [empresaId, type],
-      );
-      return result.rows[0] || null;
-    });
-    if (!row) return null;
-    const value = row.credencial_id && this.credentialVault
-      ? await this.credentialVault.getCredentialForUse({ empresaId, credentialId: row.credencial_id })
-      : row.identificador_mascarado || row.nome;
-    return { value, recipient: row.favorecido || row.nome, instructions: row.instrucoes || "" };
-  }
-}
-
-class PostgresMetaCredentialResolver {
-  constructor({ pool, credentialVault, apiVersion }) {
+export class PostgresMetaCredentialResolver {
+  constructor({ pool, credentialVault, apiVersion, transactionRunner = withTenantTransaction }) {
     this.pool = pool;
     this.credentialVault = credentialVault;
     this.apiVersion = apiVersion;
+    this.transactionRunner = transactionRunner;
   }
 
   async resolveMeta({ empresaId, numeroWhatsappId }) {
     if (!this.credentialVault) return null;
-    const row = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
+    const number = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
       await client.query(
-        `SELECT id, finalidade
+        `SELECT nw.phone_number_id, nw.aplicativo_meta_id, nw.access_token_credencial_id,
+                am.estado AS aplicativo_estado
+           FROM numeros_whatsapp nw
+           LEFT JOIN aplicativos_meta am
+             ON am.empresa_id = nw.empresa_id
+            AND am.id = nw.aplicativo_meta_id
+            AND am.deleted_at IS NULL
+          WHERE nw.empresa_id = $1 AND nw.id = $2 AND nw.deleted_at IS NULL`,
+        [empresaId, numeroWhatsappId],
+      )
+    ).rows[0]);
+    if (!number) return null;
+    if (number.aplicativo_meta_id || number.access_token_credencial_id) {
+      if (number.aplicativo_estado !== "ativo" || !number.access_token_credencial_id) return null;
+      const accessToken = await this.credentialVault.getCredentialForUse({
+        empresaId,
+        credentialId: number.access_token_credencial_id,
+      });
+      return { accessToken, phoneNumberId: number.phone_number_id, apiVersion: this.apiVersion };
+    }
+    const legacyCredential = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
+      await client.query(
+        `SELECT id
            FROM credenciais_empresa
           WHERE empresa_id = $1
             AND provedor = 'meta'
@@ -327,20 +512,14 @@ class PostgresMetaCredentialResolver {
         [empresaId, `whatsapp:${numeroWhatsappId}`],
       )
     ).rows[0]);
-    if (!row) return null;
+    if (!legacyCredential) return null;
     const accessToken = await this.credentialVault.getCredentialForUse({
       empresaId,
-      credentialId: row.id,
+      credentialId: legacyCredential.id,
     });
-    const phoneNumberId = await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (
-      await client.query(
-        "SELECT phone_number_id FROM numeros_whatsapp WHERE empresa_id = $1 AND id = $2",
-        [empresaId, numeroWhatsappId],
-      )
-    ).rows[0]?.phone_number_id);
     return {
       accessToken,
-      phoneNumberId,
+      phoneNumberId: number.phone_number_id,
       apiVersion: this.apiVersion,
     };
   }
@@ -394,9 +573,13 @@ export function createApiApp({
   app.get("/metrics", metricsCollector
     ? createMetricsHandler({ collector: metricsCollector, token: config.metrics?.bearerToken })
     : (_request, response) => response.status(404).end());
-  app.get("/privacy", (_request, response) => response.sendFile("privacy.html", { root: publicDirectory }));
-  app.get("/data-deletion", (_request, response) => response.sendFile("data-deletion.html", { root: publicDirectory }));
+  app.get("/privacy", createLegalPageHandler({ file: "privacy.html", config: config.legal }));
+  app.get("/data-deletion", createLegalPageHandler({ file: "data-deletion.html", config: config.legal }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
+  if (runtime.metaWebhookService) {
+    app.get("/webhook/meta/:webhookPublicId", createMetaMultiAppVerificationHandler({ service: runtime.metaWebhookService }));
+    app.post("/webhook/meta/:webhookPublicId", createMetaMultiAppIngestionHandler({ service: runtime.metaWebhookService }));
+  }
   app.get("/webhook", createWebhookVerificationHandler({ verifyToken: config.whatsapp.verifyToken }));
   app.post("/webhook", createWebhookHandler({
     signatureVerifier: createMetaSignatureVerifier({
@@ -417,12 +600,28 @@ export function createApiApp({
     secureCookies: config.security.cookieSecure,
     sessionTtlMs: config.security.sessionTtlHours * 60 * 60_000,
   });
-  app.use("/api/admin/auth", authRouter);
-  app.use("/api/admin", createAdminRouter({
+  const adminNetwork = createAdminNetworkMiddleware({ allowlist: config.security.adminNetworkAllowlist });
+  app.use("/api/admin/auth", adminNetwork, authRouter);
+  app.use("/api/admin", adminNetwork, createAdminRouter({
     adminService: runtime.adminService,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),
+    sensitiveRateLimit: rateLimit({
+      windowMs: 60_000,
+      limit: 30,
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
   }));
+  app.use((error, _request, response, next) => {
+    if (error?.status === 400 && error?.type === "entity.parse.failed") {
+      return response.status(400).json({
+        error: "INVALID_JSON",
+        message: "O corpo da solicitacao deve conter JSON valido.",
+      });
+    }
+    return next(error);
+  });
   app.use(authErrorMiddleware);
   app.use(adminErrorMiddleware);
   app.use((error, request, response, _next) => {
@@ -454,6 +653,7 @@ export function createWorkerRuntime({
       orderRepository: new PostgresOrderRepository(runtime.pool),
       appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
       handoffRepository: new ConversationHandoffRepository(runtime.conversationService),
+      flowRepository: runtime.flowRepository,
       mediaStore: runtime.mediaStore,
       googleSheetsIntegration: runtime.googleSheetsIntegration,
       logger,
@@ -483,6 +683,7 @@ export function createWorkerRuntime({
   const retention = startRetentionScheduler(createRetentionRunner({
     pool: runtime.pool,
     conversationService: runtime.conversationService,
+    flowRepository: runtime.flowRepository,
     mediaStore: runtime.mediaStore,
     batchSize: config.maintenance.retentionBatchSize,
     logger,

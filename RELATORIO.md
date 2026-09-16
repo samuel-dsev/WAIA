@@ -1,188 +1,414 @@
 # Relatório de continuidade — WAIA
 
-Atualizado em 31 de agosto de 2026 após corrigir e validar a tela de módulos e configurações do Capitão Mor.
+Atualizado em 8 de setembro de 2026 durante o canário real do Capitão Mor. A infraestrutura WAIA está saudável e acessível por HTTPS; a primeira empresa foi publicada e ativada após o preflight real de Meta, OpenAI e Google Sheets.
 
-## Diagnóstico executivo
+## Objetivo vigente
 
-A fundação SaaS multiempresa está funcional e tecnicamente consistente para desenvolvimento e homologação controlada. Ela ainda não deve ser considerada pronta para produção: faltam ligar algumas capacidades já implementadas, completar a operação humana, validar integrações externas reais e fechar rotinas de segurança e recuperação.
+Evoluir o WAIA para que uma nova empresa possa ser criada, configurada, testada, publicada, ativada, operada e suspensa pelo painel, sem edição de `.env`, SQL ou código e sem reinício ou deploy por tenant.
 
-Os executáveis oficiais são `src/api.js` e `src/worker.js`. A entrada `src/server.js` permanece apenas para compatibilidade com a demonstração legada do Capitão Mor.
+O provisionamento de número, WABA e permissões no Meta Business permanece externo. O painel deve receber, validar e guardar os dados fornecidos pela Meta sem expor segredos.
 
-## O que está comprovadamente implementado
+## Estado Git e proteção da versão atual
 
-- API Express com webhook Meta, autenticação administrativa, CSRF, autorização, páginas legais e health checks.
-- Worker com outbox PostgreSQL, BullMQ/Redis, locks por conversa, concorrência por tenant, retries, backoff, dead-letter e heartbeat.
-- PostgreSQL como fonte de verdade, com dezesseis migrações, chaves compostas por tenant, idempotência, índices e `ENABLE/FORCE ROW LEVEL SECURITY`.
-- Resolução do tenant por `metadata.phone_number_id`; API e worker oficiais não usam credenciais Meta globais.
-- Conversas, mensagens, estados, pedidos, agendamentos, uso de IA, logs e auditoria persistentes.
-- Runtime configurável com catálogo, eventos, pedidos, agenda, pagamentos, handoff e IA.
-- Painel administrativo estático com login, dashboards e CRUDs centrais.
-- Cofre de credenciais AES-256-GCM com AAD, versionamento, rotação, revogação, máscara e auditoria atômica.
-- Tenant demonstrativo do Capitão Mor em seed sintético, sem credenciais, PIX ou dados pessoais reais.
-- OpenAI Responses API com isolamento por tenant, limites, contingência, defesa contra prompt injection e contabilização de custo.
-- Google Sheets multiempresa ligado ao runtime oficial: configuração e JSON por tenant no cofre, importação periódica de agenda/configurações públicas, último cache válido e exportação assíncrona de pedidos.
-- Comprovantes privados em JPEG, PNG, WEBP ou PDF até 10 MB, com download Meta autenticado por tenant, SHA-256, retenção e visualização auditada no painel.
-- Atendimento humano no painel com assunção da conversa, CSRF, autorização, idempotência, mensagem/outbox/auditoria transacionais e envio assíncrono pelo número do tenant.
-- Gestão de jobs falhos no painel, restrita a administradores, com consulta sanitizada, retry por novo job, resolução explícita e auditoria transacional.
-- Métricas Prometheus protegidas por Bearer dedicado, com contadores/durações compartilhados entre API e worker no Redis e gauges reais do PostgreSQL, BullMQ e heartbeats.
-- Menus, eventos, compras, serviços e horários paginados sem perda de opções; o gateway usa botões até três escolhas e mensagens de lista entre quatro e dez.
+- Desenvolvimento realizado no checkout principal `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`, conforme autorização do usuário.
+- `origin/main` permanece no commit de produção preservado `00a0a09` e não recebeu a atualização de onboarding.
+- O baseline `00a0a09` continua disponível no worktree isolado `C:\Users\Samuel\Documents\Projetos\WAIA-baseline-00a0a09`.
+- `HEAD` e a referência local `origin/dev` apontam para `de60ec5`, versão `1.10.5`, após o commit e push da correção da agenda Google no runtime versionado.
+- A tag local anotada `v1.9.1-rc.1` resolve para `baf4a8f`. A presença da tag no remoto e a disponibilidade do artefato da CI ainda precisam ser verificadas.
+- A branch local `main` aponta para `f07e6dc`; a referência local `origin/main` aponta para `00a0a09`. Não presumir que sejam iguais e não modificar nenhuma delas nesta preparação.
+- Alterações locais anteriores em `AGENTS.md` e `RELATORIO.md` foram identificadas e preservadas.
+- A candidata foi instalada na VPS e depois publicada de forma controlada em 6 de setembro. Não houve credenciais de provedores, empresas reais ou operação com clientes.
 
-## Correções desta auditoria
+## Fases concluídas
 
-- Corrigido erro de sintaxe que impedia o JavaScript do painel de carregar.
-- O painel agora interpreta corretamente erros administrativos estruturados, sem exibir `[object Object]`.
-- Cookies malformados deixam de causar erro 500 durante autenticação.
-- Restrições do PostgreSQL na API administrativa agora retornam erro público 400/409, sem expor SQL interno.
-- API e worker deixaram de tentar conectar duas vezes o mesmo cliente Redis; ambos agora iniciam no Compose.
-- O diagnóstico de heartbeat percorre todos os cursores do `SCAN` antes de declarar o worker indisponível.
-- A perda do lease de concorrência por tenant interrompe o job, evitando conclusão concorrente sem posse do slot.
-- A abertura concorrente da primeira conversa passou a usar `ON CONFLICT`, evitando erro transitório no webhook.
-- `ultima_mensagem_at` passou a ser monotônico, impedindo regressão por mensagens recebidas fora de ordem.
-- O fluxo de agenda preserva a etapa quando recebe um horário inválido.
-- Pedidos agora exigem comprovante de imagem/documento realmente persistido, evento publicado e preço atual do banco.
-- Pedidos e agendamentos passaram a usar lock de idempotência transacional.
-- Agendamentos agora vinculam uma disponibilidade real e reservam/liberam capacidade atomicamente por trigger PostgreSQL; overbooking é rejeitado.
-- O catálogo de preços da IA agora inclui o modelo padrão `gpt-4.1-mini`, evitando falha de toda chamada real antes do provedor.
-- Corrigidos textos corrompidos em rotas administrativas e scripts sensíveis.
-- O histórico `codex-session-*.md` foi excluído do contexto de build Docker, reduzindo o envio de aproximadamente 3,5 MB para cerca de 240 KB no primeiro rebuild.
-- `.env.example` agora indica `INFRASTRUCTURE_MODE=postgres`, coerente com os executáveis oficiais.
-- `npm start` e `npm run dev` agora apontam para a API oficial; a demonstração antiga exige `npm run start:legacy` ou `npm run dev:legacy`.
-- Corrigida a falsa separação de papéis PostgreSQL: a configuração anterior transferia banco e objetos ao `waia_app`, concedia `CREATE` e executava migrações com a credencial da aplicação.
-- Migrações agora exigem `DATABASE_MIGRATOR_URL`; API e worker recebem apenas `DATABASE_URL` do papel restrito e não recebem a senha do owner.
-- O bootstrap repara volumes antigos, devolve propriedade ao owner, revoga `CREATE` e `TEMP` do papel da aplicação e mantém privilégios DML por grants atuais e default privileges.
-- Adicionado teste PostgreSQL real para propriedades do papel, negação de `CREATE TABLE`/`ALTER TABLE` e isolamento RLS entre dois tenants sintéticos.
-- O worker agora baixa a mídia da Meta antes de permitir que o pedido avance, inclusive quando a conversa está em atendimento humano; pedido PostgreSQL rejeita comprovante sem arquivo e checksum persistidos.
-- Adicionado armazenamento privado por tenant, compartilhado entre API e worker, com metadados de MIME, tamanho, SHA-256 e data no PostgreSQL.
-- O painel passou a visualizar comprovantes por endpoint autenticado e autorizado, com auditoria, `no-store`, `nosniff` e URL `blob:` temporária.
-- MIME ou tamanho recusado gera orientação determinística ao usuário e não chama runtime nem IA; bytes de comprovantes nunca são enviados à OpenAI.
-- A retenção remove arquivos privados associados às mensagens anonimizadas.
-- Adicionado `media-init` para corrigir a propriedade do volume sem elevar os privilégios da API ou do worker; `.gitattributes` fixa scripts Alpine em LF no Windows.
-- O operador que assumiu uma conversa agora pode responder pelo painel; outro operador, conversa fora do modo humano, contato bloqueado ou número inativo são recusados no backend.
-- Cada clique usa UUID v4 persistido: repetição da mesma requisição devolve a mensagem existente e não cria outra mensagem nem outro job.
-- A API retorna `202` somente depois de gravar mensagem, outbox e auditoria na mesma transação; falha de auditoria reverte a operação.
-- O worker processa `send_human_message`, envia pelo número/credencial Meta do tenant e mantém retry, dead-letter e estados de entrega/leitura sem carregar texto ou segredos no Redis.
-- A conversa no painel passou a mostrar as 100 mensagens mais recentes em ordem cronológica e o compositor reutiliza a chave de idempotência após falha ambígua de rede.
-- O painel ganhou uma área exclusiva para jobs falhos, filtrada por tenant e aberta por padrão apenas nos incidentes não resolvidos.
-- O detalhe operacional não retorna o payload bruto; mostra apenas tipo, referências, erro sanitizado, tentativas, correlação e estados do job original/novo.
-- O retry manual não reutiliza o ID retido pelo BullMQ: cria uma nova outbox pendente, reenfileira a mensagem somente se ela ainda estiver em `falhou` e encerra o incidente original.
-- A resolução sem retry encerra somente o alerta; ela não transforma uma mensagem falha em sucesso.
-- Retry e resolução exigem motivo, papel administrativo, CSRF e auditoria na mesma transação PostgreSQL; falha da auditoria reverte a decisão.
-- O registry de métricas passou a rejeitar nomes inválidos e valores não finitos/negativos, impedindo labels improvisadas e cardinalidade por identificador.
-- Webhook, requisições HTTP, dispatcher da outbox e processor do worker agora alimentam contadores de sucesso/falha/retry/duplicidade e resumos de duração sem bloquear o fluxo principal.
-- API e worker escrevem no mesmo namespace Redis; o endpoint `/metrics` agrega esses eventos com filas BullMQ, workers ativos e estados duráveis de mensagens, outbox, dead-letter, tenants e uso de IA.
-- A coleta exige `METRICS_BEARER_TOKEN` com pelo menos 32 caracteres em produção, compara o token em tempo constante e responde com `no-store` e formato Prometheus.
-- Nenhuma métrica possui label ou valor de tenant, usuário, conversa, mensagem, telefone, correlação ou conteúdo.
-- Removido o corte silencioso das opções após o terceiro botão; conjuntos acima de dez são paginados em blocos de oito com navegação anterior/próxima.
-- IDs internos de paginação usam um prefixo impossível na configuração do tenant, evitando colisão ou imitação por item administrativo.
-- O mesmo payload interativo completo atravessa runtime, persistência da resposta e worker; o gateway escolhe botão ou lista somente no limite do transporte.
-- Títulos, descrições e corpo interativo são ajustados aos limites do WhatsApp sem alterar os IDs determinísticos, e o envio falha explicitamente se receber mais de dez linhas não paginadas.
-- Respostas `list_reply` do webhook passam pelo mesmo parser e roteador das respostas de botão, inclusive nas páginas de eventos e horários com estado persistido.
-- O Capitão Mor preserva os contratos `Agenda!A2:I`, `Configurações!A2:C` e `Pedidos!A:G`; PIX/favorecida não são importados da planilha e permanecem no cofre.
-- A sincronização cria/atualiza eventos e convites no PostgreSQL, cancela/desativa itens removidos e ignora eventos inativos ou passados.
-- O worker executa sincronização por tenant a cada 120 segundos por padrão e exporta pedidos por outbox contendo apenas IDs, com checkpoint idempotente e isolamento RLS.
-- O painel recebeu configuração dedicada do Google Sheets, rotação do JSON da conta de serviço e sincronização imediata auditada.
-- Adicionado `docs/CONFIGURACAO_INTEGRACOES.md` com o fluxo de configuração Meta, OpenAI, Google Sheets e segredos de infraestrutura.
-- Corrigido o mapeamento do usuário ao reabrir uma sessão PostgreSQL: a consulta retorna `user_id_value`, e o repositório agora preserva esse ID nas requisições administrativas posteriores ao login.
-- Foram removidas, com autorização explícita, 24 empresas `Tenant A`/`Tenant B` e 24 contatos com slugs exclusivos `priv-a-*`/`priv-b-*`, resíduos dos testes de isolamento; nenhum outro dado foi atingido.
-- Corrigida a leitura da configuração operacional: o descritor PostgreSQL de `configuracoes_empresa` não consulta mais a coluna inexistente `created_at`, preservando somente `updated_at` como definido pela migração.
-- Corrigida a ação de estado das empresas no painel: tenant em `draft` agora oferece **Ativar**, tenant ativo oferece **Suspender** e tenant suspenso oferece **Ativar**.
-- O painel de números passou a permitir completar E.164/WABA/nome, ativar e definir o principal; o backend exige token Meta ativo antes da ativação, mascara o número e troca o principal na mesma transação auditada.
-- A configuração de IA agora devolve o estado real da credencial própria vinculada; o painel deixa de exibir `not_configured` quando a chave OpenAI está ativa no cofre.
-- Corrigido o salvamento dos módulos no painel: os checkboxes agora são capturados antes da confirmação assíncrona, evitando o uso de `event.currentTarget` já invalidado e garantindo o envio do `PUT`.
-- A tela de módulos e configurações agora oferece **Adicionar Google Sheets** quando a integração ainda não existe, cria o registro inicial e abre diretamente o formulário seguro da planilha.
-- O cofre administrativo agora aceita segredos multilinha, como o JSON formatado de contas de serviço Google, preservando limite de tamanho e rejeição de caracteres de controle inseguros na criação e rotação.
-- Recibos Meta referentes a mensagens externas ou anteriores ao banco local agora são registrados e concluídos como ignorados, sem retries nem incidentes falsos; mensagens realmente enviadas pelo WAIA continuam recebendo os estados `sent`, `delivered` e `read` normalmente.
-- O menu real do Capitão Mor foi restaurado com três ações canônicas e roteamento determinístico/IA; a saudação inicial volta a sair como botões e textos livres deixam de repetir indefinidamente a mensagem de boas-vindas.
-- O carregador PostgreSQL do runtime deixou de executar `Promise.all` sobre um único client transacional, eliminando a concorrência não suportada e o aviso de depreciação observado no primeiro teste real.
-- O worker agora preserva o `selectionId` de respostas interativas; botões deixam de cair no fallback da IA. O roteamento também reconhece aliases dentro de frases naturais e o Capitão Mor ganhou cópia direta para cardápio, seleção da noite, evento, PIX, comprovante e contingência.
-- Os fluxos conversacionais passaram a aceitar novas intenções antes da etapa pendente: trocar sexta por sábado substitui o evento, perguntas naturais com dia abrem a programação correspondente e `oi` reinicia o menu. Respostas livres da IA recebem apenas a base pública do tenant, sem PIX/credenciais, usam o histórico e terminam com uma pergunta configurável.
-- `MASTER_KEYRING` passou a ser interpolado como escalar YAML citado no Compose; isso preserva as duas chaves finais do JSON em versões recentes do Docker Compose e evita o ciclo de reinício da API/worker observado após uma recriação.
-- A área **Módulos e configurações → Identidade e atendimento** ganhou o campo multilinha **Regras do estabelecimento**, persistido por tenant e auditado pelo fluxo administrativo existente.
-- As regras do Capitão Mor foram cadastradas com as restrições de vestimenta e a política de aniversariante solicitadas; o backfill usa o `slug` único da empresa e preserva regras já preenchidas em outros tenants.
-- O carregador inclui as regras em `TenantRuntimeConfig.identity`; o worker as envia somente dentro do contexto público permitido da empresa, processado pela IA sob as guardrails imutáveis da plataforma e sem PIX, credenciais ou mídia privada.
+### Fase 0 — baseline e isolamento Git
 
-## Validação executada
+- Baseline anterior ao contrato V2 congelado e preservado.
+- Respostas de caracterização do Capitão Mor protegidas por testes.
+- Gate: versão atual reproduzível sem incorporar o onboarding em `origin/main`.
 
-- `npm test`: 202 testes descobertos; 196 aprovados e 6 integrações opcionais ignoradas sem infraestrutura.
-- `node --check`: 140 arquivos JavaScript válidos.
-- `npm run load:test`: cinco cenários sintéticos aprovados, de 250 a 800 jobs, sem falhas.
-- `docker compose -p waia-today config --quiet`: configuração válida com valores sintéticos.
-- Build Docker das imagens de API e worker concluído; instalação reportou zero vulnerabilidades npm.
-- PostgreSQL 16 e Redis 7 iniciados em uma pilha temporária isolada.
-- Migração incremental concluída; dezesseis migrações descobertas, com `015_establishment_rules.sql` e `016_capitao_mor_establishment_rules.sql` aplicadas uma vez cada.
-- Teste de integração real comprovou incremento de capacidade, rejeição de overbooking e liberação após cancelamento.
-- API e worker iniciados com `NODE_ENV=production`; ambos ficaram saudáveis.
-- `GET /health/ready` retornou HTTP 200.
-- O teste real confirmou `waia_app` como `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` e `NOBYPASSRLS`, sem `CREATE` no schema e sem `TEMP` no banco; tentativas de `CREATE TABLE`, `ALTER TABLE` e escrita em outro tenant foram rejeitadas.
-- A inspeção dos contêineres confirmou ausência de `POSTGRES_PASSWORD` e `DATABASE_MIGRATOR_URL` na API e no worker.
-- Bootstrap e migrações foram repetidos no mesmo volume: execução idempotente e `0` de `13` migrações reaplicadas.
-- Três integrações PostgreSQL reais passaram: privilégios/RLS, capacidade da agenda e metadados/arquivo privado de mídia.
-- A quarta integração PostgreSQL real comprovou resposta humana idempotente e auditada, falha final, listagem sanitizada do dead-letter, retry por novo job e resolução sem alterar falsamente o estado da mensagem.
-- Redis real recebeu o job `send_human_message` contendo somente IDs, tipo, correlação e versão do payload.
-- Redis real acumulou contador e resumo de duração compartilhados; o endpoint real recusou acesso sem Bearer com HTTP 401 e retornou HTTP 200 apenas com token sintético.
-- O scrape real exibiu `waia_metrics_collector_up 1`, um heartbeat de worker e gauges atuais de outbox/BullMQ sem labels de alta cardinalidade.
-- API e worker montam o mesmo `media_data`, permanecem como usuário `node` e ficaram saudáveis; `/health/ready` retornou 200.
-- A imagem Docker reconstruída aprovou 36 testes direcionados de runtime, persistência/worker, gateway e parser interativo; API e worker permaneceram saudáveis e `/health/ready` retornou 200.
-- Cinco integrações PostgreSQL reais passaram na imagem reconstruída, incluindo sincronização sintética da agenda Google com RLS e desativação de evento removido.
-- A nova tabela `integracao_operacoes` foi comprovada com privilégios DML do papel restrito e `ENABLE/FORCE ROW LEVEL SECURITY`; API retornou `/health/ready` 200 e worker permaneceu saudável sem credencial Google real.
-- O teste de regressão do repositório PostgreSQL confirmou que a sessão reconstruída mantém o ID do usuário.
-- Após reconstruir a API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 em `/api/admin/auth/session`, `/api/admin/tenants` e `/api/admin/dashboard`.
-- Após a correção da configuração operacional e novo build da API, uma sessão administrativa temporária e imediatamente removida recebeu HTTP 200 nos cinco recursos usados pela tela: módulos, IA, integrações, configuração operacional e credenciais; o container permaneceu saudável.
-- A regressão direcionada das regras aprovou 55 de 55 testes; ela comprovou formulário, descritor administrativo, parsing do runtime, envio ao contexto processado pelo modelo e exclusão dos dados privados de pagamento.
-- No PostgreSQL real, a nova coluna foi criada e o tenant `capitao-mor` recebeu 294 caracteres de regras; após rebuild, API e worker permaneceram saudáveis e `/health/ready` retornou HTTP 200.
+### Fase 1 — contratos e compilador
 
-O teste de carga continua sendo uma regressão em memória; ele não mede capacidade de VPS, latência de rede ou limites dos provedores.
+- Criados `TenantRuntimeConfigV2`, catálogo de capacidades, validação tipada, compilador e adaptador legado.
+- A configuração existente do Capitão Mor compila sem alterar as respostas caracterizadas.
+- Commit: `492a16d` (`v1.2.0`).
 
-## Lacunas e riscos ainda existentes
+### Fase 2 — rascunho e publicação versionada
 
-### Bloqueiam produção
+- Implementadas persistência de rascunho, revisão otimista, revisões imutáveis, checksum e publicação transacional.
+- O runtime carrega apenas a revisão publicada e conserva fallback para configuração legada.
+- Gate: editar o rascunho não altera o runtime ativo.
 
-- Meta, OpenAI e Google ainda precisam de credenciais exclusivas de homologação e teste externo real nesta base SaaS; nenhuma credencial antiga foi copiada automaticamente.
-- 2FA/MFA possui colunas no banco, mas não tem fluxo de cadastro, desafio ou recuperação.
-- Backup e, principalmente, restauração ainda não foram exercitados em uma cópia descartável do ambiente alvo.
-- O download de mídia foi validado com provedor simulado e armazenamento real, mas ainda precisa de homologação com um número Meta exclusivo de teste.
+### Fase 3 — onboarding e readiness
 
-### Riscos técnicos relevantes
+- Implementados serviço, políticas, rotas administrativas, checks corrigíveis, auditoria e ativação/publicação transacionais.
+- Novos tenants nascem em rascunho e não aceitam mudança de status pelo CRUD genérico.
+- Empresas já ativas não são suspensas automaticamente pelas novas regras.
+- Gate: dependências ausentes geram bloqueadores estáveis associados à etapa e à ação corretiva.
+- Commit remoto atual: `6ec0236` (`v1.4.0`).
 
-- O envio Meta é `at-least-once`: uma queda depois de a Meta aceitar a mensagem e antes do checkpoint no banco pode duplicar a resposta.
-- Um webhook muito grande é processado sequencialmente, com uma transação por evento, podendo pressionar o tempo de ACK.
-- A validação administrativa ainda depende de algumas constraints do banco para domínios e limites; o erro agora é seguro, mas a UX deve validar antes da escrita.
-- Cabeçalhos HTTP estão razoáveis com Helmet, mas CSP do app está desabilitada e a política do proxy ainda precisa de hardening para produção.
-- O arquivo `codex-session-01a044fd-4841-73b3-b456-d9d028928dee.md` tem cerca de 2,7 MB e permanece na raiz. Não foi removido por pertencer ao histórico do usuário.
-- O volume local `media_data` é adequado para homologação em host único, mas deve entrar no backup/restauração e ser substituído ou replicado se a produção usar múltiplos workers/hosts.
-- Contadores e resumos operacionais usam Redis e podem reiniciar se o volume for perdido; Prometheus deve tratar essa queda como reset de contador. Gauges de estado são recalculados das fontes reais a cada scrape.
-- O repositório Git está presente, na branch `main`, conectado a `origin`; as mudanças desta continuidade permanecem locais e ainda não foram commitadas.
-- A entrada legada mantém endpoints de diagnóstico/sincronização sem autenticação e aceita webhook sem assinatura quando não há segredo; ela não deve ser exposta nem usada como produção.
+### Fase 4 — fluxos configuráveis
 
-## Plano para concluir o projeto
+- Adicionado domínio `flows` com ações canônicas `flows.start`, `flows.continue` e `flows.cancel`.
+- O contrato suporta mensagem, escolha única, texto, nome, e-mail, telefone, data, consentimento, documento/imagem, serviço, horário, handoff, conclusão e condição simples.
+- O validador rejeita grafos inválidos, ciclos proibidos, referências ausentes, JavaScript, SQL, expressões arbitrárias, templates não permitidos e acesso a segredos.
+- O executor é declarativo e determinístico; escolhas interativas respeitam os limites do WhatsApp.
+- A migração aditiva `018_configurable_flows.sql` cria fluxos, versões imutáveis, submissões e documentos com `empresa_id`, FKs compostas, índices tenant-first e `ENABLE/FORCE ROW LEVEL SECURITY`.
+- A publicação da configuração materializa as versões de fluxo dentro da mesma transação da revisão publicada.
+- Conversas permanecem pinadas à versão de fluxo e à revisão de configuração em que começaram, mesmo após nova publicação.
+- O runtime do worker inicia, continua, cancela, conclui ou transfere fluxos, preserva estado e anexa metadados de documentos sem chamadas externas livres.
+- A retenção usa a política da revisão publicada pinada, anonimiza submissões vencidas e remove arquivos privados associados.
+- O roteador permite cancelar ou trocar de intenção com segurança, mantendo compatibilidade com tenants legados sem `flows`.
+- Gate atingido: o teste sintético percorre início por alias, botões, continuação pinada após uma nova versão, cancelamento, reset e reinício sem lógica específica por empresa.
+- Commit remoto: `6227959` (`v1.5.0`).
 
-### Fase 1 — fechar o núcleo operacional
+### Fase 5 — Meta multiaplicativo
 
-1. Configurar no painel a planilha e as credenciais exclusivas do Capitão Mor e executar a homologação externa controlada.
+- A migração aditiva `019_meta_multi_application.sql` cria aplicativos Meta tenant-scoped, referências ao cofre, identificador público opaco do webhook, revisão otimista, estado, health, último webhook válido e retenção de erro sanitizado.
+- Números WhatsApp passam a ter vínculo explícito com aplicativo Meta e credencial de access token do mesmo tenant, protegidos por FK composta e revisão do vínculo.
+- Todas as novas estruturas usam índices tenant-first e `ENABLE/FORCE ROW LEVEL SECURITY`; nenhum segredo é armazenado na configuração ou nas revisões.
+- A API administrativa permite listar, criar e editar aplicativos, vincular números, rotacionar App Secret e executar preflight sem receber ou devolver valores secretos.
+- O callback dinâmico `GET/POST /webhook/meta/:webhookPublicId` resolve a conexão por identificador aleatório, valida assinatura sobre os bytes brutos, confere WABA e `phone_number_id` e só depois ingere os eventos.
+- A rotação aceita o App Secret anterior por uma janela curta e limitada; fora dela, a credencial anterior não é carregada.
+- O preflight consulta app, WABA e número na Graph API por cliente injetável, persiste somente resultado sanitizado e controla o estado do aplicativo com revisão otimista.
+- O envio resolve exclusivamente o access token vinculado ao número e ao aplicativo ativo; números ainda não migrados conservam o fallback legado tenant-scoped.
+- O endpoint legado `/webhook` permanece disponível para o Capitão Mor.
+- Gate atingido: duas conexões com assinaturas, números, WABAs e credenciais diferentes foram testadas sem cruzamento, inclusive em PostgreSQL real.
 
-### Fase 2 — segurança e recuperação
+### Fase 6 — wizard do painel
 
-2. Implementar MFA para administrador da plataforma, incluindo recuperação segura.
-3. Endurecer CSP, HSTS e demais cabeçalhos no Caddy/Nginx após definir os domínios reais.
-4. Expandir a integração contínua PostgreSQL/Redis, agora já cobrindo privilégios, RLS, agenda, jobs falhos e métricas, para concorrência de webhook e pedidos.
-5. Validar backup e restauração ponta a ponta em banco descartável, documentando RPO/RTO e rollback de migração.
-6. Retirar o artefato de sessão da raiz somente após autorização do usuário.
+- O painel possui um wizard de dez etapas com empresa, módulos, atendimento, menus e roteamento, operação, fluxos, IA, WhatsApp/Meta, equipe e revisão.
+- O draft V2 é a fonte de verdade do wizard. Autosave e retomada usam `draftVersion` e `revision`; conflito HTTP 409 pausa novas gravações e exige recarga explícita, sem sobrescrever a revisão atual.
+- Trocas de tenant, navegação e logout aguardam o flush do rascunho; mutações de coleções são revertidas localmente quando o backend rejeita o draft, evitando perda silenciosa ou duplicação na tentativa seguinte.
+- O refresh periódico não recria o wizard nem fecha diálogos com alterações em andamento.
+- Dependências de módulos, menus, ações, parâmetros, serviços, horários, fluxos, credenciais, aplicativos Meta e usuários são escolhidos por rótulos; referências internas são geradas ou selecionadas sem digitação de UUIDs ou action keys.
+- O editor de fluxos usa somente etapas e condições allowlisted, com escolha visual dos destinos e campos coletados.
+- Chaves de IA, App Secret, verify token e access token seguem diretamente para o cofre. O draft, o DOM persistente e as respostas administrativas recebem somente referências ou valores mascarados.
+- A equipe pode criar usuários, vincular conta global por e-mail exato, editar permissões e remover vínculos; estados globais e do vínculo são tratados separadamente e o backend impede suspensão, remoção ou rebaixamento do último administrador ativo.
+- A revisão apresenta checks do backend, validação, publicação e ativação com a versão confirmada. O simulador permanece explicitamente indisponível até a Fase 7 e não finge uma execução.
+- Erros estruturados chegam aos campos do formulário e dos diálogos com foco e atributos acessíveis; o layout possui navegação por teclado, adaptação móvel e suporte a redução de movimento.
+- O Nginx do painel encaminha somente `/api/`, `/webhook` e `/webhook/` à API, permitindo usar a origem pública do painel no callback Meta sem expor outras rotas internas.
+- Gate atingido: a jornada da Fase 6 não exige IDs internos, SQL, `.env`, arquivo de tenant, alteração de código ou reinício por empresa.
 
-### Fase 3 — homologação e produção
+### Fase 7 — simulador e preflight
 
-7. Subir uma homologação isolada com domínio, TLS, volumes, monitoramento e credenciais exclusivas de teste.
-8. Cadastrar duas empresas completas e provar isolamento de números, credenciais, mensagens, limites, painel e integrações.
-9. Homologar Meta, OpenAI e Google com dados sintéticos; testar retries, indisponibilidade e limites reais.
-10. Executar teste ponta a ponta: webhook assinado → persistência/outbox → worker → resposta Meta → status de entrega/leitura.
-11. Fazer revisão LGPD/retenção, runbook de incidentes e checklist de go-live antes de qualquer tráfego real.
+- O simulador executa o draft corrente com o mesmo compilador V2, materializador e runtime configurável usados pelo worker.
+- Conversa, contato, estado, pedidos, agendamentos, handoff, submissões e documentos do simulador ficam exclusivamente em memória e são isolados por administrador, tenant e sessão.
+- Sessões usam revisão otimista, expiração, limite por administrador/tenant, limite global e invalidação quando o checksum do draft muda.
+- Texto, botões, listas, aliases, fallback, documentos sintéticos, reset, agendamento, fluxos e handoff podem ser exercitados pelo painel.
+- IA e integrações são simuladas; o serviço não recebe gateways, credenciais ou repositórios persistentes e informa explicitamente que chamadas externas são proibidas.
+- O preflight resolve no backend o número principal e o aplicativo Meta, testa somente integrações allowlisted e propaga cancelamento por timeout à Meta, OpenAI e Google Sheets.
+- Erros externos são convertidos em códigos públicos estáveis; tokens, respostas de provedores e detalhes internos não chegam à API, auditoria ou painel.
+- Cada execução externa registra início e conclusão sanitizados sob o mesmo `preflightId`, com ator, tenant, correlação, códigos dos checks e resultado. A auditoria inicial precisa ser persistida antes de qualquer chamada externa; timeout aborta o probe e sinaliza integrações que não encerram cooperativamente.
+- O runtime versionado de IA lê exclusivamente a revisão ativa, valida versão e checksum e recusa credenciais de outro tenant ou provedor antes de decifrá-las; o caminho legado continua restrito a empresas explicitamente legadas.
+- O pagamento versionado resolve exatamente a credencial `payment` publicada no V2. Uma integração externa não substitui a credencial PIX exigida pelo runtime, e falhas de vínculo fecham a carga sem recorrer à tabela legada.
+- O readiness continua sendo o único gate autoritativo para publicação e ativação e agora valida também o provedor associado a cada referência de credencial.
+- As novas rotas administrativas são tenant-scoped, exigem administrador da empresa, CSRF, versão exata do draft, corpo allowlisted e rate limit específico.
+- A etapa de revisão do wizard agora executa preflight e abre um diálogo acessível do simulador, sem persistir histórico no navegador.
+- Gate atingido no escopo conversacional: simulador e runtime tomam as mesmas decisões usando o mesmo contrato compilado e a mesma fábrica de runtime. Efeitos externos continuam deliberadamente simulados e serão cobertos pela regressão operacional das Fases 8 a 10.
 
-## Decisões que ainda dependem do usuário/produto
+### Fase 8 — regressão do Capitão Mor
 
-- Confirmar a planilha real do Capitão Mor e manter o desenho implementado: importação complementar de agenda/configurações públicas e exportação de pedidos, com PostgreSQL como verdade operacional.
-- O painel WAIA já cobre o atendimento humano mínimo; ainda deve ser decidido se haverá integração futura com uma caixa externa.
-- Qual provedor/estratégia será adotado para reduzir duplicidade no envio Meta?
-- Quais domínio, VPS, RPO/RTO, política de retenção e orçamento por tenant serão usados?
-- O artefato de sessão da raiz pode ser removido?
-- Existem dois administradores de plataforma ativos; confirmar se a conta adicional criada para teste deve ser removida.
+- A jornada conversacional cobre saudação, menu, cardápio, endereço, regras públicas, agenda, paginação, seleção de sexta e sábado, compra, preço atual, PIX sintético mascarado, comprovante e pedido pendente.
+- PIX e dados transacionais permanecem fora da IA; perguntas públicas usam somente o contexto permitido, e uma nova intenção interrompe com segurança a espera por comprovante.
+- Handoff, pausa da automação e resposta humana sobrevivem à reinstanciação dos serviços sem duplicar mensagens.
+- Outbox e exportação Google Sheets preservam referências mínimas, retry após indisponibilidade do Redis, contrato legado `Pedidos!A:G` e idempotência após reinício.
+- Status Meta evolui sem regressão, e mensagens, IDs Meta, IDs internos, filas, runtimes, IA e credenciais permanecem isolados por tenant mesmo quando os identificadores são repetidos.
+- O seed canônico do Capitão Mor foi carregado no PostgreSQL do `waia-test` com dados exclusivamente sintéticos e reaplicado de forma idempotente.
+- Gate atingido: nenhuma regressão funcional ou evidência de vazamento entre tenants foi encontrada na matriz da Fase 8.
 
-Nenhuma credencial real foi lida, exposta ou usada nesta auditoria.
+### Fase 9 — segunda empresa sintética
+
+- A jornada automatizada cria a Empresa Beta Sintética pelas mesmas rotas HTTP, autenticação, autorização e CSRF usadas pelo painel; nenhum tenant é criado por SQL, seed, arquivo ou alteração de `.env`.
+- A Beta recebe administrador e operador, configuração V2 com módulos, menu, respostas públicas, agendamento, fluxo declarativo e IA simulada; o simulador usa o draft corrente sem rede ou credenciais reais.
+- Meta é exercitada com aplicativo, número, vínculo e preflight completamente simulados e tenant-scoped, sem chamada ao Graph real nem uso de token real.
+- Publicação e ativação materializam revisões e versões de fluxo; a suspensão posterior bloqueia somente a Beta e mantém o Capitão Mor ativo.
+- Callbacks Meta simultâneos reutilizam IDs de mensagem, conversa, correlação e credencial entre Capitão Mor e Beta sem cruzar segredo, deduplicação, fila ou tenant.
+- A recriação lógica do worker preserva revisões, conversas e estados duráveis distintos: o Capitão Mor continua aguardando comprovante enquanto a Beta continua o agendamento.
+- A regressão da Beta revelou que uma resposta pública associada a uma ação canônica podia duplicar essa ação no registro do simulador. O runtime agora deduplica as chaves e mantém a resposta configurada como override.
+- O fluxo completo foi validado no harness administrativo isolado; a Beta não foi persistida no PostgreSQL do `waia-test`, e a navegação visual não foi declarada como executada porque nenhuma superfície de navegador estava disponível nesta sessão.
+- Gate atingido no escopo automatizado da Fase 9: cadastro completo pelas rotas do painel, operação simultânea, reinício lógico e suspensão sem operação manual de backend nem cruzamento entre tenants. A navegação visual e a matriz final persistente permanecem na Fase 10.
+
+### Fase 10 — validação final concluída
+
+- O runtime PostgreSQL aceita um cliente de health Meta injetado somente por chamada direta de código; sem injeção, continua instanciando o `MetaGraphHealthClient` real. Nenhuma variável de ambiente ou rota habilita simulação em produção.
+- Uma integração opt-in inicia a aplicação real com PostgreSQL e Redis, autentica um administrador de plataforma, mantém cookie e CSRF e percorre as mesmas rotas HTTP consumidas pelo painel.
+- A Empresa Beta Sintética foi persistida no `waia-test`, recebeu equipe, draft V2, simulação, número, credencial cifrada, aplicativo Meta compartilhado, vínculo, preflight simulado, publicação, ativação e suspensão sem SQL, seed, arquivo ou reinício por tenant.
+- O cenário é retomável: uma Beta parcial pode continuar pela API, e uma Beta já concluída é revalidada sem duplicação. O estado prévio do Capitão Mor é comparado antes e depois e permanece inalterado.
+- A navegação visual real foi concluída no navegador integrado: login, seleção da Empresa Beta Sintética, listagem de empresas, onboarding até a revisão final, número WhatsApp, módulos e configurações, auditoria, logs, uso de IA, diagnósticos e logout.
+- A jornada visual revelou que os recursos append-only `logs`, `audit` e `ai-usage` tentavam selecionar `updated_at`, coluna inexistente nessas tabelas. Os descritores PostgreSQL agora consultam somente `created_at` e `occurred_at`, com teste de regressão dedicado; auditoria, logs e uso de IA foram revalidados no navegador sem erro.
+- O build padrão inicialmente parou em `npm ci --omit=dev` pela rede do BuildKit. Após confirmar o registry por `npm ping`, o mesmo Dockerfile foi executado com rede de build `host`, instalou 104 pacotes pelo lockfile e gerou API e worker sem reutilizar `node_modules` de outra imagem.
+
+### Fase 11 — bloqueadores técnicos implementados; gate externo pendente
+
+- O Caddy encaminha somente a rota exata `/metrics`; o monitor operacional interno consulta readiness, métricas, heartbeat, filas e falhas e envia transições sanitizadas a um webhook HTTPS configurado. Alertas de quota da IA compartilham o mesmo destino.
+- Backup e restore agora exigem projeto Compose explícito, alvo isolado e confirmação exata. O bundle contém dump PostgreSQL, mídia, manifesto, checksums e referência não secreta de custódia do keyring; o restore recompõe schema, dados, privilégios, migrações e mídia.
+- A migration 020 torna a guarda recursiva de segredos compatível com `pg_restore` sob `search_path` restrito. O procedimento também recupera dumps anteriores à migration e limpa de forma determinística apenas o banco confirmado.
+- As páginas de privacidade e exclusão foram generalizadas para a plataforma e exigem nome, contato e aviso de controladores aprovados; sem configuração respondem 503.
+- A dependência transitiva `qs` foi atualizada pelo caminho suportado. O audit de produção ficou sem vulnerabilidades conhecidas.
+- O painel ganhou troca autenticada de senha com verificação da senha atual, política forte, auditoria e revogação das demais sessões. Recuperação e MFA ficam formalmente mitigadas no piloto por credenciais individuais e allowlist IP/CIDR de todo o prefixo administrativo.
+- OpenAI usa por padrão o snapshot `gpt-4.1-mini-2025-04-14`, catálogo de preços versionado e substituível por configuração, `X-Client-Request-Id` correlacionado e registro somente do request ID técnico devolvido pelo provedor.
+- CI, build imutável por digest, promoção, rollback, custódia do keyring, restore e alertas foram documentados. O proxy temporário versionado em `.tmp/whatsapp-test` foi removido.
+- Nenhuma alteração por tenant foi adicionada a `.env`, SQL, seed, código ou reinício; o Capitão Mor permaneceu funcional nas integrações reais.
+
+### Fase 12 — homologação técnica limpa executada; release candidate pendente
+
+- O Compose passou a aceitar `WAIA_IMAGE` em API, worker, migrador e monitor, permitindo promover o mesmo artefato com `--no-build`; o build local permanece apenas como fallback de desenvolvimento.
+- O CI corrige a descoberta de JavaScript, constrói uma imagem identificada pelo commit e preserva a imagem exportada, seu checksum SHA-256 e os metadados do artefato como resultado do workflow.
+- A imagem de produção copia somente `src`, `scripts`, `db`, `panel` e `public`; testes, relatórios, documentação e arquivos de ambiente não alteram mais o digest do runtime.
+- A homologação `waia-phase12-homolog` nasceu em volumes vazios, com credenciais exclusivamente sintéticas e sem seed. `db-init` concluiu e 20 de 20 migrations foram aplicadas.
+- O primeiro administrador foi criado pelo comando interativo, com senha apenas pelo stdin. Duas empresas sintéticas foram criadas pelas rotas autenticadas consumidas pelo painel, sem SQL, seed ou configuração manual por tenant; Alpha foi suspensa e Beta permaneceu em draft.
+- API e worker foram reiniciados e retomaram com readiness 200, preservando os dois tenants e seus estados.
+- Um backup completo da homologação foi restaurado no projeto descartável `waia-phase12-restore`; readiness, mídia e os estados acessados pelo painel foram recuperados.
+- O fechamento Git da Fase 12 já consta no commit `baf4a8f` e na tag local `v1.9.1-rc.1`; a promoção remota do artefato permanece pendente de verificação.
+
+## Validação da Fase 5
+
+- `npm test`: 334 testes descobertos, 324 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: 197 arquivos JavaScript válidos.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores sintéticos.
+- O padrão permanente para novas validações Docker é o projeto isolado `waia-test`; projetos existentes não serão removidos sem autorização explícita.
+- PostgreSQL 16 real no `waia-test`: 19 migrações aplicadas; integração de dois aplicativos, números e credenciais Meta por tenant aprovada, incluindo bloqueio de vínculo cruzado.
+- API e worker do `waia-test` ficaram saudáveis; `/health/ready` respondeu HTTP 200 com estado `ready`.
+
+## Validação da Fase 6
+
+- `npm test`: 357 testes descobertos, 347 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- Testes focados do painel e do suporte administrativo: 48 aprovados e 0 falhas.
+- `node --check`: 200 arquivos JavaScript válidos.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- `docker compose -p waia-test config --quiet`: configuração válida; nenhum projeto Docker existente foi removido e nenhum projeto permanente por fase foi criado.
+- PostgreSQL 16 real no `waia-test`: 9 integrações aprovadas, cobrindo onboarding/ativação transacional, publicação versionada, fluxos, Meta multiaplicativo, RLS, mídia, outbox e Google Sheets.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências de resposta humana.
+- Jornada HTTP real pelo painel: login, criação de empresa sintética em `draft`, salvamento do draft V2, retomada na etapa 2, readiness bloqueada e conflito stale HTTP 409 sem overwrite.
+- Build final reconstruído no projeto existente `waia-test`; API, worker, PostgreSQL e Redis ficaram saudáveis, enquanto `db-init` e migrador concluíram com código zero.
+- Nginx validado com `nginx -t`; os assets finais `app.js` e `onboarding.js` responderam HTTP 200, o callback dinâmico foi encaminhado à API e `/health/live` e `/health/ready` responderam HTTP 200.
+- A navegação visual autenticada pelo navegador embutido não foi executada porque esse navegador não alcançou a rede local do Docker; a navegação real permanece também na matriz final da Fase 10.
+
+## Validação da Fase 7
+
+- Testes focados de simulador, preflight, API, serviço, repositório, painel, IA e pagamento passaram sem falhas; o maior lote integrado teve 76 testes e a revisão final de credenciais teve 24.
+- `npm test`: 389 testes descobertos, 379 aprovados, 0 falhas e 10 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: os 31 arquivos JavaScript alterados nesta entrega possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas.
+- PostgreSQL e Redis reais no `waia-test`: 10 integrações aprovadas em grupos serializados, cobrindo onboarding, configuração versionada, fluxos, Meta multiaplicativo, RLS, mídia, outbox, Google Sheets e Redis.
+- A execução simultânea de toda a suíte dentro do mesmo banco sintético apresentou uma colisão entre fixtures concorrentes; a repetição em grupos isolados comprovou que não havia falha funcional.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores exclusivamente sintéticos.
+- API, worker e migrador foram reconstruídos novamente após a revisão final de credenciais, na versão `1.8.0`; 19 migrações foram descobertas, nenhuma nova era necessária nesta fase, e API, worker, PostgreSQL e Redis ficaram saudáveis.
+- `/health/live` e `/health/ready` responderam HTTP 200. A rota administrativa de preflight respondeu HTTP 401 sem sessão, confirmando que o proxy do painel preserva a autenticação.
+- Após a recriação da API, o Nginx do painel precisou ser reiniciado para renovar o endereço do upstream; depois disso, o proxy voltou a responder normalmente. Nenhuma alteração de configuração ou novo projeto permanente foi necessária.
+- O painel e seus assets responderam HTTP 200 no `localhost` publicado temporariamente. O navegador embutido permaneceu sem acesso à rede local do Docker; o contêiner temporário foi encerrado e os projetos existentes foram preservados.
+
+## Validação da Fase 8
+
+- Os três lotes especializados de regressão somam 10 testes aprovados: 5 de conversa e compra, 3 de isolamento multiempresa e 2 de operação, reinício e idempotência.
+- `npm test`: 400 testes descobertos, 389 aprovados, 0 falhas e 11 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: os quatro arquivos JavaScript adicionados nesta fase possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas e com distribuição por tenant preservada.
+- O seed foi executado novamente no projeto `waia-test` e retornou `0 novo(s), 2 descoberto(s)`, comprovando reaplicação idempotente sem criar outro projeto Docker.
+- PostgreSQL 16 real no `waia-test`: 10 integrações aprovadas, incluindo a carga do Capitão Mor pelo papel restrito da aplicação, publicação versionada, onboarding, flows, Meta multiaplicativo, RLS, mídia, outbox e Google Sheets.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências da resposta humana.
+- `docker compose -p waia-test config --quiet`: configuração válida com valores exclusivamente sintéticos; nenhum projeto permanente por fase foi criado ou removido.
+- API e worker foram reconstruídos na versão `1.8.1` e ficaram saudáveis; `db-init`, `media-init` e migrador concluíram com código zero, com 19 migrações descobertas e nenhuma nova nesta fase.
+- `/health/live` e `/health/ready` responderam HTTP 200 com estados `ok` e `ready`.
+
+## Validação da Fase 9
+
+- Testes focados da Fase 9: 3 aprovados e 0 falhas, cobrindo jornada administrativa completa, callbacks repetidos e isolamento após recriação do worker.
+- `npm test`: 403 testes descobertos, 392 aprovados, 0 falhas e 11 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: o runtime corrigido e os dois novos arquivos de teste possuem sintaxe válida.
+- `npm run load:test`: cinco cenários sintéticos aprovados, entre 250 e 800 jobs, sem falhas e com distribuição por tenant preservada.
+- PostgreSQL 16 real no `waia-test`: 10 integrações aprovadas em grupos serializados, incluindo publicação versionada, onboarding transacional, flows, Meta multiaplicativo, RLS, agendamento, mídia, resposta humana, Google Sheets e regressão do Capitão Mor.
+- Redis real no `waia-test`: integração aprovada, mantendo somente referências da resposta humana.
+- `docker compose -p waia-test config --quiet`: configuração válida; o conjunto de credenciais sintéticas já associado ao volume precisou ser preservado para não divergir do `.env` local.
+- O primeiro build padrão com a correção concluiu normalmente. Após apenas a mudança de versão invalidar a camada de dependências, o registry deixou o `npm ci` sem progresso; o build final `1.8.2` reutilizou o `node_modules` da imagem já validada, pois nenhuma dependência mudou, e substituiu somente os arquivos do checkout.
+- API e worker foram recriados na versão `1.8.2`; `db-init` e migrador concluíram com código zero, PostgreSQL e Redis permaneceram saudáveis e o Nginx do painel teve o upstream renovado.
+- API e worker não contêm `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL`; `/health/live` e `/health/ready` responderam HTTP 200 com estados `ok` e `ready`.
+- Um proxy local e um administrador exclusivamente sintéticos foram criados para tentar a navegação visual; como não havia navegador disponível, ambos foram removidos ao final sem alterar os demais dados ou projetos Docker.
+
+## Validação da Fase 10
+
+- `npm test`: 405 testes descobertos, 393 aprovados, 0 falhas e 12 integrações opcionais ignoradas sem variáveis de infraestrutura.
+- `node --check`: 214 arquivos JavaScript válidos.
+- Teste focado de bootstrap, Meta e E2E: 21 aprovados, 0 falhas e 1 integração opt-in ignorada no host.
+- Testes focados do repositório administrativo PostgreSQL: 9 aprovados e 0 falhas, incluindo a regressão dos recursos append-only sem `updated_at`.
+- E2E persistente no container temporário `--rm` do `waia-test`: 1 aprovado; uma segunda execução idempotente também foi aprovada.
+- PostgreSQL 16 real: as 10 integrações anteriores passaram serialmente e o novo E2E persistente passou separadamente; 45 de 45 tabelas com `empresa_id` possuem `ENABLE/FORCE ROW LEVEL SECURITY`.
+- Redis real: integração aprovada; varredura adicional examinou 12 chaves e 37 valores sem encontrar nenhuma credencial sintética conhecida.
+- Drafts, revisões, auditoria e logs operacionais não contêm chaves sensíveis proibidas nem os valores sintéticos conhecidos; logs recentes da API e do worker também tiveram zero ocorrências.
+- A Beta persistida terminou `suspensa`, em runtime `versionado`, com revisão ativa 3, duas revisões imutáveis, uma auditoria de ativação e uma de suspensão; o segredo Meta sintético não aparece nas revisões.
+- O seed canônico do Capitão Mor permaneceu no mesmo estado anterior ao E2E, sua regressão PostgreSQL passou, a Filaretti continua ausente e `origin/main` permanece em `00a0a09`.
+- `npm run load:test`: cinco cenários entre 250 e 800 jobs aprovados, sem falhas e com distribuição por tenant preservada.
+- `docker compose -p waia-test config --quiet`: configuração válida com credenciais sintéticas compatíveis com o volume existente.
+- API e worker foram reconstruídos e recriados em `1.8.3`; ambos ficaram saudáveis, usam `waia_app` e não recebem `POSTGRES_PASSWORD` nem `DATABASE_MIGRATOR_URL`.
+- `/health/live` e `/health/ready` responderam HTTP 200. O endpoint autenticado de métricas respondeu HTTP 200 sem UUID, label de alta cardinalidade ou credencial sintética.
+- O Nginx do painel passou em `nginx -t`; `/`, `app.js` e `onboarding.js` responderam HTTP 200 na porta interna 8080, e `/api/admin/auth/session` respondeu HTTP 401 sem sessão, como esperado.
+- O build padrão de API/worker passou com `docker build --network=host`: `npm ci --omit=dev` instalou 104 pacotes em 8 segundos. O audit do npm informou uma vulnerabilidade moderada já presente; as dependências não foram alteradas nesta fase.
+- A navegação autenticada foi executada visualmente em uma aba integrada. A auditoria exibiu 22 registros da Beta; logs e uso de IA exibiram seus estados vazios sem erro; os diagnósticos mostraram PostgreSQL, Redis e worker saudáveis; o logout encerrou a sessão com segurança.
+- A porta e a rede bridge usadas somente para a inspeção visual foram removidas ao final. O painel voltou a expor apenas as portas internas do Compose, a rede temporária `waia-test-browser-public` está ausente e os demais serviços e projetos Docker foram preservados.
+
+## Validação da Fase 11
+
+- `npm test`: 414 testes descobertos, 402 aprovados, 0 falhas e 12 integrações opt-in ignoradas no host; a imagem limpa repetiu a suíte sem falhas com `NODE_ENV=test`.
+- PostgreSQL 16 e Redis reais no `waia-test`: 12 de 12 integrações aprovadas em execução serial, incluindo regressão do Capitão Mor, onboarding, fluxos, Meta multiaplicativo, RLS, mídia, outbox, Google Sheets, painel persistente e Redis.
+- A integração real encontrou e corrigiu a divergência de tipo de `bindingRevision` entre o repositório administrativo e o módulo Meta; o valor `bigint` agora sai como `number` em ambos.
+- `npm audit --omit=dev`: 0 vulnerabilidades. `docker compose -p waia-test config --quiet` e a validação nativa do Caddy passaram.
+- `node --check`: 220 arquivos JavaScript válidos. Build final limpo e sem `node_modules` externo concluído a partir de `node:22-alpine`; `npm ci --omit=dev` instalou 104 pacotes e encontrou 0 vulnerabilidades. A imagem local `waia:1.9.0-phase11` foi identificada pelo manifest list `sha256:ee62e513b1a37a875451d8d0519c0f407de628efacd18952a17d645d1055ef44`.
+- `/metrics`, `/privacy` e `/data-deletion` passaram via HTTPS e Caddy real em contêiner transitório sem portas publicadas. O Caddy persistente não foi iniciado porque as portas 80/443 já pertenciam a outro ambiente, que não foi alterado.
+- O ensaio de desastre criou bundle com checksums, restaurou dump e mídia em projeto Compose descartável, reaplicou privilégios e migrations e confirmou readiness, marcador de mídia e descriptografia de credencial sintética pelo keyring recuperado.
+- O primeiro restore revelou a função recursiva incompatível com o `search_path` do `pg_restore`; a migration 020 e o procedimento compatível com dumps históricos foram implementados e o ensaio completo foi repetido com sucesso.
+- O projeto descartável, seus volumes e os dois bundles temporários foram removidos após a validação. O `waia-test` permaneceu; a migration 020 foi aplicada nele e API, worker, PostgreSQL e Redis continuaram saudáveis.
+- Nenhuma credencial real, endpoint externo ou produção foi usado. Não houve commit, push, tag, merge ou deploy.
+
+## Validação da Fase 12
+
+- Branch `dev` partiu limpa de `8740fa5`, sincronizado com `origin/dev`; `origin/main` permaneceu em `00a0a09`.
+- API, worker e migrador usaram o mesmo image ID `sha256:861616212b498b2cdd3e0bbcbebf988646895e830e8d67aabfd32e99324098ad` na homologação e no alvo de restore, sempre com `--no-build`.
+- Instalação vazia: 20 migrations novas de 20 descobertas e `/health/ready` HTTP 200.
+- Contrato HTTP do painel: login, CSRF, criação de Alpha e Beta, suspensão de Alpha e listagem isolada aprovados. A sessão não dispunha de navegador para repetir a navegação visual.
+- Integrações independentes de seed: 10 aprovadas com PostgreSQL e Redis reais. As duas regressões específicas do Capitão Mor confirmaram a ausência esperada do seed e não são aplicáveis a esta homologação limpa; continuam aprovadas no `waia-test` preservado.
+- Reinício: readiness recuperada e estados `Alpha=suspended` e `Beta=draft` preservados.
+- Backup/restore: checksums, PostgreSQL, mídia, privilégios e 20 migrations aprovados; o administrador restaurado autenticou e encontrou os mesmos estados dos tenants.
+- `npm test`: 415 testes descobertos, 403 aprovados, 0 falhas e 12 integrações opt-in ignoradas no host. `npm audit --omit=dev`: 0 vulnerabilidades.
+- Caddy em loopback HTTPS: painel, readiness, métricas autenticadas e página de privacidade responderam HTTP 200 com a imagem candidata final.
+- Os dois projetos Compose descartáveis, seus volumes e o bundle sintético de backup foram removidos após a validação; o projeto `waia-test` permaneceu preservado.
+- A exportação da imagem pelo GitHub Actions só poderá ser comprovada após o commit e push autorizados; localmente, a promoção sem rebuild e a identidade da imagem foram comprovadas nos dois ambientes descartáveis.
+- Nenhuma credencial real, seed, tráfego externo, produção, tag ou merge foi usado.
+
+## Segurança e limites preservados
+
+- Nenhuma credencial real foi lida, registrada ou usada.
+- Nenhum dado da Filaretti foi criado.
+- Configurações e revisões não armazenam segredos; apenas referências ao cofre são permitidas.
+- Fluxos não executam JavaScript, SQL, HTTP livre nem templates arbitrários.
+- O endpoint legado `/webhook` continua necessário temporariamente para o Capitão Mor.
+- O ambiente `waia-test` contém somente dados sintéticos de validação, incluindo o seed canônico do Capitão Mor e a Empresa Beta Sintética persistida pela Fase 10.
+
+## Fechamento da Fase 10
+
+A Fase 10 foi iniciada após o commit e push da Fase 9 e a autorização explícita do usuário. A matriz técnica, a jornada persistente e a validação visual foram concluídas; a entrega foi revisada e autorizada para commit e push na branch `dev`.
+
+Itens já fechados:
+
+- suíte integral e build reproduzível;
+- PostgreSQL, Redis, Docker Compose, RLS, auditoria e inspeção de segredos;
+- carga e health/readiness;
+- jornada persistente pelas rotas reais do painel;
+- navegação visual autenticada, incluindo auditoria, diagnósticos e logout;
+- consolidação da documentação e do relatório.
+
+O teste de carga atual é uma regressão em memória; não mede capacidade de VPS, latência de rede nem limites de provedores externos.
+
+## Pendências operacionais
+
+- O `.env` local não deve ser usado para recriar o PostgreSQL persistente do `waia-test` sem antes alinhar as credenciais sintéticas já associadas ao volume.
+- Em 7 de setembro, o usuário aprovou RPO de 24 horas e RTO de 4 horas e indicou Samuel Felipe (`samuelfelipeleao@gmail.com`) como responsável por incidentes. O perímetro administrativo por allowlist já está ativo e comprovado.
+- Google Drive foi escolhido para a cópia externa e Discord para alertas. O Drive usa cliente OAuth próprio do projeto `waia-production`; a cópia cifrada, o `cryptcheck` e o timer recorrente estão comprovados. O monitor implantado enviou ao Discord as transições sintéticas de disparo e recuperação e permaneceu sem falhas de entrega.
+- MFA, convite e recuperação automatizada continuam posteriores ao piloto. A mitigação temporária foi formalizada por credencial individual, senha forte, troca autenticada de senha, revogação de sessões e allowlist administrativa comprovada.
+- Os P0 externos da Fase 11 foram aceitos e comprovados em 7 de setembro. Isso não autoriza clientes reais nem substitui o gate separado da Fase 14.
+- A Fase 13 está concluída: VPS, perímetro administrativo, DNS/TLS, volumes, logs, backup local e externo, custódia do keyring, monitoramento, imagem imutável, smoke tests e rollback foram comprovados sem cadastrar empresas.
+
+## Retomada de 5 de setembro de 2026
+
+- Lidos `AGENTS.md`, `PLAN.md`, `implementações_finais.md`, relatório e runbooks de operação e integrações; inspecionados Compose, Caddy e workflow da CI.
+- O Compose já mantém PostgreSQL/Redis sem portas públicas, possui volumes persistentes, rotação de logs e monitor opcional. Isso é configuração local, não evidência de infraestrutura implantada.
+- Hostinger aberta no navegador visível. A página solicitou código de verificação por e-mail; o usuário deve concluí-lo diretamente no site. Nenhum código ou senha foi solicitado no chat.
+- O acesso inicial ao Docker local foi negado pelo sandbox. A consulta posterior com escalonamento autorizado encontrou a imagem homologada `waia:1.9.1-phase12-local`, que foi exportada sem rebuild. Nenhuma suíte integral ou integração foi reexecutada; resultados das fases anteriores acima são históricos.
+- Correções documentais desta retomada usam versão `1.9.2`; o alvo de implantação continua sendo a candidata `v1.9.1-rc.1`, sem reconstrução implícita.
+- Login concluído pelo usuário. VPS inspecionada: Ubuntu 24.04, Docker 29.3.0, Compose 5.1.0, 1 CPU/4 GB/50 GB, aproximadamente 37 GB livres e 2,5 GiB de memória disponível na leitura. EasyPanel/Traefik e dois n8n ativos foram preservados. Não houve reinício nem alteração de firewall.
+- Portas 80/443 já ocupadas pelo Traefik; porta 3000 do EasyPanel publicada, SSH root/senha habilitado, UFW inativo e política INPUT ACCEPT. O sistema informa atualizações e reinício pendentes. NTP está sincronizado; não há swap.
+- `waia.ia.br` não resolveu no DNS. Após a pergunta do usuário sobre endereço gratuito, a preparação passou a usar `srv1513113.hstgr.cloud`; os registros A/AAAA foram confirmados. O hostname foi posteriormente publicado com TLS válido, conforme a seção abaixo.
+- Adicionado overlay privado `infra/hostinger/compose.staging.yml`, com portas em loopback, limites de recursos e sem build/Caddy público. A validação com dados sintéticos no nome Compose `waia-test` comprovou essas invariantes, sem iniciar ou modificar contêineres.
+- Exportados localmente a imagem homologada e os arquivos de infraestrutura/painel da tag candidata; arquivos temporários desta preparação ficam ignorados no Git. O navegador sem sessão GitHub não permitiu conferir o artefato da CI.
+- O usuário instalou a chave temporária pelo Web console, com restrições de forwarding/PTY, expiração de duas horas e remoção agendada. As permissões da chave local foram ajustadas para a conta Samuel, permitindo a conexão SSH com identidade do servidor previamente conferida.
+- Os checksums dos artefatos foram conferidos na VPS. A candidata mantém o image ID homologado, sem rebuild; a validação também comprovou reconstrução byte a byte do arquivo usando camadas oficiais compartilhadas durante o diagnóstico da transferência lenta.
+
+## Instalação privada na Hostinger — 6 de setembro de 2026
+
+- Diretório: `/opt/waia/releases/v1.9.1-rc.1`; projeto Compose `waia-prod`, separado dos serviços existentes. Artefato `baf4a8f`/`v1.9.1-rc.1`, image ID `sha256:861616212b498b2cdd3e0bbcbebf988646895e830e8d67aabfd32e99324098ad`.
+- Segredos de infraestrutura novos foram gerados somente na VPS e armazenados no `.env` com permissão 600. Os campos Meta obrigatórios receberam valores aleatórios locais, sem aplicativo real conectado. Nenhum segredo foi impresso ou copiado para o relatório.
+- API e painel vinculados somente a `127.0.0.1:13001` e `127.0.0.1:18080`; banco e Redis sem portas publicadas. Caddy não foi iniciado. EasyPanel, Traefik e ambos os n8n foram preservados.
+- Corrigida a rede do painel: ele precisa também da rede egress para o Docker publicar a porta em loopback. Ajustada para 755 somente a pasta de assets públicos montada no Nginx; a extração segura com umask 077 havia deixado essa pasta inacessível ao worker.
+- API, worker, PostgreSQL e Redis saudáveis; painel em execução. Foram aplicadas 20 migrações. Banco com zero empresas, zero usuários e 48 tabelas com RLS habilitada e forçada.
+- Smoke tests: live/readiness, painel e asset HTTP 200; administração direta e via painel HTTP 403; métricas sem token HTTP 401; webhook sem assinatura HTTP 401; páginas legais HTTP 503 enquanto conteúdo aprovado permanece ausente.
+- API e worker reiniciados, com repetição dos smoke tests aprovada e persistência preservada. Não houve reinício da VPS nem dos serviços anteriores.
+- Backup local inicial em `/opt/waia/backups/waia-backup-20260906T170623Z`; dump, mídia e manifesto passaram nos checksums. O restore isolado foi posteriormente aprovado, conforme a seção abaixo. A cópia externa posterior ao deploy foi comprovada em um bundle mais recente; a custódia independente do keyring continua pendente.
+- Evidências sanitizadas `private-smoke.json`, `release-evidence.json` e `infra-images.json` preservadas na release e copiadas para a pasta temporária local ignorada no Git. Digests das imagens auxiliares registrados; elas vieram do registry oficial, enquanto o runtime permaneceu exatamente na candidata.
+- Versão local das correções de configuração/documentação: `1.9.2`; nenhuma alteração do runtime da candidata. Compose e invariantes de segurança validados; `git diff --check` aprovado. Não houve commit ou push.
+- A candidata foi posteriormente promovida pela versão corretiva 1.10.1, com alertas reais de disparo e recuperação pelo monitor. RPO/RTO, responsável por incidentes, backup externo, custódia do keyring e os destinos Google Drive/Discord foram definidos e comprovados em 7 de setembro.
+- A chave SSH temporária foi removida do servidor ao concluir a instalação privada, preservando as chaves anteriores. Uma nova tentativa autenticada foi rejeitada, comprovando a revogação. A chave privada temporária local também foi excluída.
+- Na continuação de 6 de setembro, uma nova chave temporária foi autorizada e instalada com expiração de duas horas. A stack privada permanecia saudável havia quatro horas.
+- Preparados e validados o ingresso pelo overlay `easypanel`, a rota Traefik para `srv1513113.hstgr.cloud` e a allowlist do IP administrativo atual. O desenho publica webhooks, health e páginas legais; restringe painel, `/api/admin` e `/metrics`, que também exige Bearer.
+- A aplicação da rota foi recusada pela revisão automática por representar exposição externa persistente sem autorização específica para publicar os endpoints. A verificação posterior confirmou rota ausente, API não recriada e HTTPS ainda respondendo 404. Nenhuma publicação parcial ocorreu.
+
+## Publicação HTTPS e restore drill — 6 de setembro de 2026
+
+- Após autorização explícita do usuário, API e painel foram conectados à rede attachable `easypanel` e somente esses dois contêineres foram recriados. PostgreSQL, Redis, worker, EasyPanel, Traefik e os dois n8n permaneceram ativos.
+- O Traefik passou a encaminhar `srv1513113.hstgr.cloud` com certificado Let's Encrypt válido e SAN correspondente. Health público retorna 200; as páginas legais retornam 503 até receberem conteúdo aprovado.
+- Painel e `/api/admin` exigem allowlist do IPv4 administrativo atual. A sessão sem login retorna 401 a partir do IP autorizado; painel e administração retornam 403 fora dele.
+- A rota exata `/metrics` foi corrigida após o primeiro teste revelar que o fallback do painel devolvia HTML 200. Agora ela segue para a API com allowlist e Bearer: 401 sem token no IP autorizado e 403 fora da allowlist.
+- O callback para um identificador inexistente retornou 404 sem persistir dados. PostgreSQL, Redis e as portas de loopback 13001/18080 permaneceram inacessíveis externamente. As portas 22, 80, 443 e 3000 ainda respondem externamente; 22 e 3000 dependem do firewall definitivo.
+- O bundle `/opt/waia/backups/waia-backup-20260906T170623Z` foi restaurado no projeto isolado `waia-restore-drill`, sem portas publicadas nem rota. Readiness, 20 migrações, zero tenants, 48 tabelas com RLS forçada e três entradas de mídia foram conferidos. Contêineres, redes e volumes descartáveis foram removidos; produção continuou com health 200.
+- A Hostinger possui dois backups automáticos semanais separados da VPS, ambos anteriores à instalação observada. O plano oferece upgrade pago para backup diário. Nenhum upgrade foi contratado e nenhum snapshot manual foi substituído sem autorização.
+- O painel publicado foi aberto no navegador e apresentou a tela de login. A VPS vence em 8 de setembro de 2026 e a renovação automática aparece ativa no hPanel; o alerta de renovação do plano de hospedagem deve ser tratado pelo titular.
+
+## Hardening, snapshot, atualização e reboot — 6 de setembro de 2026
+
+- Criado `waiaops` com chave Ed25519 dedicada, sudo sem senha e grupo Docker. A chave foi testada antes de qualquer alteração de rede. Sua parte privada permanece somente em `.secrets/hostinger-waiaops`, ignorada pelo Git.
+- SSH efetivo: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin without-password` e `PubkeyAuthentication yes`. A diretiva precisou ser instalada como `00-waia-hardening.conf`, pois `50-cloud-init.conf` definia senha como habilitada e o OpenSSH usa a primeira ocorrência aplicável.
+- O firewall Hostinger `WAIA producao` foi criado e ativado com cinco regras: aceitar TCP 22 e 3000 somente do IPv4 administrativo; aceitar TCP 80 e 443 de qualquer origem; recusar todo o restante. O acesso por chave, painel, health e métricas foi retestado a partir do IP autorizado.
+- Criado snapshot da VPS após a publicação, em 6 de setembro às 18:44, com expiração informada pela Hostinger em 7 de setembro. Os dois backups automáticos semanais anteriores continuam disponíveis. Nenhum upgrade pago foi contratado.
+- Atualizados 45 pacotes do Ubuntu, incluindo Docker 29.8.0, Compose 5.5.1, containerd, AppArmor, Python e componentes de rede. O provider mantém cloud-init e metapacotes de kernel em hold; esse bloqueio não foi removido. Após o reboot, `/var/run/reboot-required` não existe.
+- O upgrade do Docker reiniciou os contêineres e preservou WAIA. No reboot, os dois n8n ficaram `0/1` porque sua política `on-failure` não recriava tarefas encerradas de forma limpa. Ambos foram reativados e a política foi ajustada para `any`; ao final, EasyPanel, Traefik e os dois n8n estavam `1/1`.
+- Verificação pós-reboot: cinco contêineres WAIA saudáveis, 20 migrações, zero tenants, zero usuários, 48 tabelas com RLS forçada, health público 200, painel/métricas 403 fora da allowlist e painel 200/métricas 401 sem Bearer a partir do IP autorizado.
+- Instalado backup diário local via `waia-backup.timer`, às 03:15 UTC com atraso aleatório de até 15 minutos e retenção de sete dias. A execução inicial criou `waia-backup-20260906T215620Z`. O primeiro disparo realmente automático ocorreu em 7 de setembro às 03:17:36 UTC, criou `waia-backup-20260907T031736Z` e terminou com `Result=success`/`ExecMainStatus=0`; dump, mídia e manifesto passaram nos checksums. A referência permanece `server-env-only-external-custody-pending`, portanto cópia cifrada externa e custódia independente continuam abertas.
+- A segunda chave temporária de root foi removida por comentário exato, sua cópia pública foi apagada da pasta de entrada e a chave privada temporária local foi excluída. Root ficou sem chaves autorizadas; `waiaops` é o acesso SSH operacional.
+
+## Administrador inicial — 7 de setembro de 2026
+
+- A primeira tentativa de cadastro por `docker compose run` avaliou as dependências após a atualização para Compose 5.5.1 e recriou PostgreSQL e Redis. O comando foi interrompido antes de receber dados administrativos. Os volumes persistentes foram preservados; a verificação imediata confirmou cinco serviços ativos, readiness HTTP 200, 20 migrações, zero empresas, zero usuários e 48 tabelas com RLS forçada.
+- O cadastro foi repetido diretamente no contêiner ativo com `docker exec`, por sessão SSH interativa do usuário `waiaops`. O primeiro administrador foi criado sem passar a senha por argumento, arquivo ou chat.
+- A verificação posterior confirmou exatamente um usuário, zero empresas, 20 migrações, 48 tabelas com RLS forçada, cinco contêineres ativos e readiness HTTP 200. O primeiro login carregou a visão global da plataforma com o papel de administrador. O logout emitido pelo painel com o CSRF da sessão foi processado e registrado como `auth.logout`/`sucesso`, confirmando autenticação e CSRF reais sem criar ou alterar tenants.
+
+## Aceites e destinos externos — 7 de setembro de 2026
+
+- O usuário aprovou RPO de 24 horas e RTO de 4 horas e indicou Samuel Felipe (`samuelfelipeleao@gmail.com`) como responsável por incidentes.
+- Google Drive foi definido como destino da cópia externa. O rclone 1.75.1 foi obtido de fonte oficial, teve checksum conferido e foi instalado na VPS. A autorização OAuth foi concluída no navegador; o token ficou somente em arquivos ignorados pelo Git e a configuração foi instalada no servidor com modo 600. Uma consulta somente de leitura à API identificou a conta autorizada como `samuelfelipeleao@gmail.com`.
+- A configuração preparada usa um remote `crypt` dedicado sobre a pasta `WAIA Backups`, com criptografia de conteúdo, nomes de arquivos e nomes de diretórios. A rotina rejeita remote sem `type = crypt`, valida os checksums locais antes do envio e executa `rclone cryptcheck --one-way` após a cópia.
+- A autenticação atual usa temporariamente o cliente OAuth compartilhado do rclone. O rclone 1.75.1 avisou que esse cliente será retirado durante 2026 e recomendou um `client_id` próprio. O timer externo foi desabilitado antes do primeiro disparo; nenhum bundle foi enviado enquanto a conta específica e essa mitigação não forem confirmadas.
+- Discord foi definido como canal de alertas. O runtime limita a mensagem a 2.000 caracteres, desativa menções e mantém a sanitização de dados. A URL respondeu HTTP 204 ao teste direto; depois foi instalada somente no servidor e o monitor implantado enviou as transições sintéticas `queue_backlog_high` e `recovered`.
+- O usuário informou `Samuel Felipe Leão de Barros, pessoa física` como operador e forneceu o contato acima. Em seguida, declarou que assume a revisão jurídica e aprovou expressamente o texto integral e o aviso de controlador registrados em `docs/ACEITES_FASE_11.md`. A página de privacidade passou a registrar a aprovação em 7 de setembro de 2026.
+- Os três valores legais foram aplicados ao `.env` da produção e somente a API foi recriada. `/privacy` e `/data-deletion` passaram de 503 para 200 e foram conferidas pelo contato e nome aprovados.
+- Na primeira tentativa de aplicação, o usuário SSH não conseguiu entrar no diretório 700 da release; como o comando não falhou imediatamente, o Compose foi executado a partir do diretório pessoal sem carregar o `.env` de produção e a API respondeu 502. A correção foi aplicada em seguida por script `set -eu` executado como root dentro de `/opt/waia/current`, reutilizando o `.env` original. Ao final, API saudável, readiness privado/público 200 e os cinco contêineres WAIA ativos; banco, Redis, worker, painel e volumes não foram recriados.
+- O primeiro envio externo autorizado terminou com `Result=success` e `ExecMainStatus=0` para `waia-backup-20260907T031736Z`. O script validou checksums antes do envio e o `rclone cryptcheck --one-way` confirmou o conteúdo cifrado no remote `waia-drive-crypt:production`.
+- A criação do cliente OAuth próprio foi bloqueada pelo Google Cloud porque a conta ainda não possui verificação em duas etapas. Essa ativação de segurança exige ação manual do titular; até a troca, o cliente compartilhado permanece uma mitigação temporária sujeita à retirada anunciada pelo rclone.
+- O titular ativou a verificação em duas etapas. Após a primeira consulta ainda indicar propagação, a consulta seguinte liberou o Console; o projeto existente `Chatbot Capitao Mor` foi preservado e a página de criação de um projeto separado para o WAIA foi aberta. O timer externo permanece desabilitado porque a revisão automática recusou o uso recorrente do OAuth compartilhado sem um aceite separado desse fallback.
+- O usuário criou `WAIA Production` (`waia-production`) na conta correta `samuelfelipeleao@gmail.com` e informou que a conta `capitaomor4@gmail.com` foi removida. No projeto novo, a Google Drive API foi ativada e a Google Auth Platform configurada com app externo `WAIA Backup`, suporte e contato em `samuelfelipeleao@gmail.com`. O formulário do cliente desktop `WAIA Backup rclone` ficou completo, aguardando somente a confirmação imediatamente anterior à geração do ID e do segredo OAuth.
+- Após confirmação explícita, os dois clientes OAuth cujos segredos apareceram em saídas de diagnóstico foram revogados. Um terceiro cliente desktop foi criado; ID e segredo foram capturados separadamente em arquivos ignorados pelo Git, sem exibição dos valores, e combinados em material local de recuperação. A conta `samuelfelipeleao@gmail.com` foi adicionada como único usuário de teste.
+- O fluxo OAuth do cliente próprio foi concluído. A primeira troca do código falhou por bloqueio de rede do sandbox local e não gerou token; a repetição com rede autorizada terminou com token e refresh token válidos. Os logs temporários de autorização foram removidos após atualizar a configuração.
+- O cliente próprio acessou `WAIA Backups` e leu `waia-drive-crypt:production/waia-backup-20260907T031736Z`. A configuração foi instalada atomicamente em `/etc/waia/rclone.conf`; novo disparo de `waia-backup-offsite.service` terminou com `Result=success`/`ExecMainStatus=0`, incluindo `cryptcheck --one-way`. O timer externo foi habilitado e ficou ativo, com próximo disparo observado para 8 de setembro às 03:50:06 UTC, dentro da janela de 03:45 UTC mais atraso aleatório.
+- O `MASTER_KEYRING` foi copiado da VPS para a pasta local `.secrets`, normalizado sem alterar o valor lógico e validado com uma versão ativa recuperável. Keyring, chave SSH, configuração rclone e cliente OAuth receberam ACL restrita ao usuário Samuel e inventário local com tamanho e SHA-256. O arquivo temporário do webhook foi removido da estação após a instalação no servidor.
+- O commit `d382245` (`v1.10.0 - conclui infraestrutura e alertas da Fase 13`) foi enviado para `origin/dev`. Na primeira tentativa de promoção, a imagem nova foi construída e o teste sintético enviou ao Discord as transições `queue_backlog_high` e `recovered`, mas a migração falhou antes da troca do runtime porque o checksum histórico era sensível a CRLF/LF. O rollback não precisou recriar serviços: o symlink e os cinco contêineres permaneceram na candidata `v1.9.1-rc.1`, todos saudáveis, com readiness público aprovado.
+- A imagem anterior e o banco registravam o mesmo hash CRLF de `001_identity_and_configuration.sql`; o arquivo extraído do commit na VPS tinha conteúdo lógico idêntico em LF e outro hash. A versão 1.10.1 normaliza quebras de linha para LF nos novos registros e aceita, na validação de histórico, somente os hashes equivalentes LF/CRLF do mesmo SQL. Alterações reais continuam bloqueadas.
+- O commit `18c0e14` (`v1.10.1 - normaliza checksums SQL entre plataformas`) foi enviado para `origin/dev`. A imagem `waia:1.10.1`, ID `sha256:f0bb391adfd0851d3b83a98cd8aeed99b61fed930f61a86689baf39d50d4e148`, foi construída na VPS com os labels `version=1.10.1` e `revision=18c0e14`. Migrações e promoção terminaram com sucesso; `/opt/waia/current` aponta para `/opt/waia/releases/v1.10.1`.
+- A auditoria pós-deploy confirmou API e worker saudáveis, monitor ativo, zero reinícios, 20 migrações, 48 tabelas com RLS forçada, um administrador e zero empresas. Health, páginas legais e painel responderam 200; sessão administrativa e métricas sem credenciais responderam 401 no IP autorizado; origem fora da allowlist recebeu 403 em métricas; webhook inexistente respondeu 404.
+- PostgreSQL, Redis e painel foram preservados durante a promoção. EasyPanel, Traefik e os dois serviços n8n permaneceram `1/1`, com política de reinício `any`. A release `v1.9.1-rc.1` e sua imagem continuam disponíveis para rollback.
+- O backup pós-release final `waia-backup-20260907T222024Z` validou `postgres.dump`, mídia e manifesto, registrou a custódia externa do keyring e terminou com `cryptcheck --one-way` aprovado no Google Drive. Os timers local e externo seguem habilitados. Com isso, os critérios da Fase 13 foram atendidos; a Fase 14 depende de nova autorização explícita.
+
+## Retomada de 8 de setembro de 2026 — Fase 14 e primeiro onboarding real
+
+- A Fase 14 foi autorizada e o onboarding do Capitão Mor foi executado exclusivamente pelo painel de produção. A revisão foi publicada, a empresa foi ativada e o canário recebe somente as mensagens reais controladas deste ensaio.
+- Identidade, retenção, módulos, atendimento, menus, catálogo, eventos, pagamento, IA, aplicativo Meta próprio, número principal, token de usuário de sistema e administrador da empresa foram cadastrados sem inserir segredos no código, na documentação ou no chat.
+- O callback dinâmico foi verificado na Meta, o campo `messages` foi assinado e o preflight específico da conexão Meta confirmou aplicativo, WABA, número e token.
+- A Google Sheets API foi habilitada no projeto dedicado, uma conta de serviço isolada foi criada e recebeu acesso somente à planilha do Capitão Mor. Os ranges `Agenda!A2:I`, `Configurações!A2:C` e `Pedidos!A:G` foram configurados pelo painel e a sincronização informou estado saudável.
+- O readiness real manteve apenas `REQUIRED_INTEGRATIONS_AVAILABLE` bloqueado porque o draft usa um identificador lógico para a integração e o snapshot PostgreSQL expunha somente a referência interna `integration:<uuid>`. A versão `1.10.3` passa a expor também o tipo do conector e associa, dentro do mesmo tenant, cada integração obrigatória a um único conector saudável do mesmo tipo, preservando o vínculo direto quando disponível e o bloqueio para conectores indisponíveis ou insuficientes.
+- A correção foi validada por 17 testes focados, suíte completa com 420 testes descobertos, 408 aprovados, 0 falhas e 12 integrações opcionais ignoradas, `node --check`, `docker compose -p waia-test config --quiet` e uma transação PostgreSQL real no `waia-test` revertida após confirmar o tipo `google_sheets` e o estado saudável no snapshot.
+- O commit `6bda3fd` (`v1.10.3 - corrige vínculo de integrações no readiness`) foi enviado para `origin/dev`. Antes da promoção foi criado o restore point `waia-backup-20260908T040804Z`, validado localmente e no armazenamento externo cifrado. A imagem `waia:1.10.3`, ID `sha256:df447574607c93a6b39dc4a3fe4af7f00d2381d4a340bea6cbcf887cd5cca198`, foi construída na VPS com os labels corretos e promovida em `/opt/waia/releases/v1.10.3`; API e worker permaneceram saudáveis, monitor ativo, zero reinícios e `/health/ready` em HTTP 200. A release e a imagem `1.10.1` foram preservadas para rollback, assim como EasyPanel, Traefik e os dois serviços n8n.
+- Após a implantação, o readiness estrutural ficou aprovado. O primeiro preflight externo completo aprovou a Meta e bloqueou OpenAI e Google Sheets. A reprodução sanitizada no runtime confirmou que a chave OpenAI autentica e lista `gpt-4.1-mini`, mas o projeto não permite recuperar o snapshot configurado `gpt-4.1-mini-2025-04-14`, que respondeu HTTP 404. O modelo do rascunho deve ser ajustado para uma opção habilitada no projeto ou o snapshot deve ser liberado em Model Usage.
+- A mesma reprodução comprovou que o Google Sheets autentica, lê o range de diagnóstico e retorna `{ state: "healthy" }`. A versão `1.10.4`, commit `6421210`, corrigiu o preflight, foi enviada para `origin/dev` e implantada na release `/opt/waia/releases/v1.10.4`, com restore point local e cópia cifrada no Google Drive. O preflight real repetido aprovou Meta, OpenAI e Google Sheets; a revisão foi publicada e a empresa foi ativada em runtime versionado.
+- Os testes reais de WhatsApp aprovaram saudação/menu, status enviado/entregue/lido e a resposta de endereço, sem jobs falhos, outbox pendente ou reinício da API/worker.
+- O teste de `agenda` encontrou uma lacuna entre a revisão imutável e os dados operacionais: a revisão ativa possuía zero eventos embutidos, enquanto a sincronização Google mantinha dois eventos futuros publicados, ambos ligados a convites ativos. Por isso o runtime respondeu que não havia eventos.
+- A correção `1.10.5` mantém identidade, módulos, menus e referências externas presos à revisão ativa e, somente quando essa revisão habilita `events` com integração `google_sheets`, materializa a agenda do cache PostgreSQL tenant-scoped. A consulta exige origem Google, evento publicado, data vigente e convite ativo. O commit `de60ec5` foi enviado para `origin/dev` e a imagem correspondente foi implantada em `/opt/waia/releases/v1.10.5`, com backup local, cópia externa cifrada e rollback preservado. O teste real repetido retornou os dois eventos esperados.
+- O primeiro fluxo controlado de compra recebeu imagem, solicitou o nome e criou exatamente um pedido com um item em `aguardando_conferencia`, pagamento `em_conferencia`, comprovante vinculado com armazenamento e hash presentes e exportação Google Sheets `sincronizada`. O job terminou como `concluido` na primeira tentativa; havia zero jobs falhos abertos e zero chamadas à IA associadas ao teste.
+- A mensagem de pagamento mostrou toda a estrutura textual armazenada na credencial em vez de somente a chave PIX. A preparação `1.10.6` substitui os campos genéricos do painel por um cadastro explícito de chave PIX, normaliza CPF/CNPJ, telefone, e-mail e chave aleatória, rejeita rótulos, instruções, multilinhas e estruturas, e faz o resolver versionado retornar indisponível quando uma credencial antiga não cumprir o contrato. A credencial atual deverá ser rotacionada pelo painel antes da repetição do fluxo.

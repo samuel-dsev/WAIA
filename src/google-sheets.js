@@ -24,7 +24,7 @@ export class GoogleSheetsClient {
     return Boolean(this.spreadsheetId && this.clientEmail && this.privateKey);
   }
 
-  async authorize() {
+  async authorize({ signal } = {}) {
     if (!this.configured) throw new Error("Credenciais do Google Sheets não configuradas.");
     if (this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000) return this.accessToken;
 
@@ -41,6 +41,7 @@ export class GoogleSheetsClient {
     const signature = createSign("RSA-SHA256").update(unsigned).sign(this.privateKey, "base64url");
     const response = await this.fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
+      signal,
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -55,7 +56,7 @@ export class GoogleSheetsClient {
   }
 
   async request(path, options = {}) {
-    const token = await this.authorize();
+    const token = await this.authorize({ signal: options.signal });
     const response = await this.fetch(`https://sheets.googleapis.com/v4/spreadsheets/${this.spreadsheetId}${path}`, {
       ...options,
       headers: {
@@ -68,8 +69,8 @@ export class GoogleSheetsClient {
     return response.json();
   }
 
-  async getValues(range) {
-    const payload = await this.request(`/values/${encodeURIComponent(range)}?majorDimension=ROWS`);
+  async getValues(range, { signal } = {}) {
+    const payload = await this.request(`/values/${encodeURIComponent(range)}?majorDimension=ROWS`, { signal });
     return payload.values || [];
   }
 

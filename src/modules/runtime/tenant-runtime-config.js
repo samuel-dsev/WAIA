@@ -1,4 +1,5 @@
 import { MODULE_KEYS } from "../../core/contracts.js";
+import { parseFlowDefinition } from "../flows/index.js";
 
 const MODULE_SET = new Set(MODULE_KEYS);
 const ACTION_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
@@ -148,9 +149,14 @@ export function parseTenantRuntimeConfig(input) {
   const items = list(input.catalog?.items, "catalog.items", parseCatalogItem);
   const events = list(input.events?.items, "events.items", parseEvent);
   const services = list(input.appointments?.services, "appointments.services", parseService);
+  const flows = list(input.flows?.definitions, "flows.definitions", (definition) => parseFlowDefinition(definition), { max: 100 });
   unique(items, (item) => item.id, "catalog.items");
   unique(events, (event) => event.id, "events.items");
   unique(services, (service) => service.id, "appointments.services");
+  unique(flows, (flow) => flow.key, "flows.definitions");
+  if (enabledSet.has("flows") && flows.length === 0) {
+    throw new TypeError("flows.definitions é obrigatório quando flows está habilitado.");
+  }
 
   const pix = input.payments?.pix;
   if (enabledSet.has("payments") && !pix) {
@@ -188,6 +194,7 @@ export function parseTenantRuntimeConfig(input) {
       successMessage: optionalText(input.orders?.successMessage, "orders.successMessage", { max: 1000 }),
     },
     appointments: { services },
+    flows: { definitions: flows },
     humanHandoff: {
       message: optionalText(input.humanHandoff?.message, "humanHandoff.message", { max: 1000 }),
       channel: optionalText(input.humanHandoff?.channel, "humanHandoff.channel", { max: 300 }),
