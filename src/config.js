@@ -9,6 +9,19 @@ function numberFromEnv(name, fallback) {
 export const config = {
   environment: process.env.NODE_ENV || "development",
   infrastructureMode: process.env.INFRASTRUCTURE_MODE || "memory",
+  accounts: {
+    enabled: process.env.CUSTOMER_ACCOUNTS_ENABLED === "true",
+    origin: process.env.CUSTOMER_PORTAL_ORIGIN || "http://localhost:3001",
+    companyLimit: numberFromEnv("CUSTOMER_COMPANY_LIMIT", 1),
+    sessionMs: numberFromEnv("CUSTOMER_SESSION_MS", 12 * 3600_000),
+    idleMs: numberFromEnv("CUSTOMER_IDLE_MS", 3600_000),
+    verifyMs: numberFromEnv("CUSTOMER_VERIFY_MS", 24 * 3600_000),
+    resetMs: numberFromEnv("CUSTOMER_RESET_MS", 30 * 60_000),
+    emailMode: process.env.ACCOUNT_EMAIL_MODE || "disabled",
+    emailEndpoint: process.env.ACCOUNT_EMAIL_ENDPOINT || "",
+    emailToken: process.env.ACCOUNT_EMAIL_TOKEN || "",
+    emailFrom: process.env.ACCOUNT_EMAIL_FROM || "",
+  },
   logLevel: process.env.LOG_LEVEL || "info",
   webhookPort: numberFromEnv("WEBHOOK_PORT", 3001),
   database: {
@@ -34,6 +47,7 @@ export const config = {
     maxBytes: numberFromEnv("MEDIA_MAX_BYTES", 10 * 1024 * 1024),
   },
   security: {
+    trustProxy: process.env.TRUST_PROXY || false,
     masterKeyring: process.env.MASTER_KEYRING,
     sessionPepper: process.env.SESSION_PEPPER,
     cookieSecure: process.env.COOKIE_SECURE

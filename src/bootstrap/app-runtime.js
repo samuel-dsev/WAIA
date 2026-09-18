@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { createAccountsRuntime } from "../modules/accounts/runtime.js";
+import { createAccountRouter, createCustomerRouter } from "../modules/accounts/http.js";
+import { startAccountEmailWorker } from "../integrations/email/transport.js";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -426,6 +429,7 @@ export function createPostgresRuntime({
     adminService,
     onboardingService,
     authService,
+    accounts: createAccountsRuntime({ pool, redis, config }),
     aiService,
     tenantDefinitionRepository,
     metaGateway,
@@ -576,6 +580,18 @@ export function createApiApp({
   app.get("/privacy", createLegalPageHandler({ file: "privacy.html", config: config.legal }));
   app.get("/data-deletion", createLegalPageHandler({ file: "data-deletion.html", config: config.legal }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
+  if (runtime.accounts) {
+    app.use('/portal', (_req, res, next) => {
+      res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
+      next();
+    }, express.static(fileURLToPath(new URL('../../portal', import.meta.url))));
+    const customerApi = express();
+    customerApi.set('trust proxy', config.security.trustProxy || false);
+    customerApi.use('/account/v1', createAccountRouter({ service: runtime.accounts.service, secure: config.security.cookieSecure }));
+    customerApi.use('/app/v1', createCustomerRouter({ service: runtime.accounts.service }));
+    app.use('/api', customerApi);
+  }
   if (runtime.metaWebhookService) {
     app.get("/webhook/meta/:webhookPublicId", createMetaMultiAppVerificationHandler({ service: runtime.metaWebhookService }));
     app.post("/webhook/meta/:webhookPublicId", createMetaMultiAppIngestionHandler({ service: runtime.metaWebhookService }));
@@ -698,6 +714,8 @@ export function createWorkerRuntime({
     ttlMs: config.maintenance.heartbeatTtlMs,
     logger,
   });
+  const accountEmail = runtime.accounts
+    ? startAccountEmailWorker(runtime.accounts.service, runtime.accounts.transport) : null;
   return Object.freeze({
     processor,
     worker,
@@ -706,6 +724,7 @@ export function createWorkerRuntime({
     googleSheets,
     heartbeat,
     async close() {
+      await accountEmail?.close();
       await dispatcher.close();
       await retention.close();
       await googleSheets.close();

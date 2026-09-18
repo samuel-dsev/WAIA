@@ -11,6 +11,7 @@ COPY scripts ./scripts
 COPY db ./db
 COPY panel ./panel
 COPY public ./public
+COPY portal ./portal
 
 USER node
 EXPOSE 3001

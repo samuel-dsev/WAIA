@@ -66,6 +66,12 @@ export function withPlatformTransaction(pool, { usuarioId } = {}, callback) {
   }, callback);
 }
 
+export function withIdentityTransaction(pool, { usuarioId }, callback) {
+  return runTransaction(pool, {
+    tenantId: '', userId: requiredUuid(usuarioId, 'usuarioId'), isPlatformAdmin: false,
+  }, callback);
+}
+
 export function assertTenantTransaction(tx) {
   if (!tx?.client?.query || !tx.tenantId || tx.isPlatformAdmin) {
     throw new TypeError('A operação exige uma transação vinculada a uma empresa.');

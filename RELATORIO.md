@@ -1,6 +1,6 @@
 # Continuidade — WAIA
 
-Atualizado em 16/09/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 18/09/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
 ## Estado atual confirmado localmente
@@ -9,7 +9,7 @@ Este relatório separa inspeção local, histórico de operação e trabalho ain
 - Baseline funcional: v1.10.6, `497e511` (proteção da chave PIX).
 - `main` e remoto foram atualizados com autorização para `707a46d`, merge da dev; árvores de conteúdo idênticas antes desta revisão. GitHub confirmou main como padrão.
 - A diferença de ancestralidade main/dev é esperada; não fazer reset ou force push para eliminá-la.
-- A revisão anterior preparou v1.10.7; o início da F0 preparou v1.10.8 e seu fechamento prepara v1.10.9, somente documentação e metadados de versão. Não é entrega nem deploy da 2.0.0.
+- F0 versionada e enviada à dev com autorização: `40eeb9c`, v1.10.9. F1 autorizada e preparada como v1.11.0; commit/push explicitamente autorizados após apresentação do conjunto. Não é entrega nem deploy da 2.0.0.
 - A VPS não foi consultada nesta rodada. Último deploy registrado: v1.10.6/497e511 em `/opt/waia/releases/v1.10.6`; pode ter mudado posteriormente.
 
 ## Base existente que deve ser preservada
@@ -67,9 +67,11 @@ Histórico do deploy v1.10.6: backup `waia-backup-20260909T012103Z` com verifica
 
 ## Próximo trabalho
 
-F0 concluída. Aguardar confirmação explícita para commit/push do conjunto documental em `dev`; depois obter autorização própria para F1. Decisões externas restantes constam na seção 20 da especificação. Na F1, validar o código novo em PostgreSQL/Redis reais e planejar atualização do `waia-test` sem reset dos volumes; a imagem atual desse ambiente é antiga.
+F1 com gate local concluído. Arquivos, validações, versão 1.11.0 e mensagem apresentados; usuário autorizou commit/push em `dev`. F2 requer novo aceite. E-mail real/domínio e publicação continuam gates externos. A imagem dos serviços de `waia-test` permanece antiga; a validação executou o código atual em staging efêmero, sem substituir os serviços ou resetar volumes.
 
 ## F0 — início e fechamento em 16/09/2026
+
+Registro histórico; fechamento posteriormente commitado/enviado como `40eeb9c`. As referências abaixo a pendências da F0 descrevem o momento da execução, superado pela seção F1 ao final.
 
 - Pedido do usuário: começar a atualização da raiz; iniciada a primeira fase prevista, F0. Checkout `dev`, HEAD `497e511`; referência local main `707a46d` com árvore funcional idêntica. Remoto/VPS não consultados nesta fase.
 - Preservadas alterações anteriores em `.gitignore`, `AGENTS.md`, `README.md`, `RELATORIO.md`, `docs/OPERACAO_RELEASE.md`, `implementações_finais.md`, packages, `PLAN.md` e especificação. Nenhum commit/push realizado.
@@ -81,3 +83,27 @@ F0 concluída. Aguardar confirmação explícita para commit/push do conjunto do
 - Sondas somente leitura: 20 migrações no PostgreSQL; `waia_app` com `rolsuper=false` e `rolbypassrls=false`; RLS habilitada/forçada em `empresas`, `usuarios`, `usuarios_empresas` e `auth_sessions`; identidade/tenant aleatórios enxergam zero registros nessas tabelas; rollback e conexão reutilizada sem contexto residual. Redis retornou PONG; `/health/ready` retornou 200. Não foram inseridas fixtures ou executadas migrações.
 - Gate F0 concluído: baseline reproduzível e ambiente conhecido sem afetar dados reais. Limites: sondas não substituem suíte completa opt-in, ensaio de migração do código atual, testes de dois cadastros da F1, carga ou fornecedores reais. Tarifas/volume e capacidade medida continuam pendentes nas fases correspondentes, sob responsabilidade do titular do WAIA. F1 não iniciada.
 - Versão de fechamento documental: 1.10.9 nos dois manifests. Mensagem sugerida para aprovação: `v1.10.9 - consolida plano WAIA 2.0.0 e fecha baseline F0`.
+
+## F1 — contas e empresas, fechamento local em 18/09/2026
+
+- Autorização explícita recebida após commit/push da F0. Implementação incremental no checkout principal `dev`, versão preparada 1.11.0. Após apresentação dos 33 arquivos, validações e mensagem, usuário autorizou commit/push; F2 não iniciada.
+- Portal mínimo com cadastro, login/logout, confirmação, reenvio, recuperação/troca de senha, perfil, criação e retomada de empresa. Superfícies `/api/account/v1` e `/api/app/v1` separadas do admin. Contas desligadas por padrão; modo fake restrito a teste/desenvolvimento. Adapter HTTP preparado, sem fornecedor/domínio real homologado.
+- Migrações 021/022 aplicadas no `waia-test`, sem alterar 001–020, apagar volumes ou substituir imagens dos serviços. Sessões com audience, verificação, tokens de uso único, outbox cifrada, proprietário explícito e auditoria. Empresa, vínculo, proprietário, rascunho V2 e progresso criados atomicamente, com limite e idempotência por usuário. Nenhuma atribuição automática de proprietário a empresa legada.
+- Proteções: origem exata, cookie HTTPOnly/SameSite, CSRF, rate limit compartilhado com Redis, RLS por identidade e revalidação de vínculos. Poder global não passa para sessão customer. Reset revoga sessões administrativas e de cliente; MFA legado é preservado e impede login público até a F2.
+- Regressão host Node 24: **431 testes, 417 aprovados, 0 falhas, 14 skips** (integrações opt-in). Mesma suíte em Node 22.23.2 no Docker, `NODE_ENV=test`, flags opt-in desligadas: código de saída 0. O primeiro harness Docker herdou ambiente production e omitiu arquivos de infraestrutura; corrigido o harness, a regressão passou, sem mudança funcional para contornar testes.
+- Integração específica F1, Node 22 + PostgreSQL/Redis reais: **15 testes aprovados, 0 falhas, 0 skips**. Cobertura: dois cadastros, duplicidade concorrente, e-mail não confirmado, origem/CSRF/mass assignment, uso único/expiração de token, rollback de auditoria, provisionamento concorrente e rascunho válido, RLS/pool reutilizado, retomada, cookie, audience, revogação e limite distribuído com falha fechada. Um erro de formato do rascunho (`modules` deve ser lista) foi detectado e corrigido antes do resultado final.
+- Navegador local: cadastro, login, confirmação fake, criação/retomada da empresa e logout exercitados. Corrigidos foco em campo visível e reconhecimento do link de confirmação na aba já aberta. Screenshot desktop inspecionado. Tentativa de viewport 390px não foi aplicada pelo navegador (largura efetiva 1265px); aceitação visual mobile permanece sem comprovação nesta rodada.
+- Build local concluído: `waia:1.11.0-f1-local`, image config `sha256:bcef6105d5bc150ed0bee9471c082a3e483be97fbaa093e86454138e1421c4be`. Portal incluído no artefato; `npm ci --omit=dev` terminou sem vulnerabilidades reportadas pelo comando. Imagem não implantada.
+- Preview efêmero encerrado. Removidas somente uma conta e uma empresa sintéticas criadas para UI, além dos scripts temporários locais; testes automatizados limpam seus próprios UUIDs. API/worker/PostgreSQL/Redis do `waia-test` permaneceram saudáveis, painel ativo e volumes preservados. Nenhuma mensagem externa, VPS, túnel ou produção nesta fase.
+- Operação, parâmetros globais, contrato de e-mail e rollback: [CONTAS_CLIENTE_F1.md](docs/CONTAS_CLIENTE_F1.md). Gate técnico local F1 concluído; exposição pública exige provedor/domínio, termos finais e gates comerciais posteriores. Não comprova entrega real de e-mail, carga, todas as integrações legadas opt-in ou produto 2.0.0 completo.
+
+### Conjunto preparado para commit
+
+- Infraestrutura/metadados: `.gitignore`, `.dockerignore`, `.env.example`, `Dockerfile`, `docker-compose.yml`, `infra/caddy/Caddyfile`, `package.json`, `package-lock.json`.
+- Continuidade: `PLAN.md`, `RELATORIO.md`, `WAIA_2.0.0.md`, `docs/ADR_001_PORTAL_IDENTIDADE.md`, `docs/CONTAS_CLIENTE_F1.md`.
+- Banco: `db/migrations/021_customer_accounts.sql`, `db/migrations/022_account_identity_audit.sql`.
+- Runtime: `src/bootstrap/app-runtime.js`, `src/config.js`, `src/infra/postgres/transaction.js`, `src/modules/auth/repositories.js`, `src/modules/auth/token-codec.js`, `src/integrations/email/transport.js`.
+- Contas: `src/modules/accounts/account-repository.js`, `account-service.js`, `errors.js`, `http.js`, `rate-limiter.js`, `runtime.js` (todos no mesmo diretório).
+- Portal: `portal/index.html`, `portal/styles.css`, `portal/app.js`.
+- Testes: `test/accounts.test.js`, `test/accounts-postgres.test.js`, `test/accounts-redis.test.js`.
+- Mensagem proposta: `v1.11.0 - adiciona contas de cliente e provisionamento de empresas`.

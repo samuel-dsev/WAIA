@@ -13,6 +13,7 @@ docs/*
 !docs/OPERACAO_RELEASE.md
 !docs/ACEITES_FASE_11.md
 !docs/ADR_001_PORTAL_IDENTIDADE.md
+!docs/CONTAS_CLIENTE_F1.md
 RELATORIO.md
 AGENTS.md
 package-lock.json

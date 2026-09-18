@@ -35,6 +35,7 @@ export function createSessionTokenCodec({ pepper, random = randomBytes } = {}) {
       if (typeof token !== "string" || typeof csrfToken !== "string") return false;
       return safeEqual(hmac(key, "csrf", token).toString("base64url"), csrfToken);
     },
+    csrf(token) { return hmac(key, "csrf", token).toString("base64url"); },
     fingerprint(value) {
       return hmac(key, "fingerprint", String(value || "")).toString("hex").slice(0, 32);
     },

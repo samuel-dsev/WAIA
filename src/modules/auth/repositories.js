@@ -56,7 +56,7 @@ export class PostgresAuthRepository {
       const result = await client.query(
         `SELECT s.*, u.id user_id_value, u.email, u.nome, u.password_hash, u.papel_plataforma, u.status user_status
            FROM auth_sessions s JOIN usuarios u ON u.id = s.usuario_id
-          WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2 AND u.deleted_at IS NULL`,
+          WHERE s.token_hash = $1 AND s.audience = 'admin' AND s.revoked_at IS NULL AND s.expires_at > $2 AND u.deleted_at IS NULL`,
         [tokenHash, now],
       );
       const row = result.rows[0];

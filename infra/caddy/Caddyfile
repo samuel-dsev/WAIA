@@ -9,6 +9,10 @@
 		reverse_proxy api:3001
 	}
 
+	handle /portal* {
+		reverse_proxy api:3001
+	}
+
 	handle /privacy* {
 		reverse_proxy api:3001
 	}

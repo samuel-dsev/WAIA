@@ -1,8 +1,8 @@
 # WAIA 2.0.0 — especificação de implementação do SaaS
 
-Data: 16/09/2026. Estado: F0 concluída; funcionalidades novas ainda não implementadas. F1 aguarda autorização.
+Atualização: 18/09/2026. Estado: F0 concluída e versionada; F1 implementada e validada localmente, com commit/push autorizados após apresentação. Provedor/domínio de e-mail real pendentes. F2–F9 planejadas.
 Baseline funcional: `dev` em `497e511`, v1.10.6. `main` recebeu a mesma árvore pelo merge `707a46d`.
-A revisão documental inicial foi v1.10.7; baseline e ADR iniciados em v1.10.8; fechamento da F0 prepara v1.10.9. O número 2.0.0 identifica a entrega futura, não a produção atual.
+A revisão documental inicial foi v1.10.7; baseline e ADR iniciados em v1.10.8; F0 versionada em v1.10.9; F1 prepara v1.11.0. O número 2.0.0 identifica a entrega futura, não a produção atual. Evidências atuais em RELATORIO.md e operação da F1 em docs/CONTAS_CLIENTE_F1.md; as demais seções descrevem a especificação alvo.
 
 ## 1. Objetivo, escopo e autoridade
 

@@ -1,5 +1,7 @@
 # ADR 001 — portal e migração de identidade
 
+Atualização F1, 18/09/2026: decisões 1, 2, 4, 5 e 6 implementadas localmente em v1.11.0; decisão 3 mantém unificação completa/MFA na F2. Migrações aditivas 021/022 e testes reais com duas identidades, isolamento RLS, rollback de auditoria e revogação passaram. Provedor de e-mail ainda não homologado. Estado operacional em [CONTAS_CLIENTE_F1.md](CONTAS_CLIENTE_F1.md) e evidências atuais em RELATORIO.md. O texto abaixo preserva o contexto da F0.
+
 Data: 16/09/2026. Decisão técnica registrada na F0; implementação na F1/F2 mediante seus gates. Especificação dos contratos: [WAIA_2.0.0.md](../WAIA_2.0.0.md), seções 3, 5–8. Esta ADR registra a escolha e suas consequências, sem substituir a especificação.
 
 ## Contexto verificado

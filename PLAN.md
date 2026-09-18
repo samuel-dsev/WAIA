@@ -1,6 +1,6 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 16/09/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 18/09/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
 ## Objetivo
@@ -10,17 +10,17 @@ Evoluir a base atual para SaaS de autoatendimento: conta individual, empresa pr�
 ## Estado e autorização
 
 - `main`: referência estável v1.10.6, merge `707a46d`, promovida com autorização em 16/09/2026.
-- `dev`: checkout de desenvolvimento, baseline `497e511`; mesma árvore funcional da main antes desta documentação.
-- Revisão documental e fechamento F0 preparados: v1.10.9. Produto 2.0.0 ainda não implementado.
+- `dev`: F0 versionada/publicada no commit `40eeb9c` (v1.10.9); F1 preparada como v1.11.0, com commit/push explicitamente autorizados pelo usuário.
+- Produto 2.0.0 permanece futuro; a F1 é uma entrega incremental compatível.
 - Pedido de início recebido em 16/09/2026: iniciada F0, preservando a revisão documental anterior.
-- F0 concluída: testes locais/Node 22, ADR e ambiente `waia-test` verificados. Commit/push e início da F1 aguardam os respectivos aceites.
+- F0 concluída e commit/push autorizados. F1 autorizada posteriormente e implementada; gate local validado em PostgreSQL/Redis reais. Commit/push da F1 autorizados após apresentação do conjunto; F2 aguarda autorização própria.
 
 ## Sequência de execução
 
 | Fase | Entrega | Gate principal | Estado |
 |---|---|---|---|
-| F0 | Baseline, inventário e decisões | Ambiente/testes conhecidos; contratos definidos | Concluída; aguarda commit |
-| F1 | Conta e empresa do cliente | Dois cadastros independentes com isolamento real | Próxima funcional |
+| F0 | Baseline, inventário e decisões | Ambiente/testes conhecidos; contratos definidos | Concluída; commit 40eeb9c |
+| F1 | Conta e empresa do cliente | Dois cadastros independentes com isolamento real | Gate local concluído; commit/push autorizados; e-mail real pendente |
 | F2 | Equipe, propriedade, MFA e permissões | Sem escalada de acesso; revogação efetiva | Planejada |
 | F3 | Questionário e IA simplificados | Configuração/publicação sem intervenção técnica | Planejada |
 | F4 | Planos, assinatura e quotas | Sandbox completo, idempotência e reconciliação | Planejada |
