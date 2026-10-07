@@ -105,6 +105,8 @@ import {
   startGoogleSheetsSyncScheduler,
 } from "../integrations/index.js";
 import { GoogleSheetsClient } from "../google-sheets.js";
+import { createYCloudClient } from "../integrations/ycloud/client.js";
+import { createYCloudWebhookService, createYCloudWebhookHandler } from "../modules/meta/ycloud-webhook-service.js";
 import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
@@ -285,6 +287,7 @@ export function createPostgresRuntime({
     ? new MetaHealthService({
       repository: metaAppRepository,
       credentialVault,
+      ycloudClient: createYCloudClient({ timeoutMs: config.whatsapp.requestTimeoutMs }),
       client: metaHealthClient || new MetaGraphHealthClient({
         apiVersion: config.whatsapp.apiVersion,
         timeoutMs: config.whatsapp.requestTimeoutMs,
@@ -414,6 +417,10 @@ export function createPostgresRuntime({
     },
     logger: runtimeLogger,
   });
+  const ycloudWebhookService = credentialVault ? createYCloudWebhookService({
+    connectionResolver: metaAppRepository, credentialVault,
+    ingestionService: webhookIngestionService, repository: metaAppRepository,
+  }) : null;
   const queue = new BullMqJobQueue({
     connection: redis,
     queueName: config.redis.queueName,
@@ -436,6 +443,7 @@ export function createPostgresRuntime({
     metaAppRepository,
     metaHealthService,
     metaWebhookService,
+    ycloudWebhookService,
     queue,
     health,
     metrics,
@@ -484,6 +492,7 @@ export class PostgresMetaCredentialResolver {
     const number = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
       await client.query(
         `SELECT nw.phone_number_id, nw.aplicativo_meta_id, nw.access_token_credencial_id,
+                nw.numero_e164, nw.waba_id, am.modo AS aplicativo_modo,
                 am.estado AS aplicativo_estado
            FROM numeros_whatsapp nw
            LEFT JOIN aplicativos_meta am
@@ -501,7 +510,9 @@ export class PostgresMetaCredentialResolver {
         empresaId,
         credentialId: number.access_token_credencial_id,
       });
-      return { accessToken, phoneNumberId: number.phone_number_id, apiVersion: this.apiVersion };
+      return { accessToken, phoneNumberId: number.phone_number_id, apiVersion: this.apiVersion,
+        ...(number.aplicativo_modo === "ycloud" ? { provider: "ycloud", phoneNumber: number.numero_e164, wabaId: number.waba_id } : {}),
+      };
     }
     const legacyCredential = await this.transactionRunner(this.pool, { empresaId }, async ({ client }) => (
       await client.query(
@@ -565,6 +576,9 @@ export function createApiApp({
     next();
   });
   app.use(jsonParser());
+  if (runtime.ycloudWebhookService) {
+    app.post("/webhook/ycloud/:webhookPublicId", createYCloudWebhookHandler({ service: runtime.ycloudWebhookService }));
+  }
   app.get("/health/live", (_request, response) => response.json(runtime.health.live()));
   app.get("/health/ready", async (request, response, next) => {
     try {

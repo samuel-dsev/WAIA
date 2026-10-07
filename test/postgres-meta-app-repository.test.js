@@ -235,7 +235,7 @@ test("rotação persiste início explícito e janela da credencial anterior", as
 
 test("vincula número explicitamente ao app e access token com revisão otimista", async () => {
   const { repository, calls } = fixture(async (sql, params) => {
-    if (sql.includes("SELECT id FROM aplicativos_meta")) return { rows: [{ id: APP_ID }] };
+    if (sql.includes("SELECT id, modo FROM aplicativos_meta")) return { rows: [{ id: APP_ID, modo: "proprio" }] };
     if (sql.includes("FROM credenciais_empresa")) {
       return { rows: [{
         id: ACCESS_ID,

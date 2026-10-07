@@ -3,6 +3,16 @@
 Atualizado em 18/09/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Integração YCloud — 07/10/2026
+
+- Pedido explícito para integrar a YCloud à WAIA em produção. No navegador, número da Filaretti aparece conectado na YCloud; WABA ainda `In process`. Cadastro Filaretti criado no painel de produção como rascunho, sem ativação ou credenciais. O painel ainda não oferece YCloud.
+- Preparado localmente o conector incremental v1.12.0: API key e assinatura no cofre por empresa, vínculo de número com finalidade/provedor validados, envio de texto/botões/listas, leitura, estados, preflight GET e callback separado `/webhook/ycloud/:webhookPublicId`. Mantidos Graph API/Meta e fluxo transacional/outbox existentes.
+- Migração 024 amplia de modo aditivo os modos/regras da conexão. Histórico, ecos e grupos não entram na fila de IA. Mídia YCloud não suportada nesta entrega; sem promessa de sincronização de inbox/histórico ou conclusão da F5.
+- Validação local: 447 testes, 431 pass, zero falhas, 16 skips opt-in. PostgreSQL 16 real no servidor de `waia-test`, banco temporário isolado: migrações 001–024 aplicadas; dois testes de vínculos Meta/YCloud, finalidades, readiness e isolamento aprovados em Node 22. Nenhuma migração aplicada ao banco existente de `waia-test` ou produção. Erros iniciais no harness SQL/limpeza foram corrigidos antes do resultado final.
+- Validação adicional em snapshot do conector sobre HEAD, excluindo os arquivos e hunks anteriores de F2: 443 testes, 428 aprovados, 15 skips opt-in, zero falhas. Conector independente das alterações anteriores; lista de arquivos e procedimento em `docs/YCLOUD_FILARETTI.md`.
+- Alterações preexistentes de F2/equipe/MFA preservadas. Elas não foram autorizadas como parte da release YCloud; o conjunto deve ser separado antes de commit/build de produção. Nenhum commit, push, deploy, webhook externo ou envio real realizado nesta implementação.
+- Procedimento de cadastro e gates externos em [docs/YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Commit/push somente do conector autorizados em 07/10/2026 após revisão de arquivos, versão e testes. Publicação ainda depende de autorização específica; então salvar credenciais pelo painel, configurar webhook e validar mensagem real + uso no celular.
+
 ## Estado atual confirmado localmente
 
 - Checkout: `C:\Users\Samuel\Documents\Projetos\WAIA`, branch `dev`.

@@ -5,6 +5,7 @@ import {
   safeIntegrationLog,
 } from "../common.js";
 import { createWhatsAppReplyPayload } from "../../modules/whatsapp/outbound.js";
+import { createYCloudClient } from "../ycloud/client.js";
 
 function requiredText(value, field, max = 4096) {
   const text = String(value || "").trim();
@@ -22,6 +23,9 @@ function normalizeCredentials(value) {
     accessToken,
     phoneNumberId,
     apiVersion: String(value.apiVersion || "v26.0").trim(),
+    provider: value.provider || "meta",
+    phoneNumber: value.phoneNumber,
+    wabaId: value.wabaId,
   };
 }
 
@@ -88,6 +92,7 @@ export function createMetaGateway({
   requireMethod(credentialResolver, "resolveMeta", "credentialResolver");
   if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl é obrigatório.");
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new TypeError("timeoutMs deve ser positivo.");
+  const ycloud = createYCloudClient({ fetchImpl, timeoutMs });
 
   async function resolve(context) {
     const tenant = requireTenantContext(context, { requireNumber: true });
@@ -103,6 +108,7 @@ export function createMetaGateway({
         retryable: false,
       });
     }
+    if (credentials.provider !== "meta") throw new IntegrationError("Conector incompatível.", { code: "META_PROVIDER_MISMATCH", retryable: false });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const { operation, ...fetchOptions } = options;
@@ -147,6 +153,7 @@ export function createMetaGateway({
     const scoped = await resolve(context);
     const { credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
+    if (credentials.provider === "ycloud") return ycloud.sendReply(credentials, { to, text, buttons });
     const message = createWhatsAppReplyPayload({ to, text, buttons });
     return request(context, `${credentials.phoneNumberId}/messages`, {
       method: "POST",
@@ -160,6 +167,7 @@ export function createMetaGateway({
     const scoped = await resolve(context);
     const { credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
+    if (credentials.provider === "ycloud") return ycloud.markRead(credentials, { messageId, status });
     return request(context, `${credentials.phoneNumberId}/messages`, {
       method: "POST",
       body: JSON.stringify({
@@ -179,6 +187,7 @@ export function createMetaGateway({
     const scoped = await resolve(context);
     const { tenant, credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
+    if (credentials.provider === "ycloud") throw new IntegrationError("Anexos YCloud ainda não suportados.", { code: "YCLOUD_MEDIA_NOT_SUPPORTED", retryable: false });
     const id = requiredText(mediaId, "mediaId", 512);
     const metadata = await request(context, id, { operation: "resolve_media" }, scoped);
     const mimeType = normalizedMime(metadata.mime_type);
@@ -241,6 +250,10 @@ export function createMetaGateway({
     try {
       resolved = await resolve(context);
       if (!resolved.credentials) return integrationHealth("not_configured", { integration: "meta" });
+      if (resolved.credentials.provider === "ycloud") {
+        await ycloud.checkConnection({ ...resolved.credentials, appId: "ycloud" });
+        return integrationHealth("healthy", { integration: "meta" });
+      }
       await request(context, `${resolved.credentials.phoneNumberId}?fields=id`, { operation: "health" }, resolved);
       return integrationHealth("healthy", { integration: "meta" });
     } catch (error) {

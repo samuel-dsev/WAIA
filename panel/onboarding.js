@@ -917,6 +917,24 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     });
   }
 
+  function ycloudDialog(current = null) {
+    makeDialog(current ? "Editar conexão YCloud" : "Adicionar conexão YCloud", [
+      { name: "name", label: "Nome da conexão", required: true },
+      { name: "companyId", label: "Company ID da YCloud", required: true },
+      { name: "webhookSecret", label: "Segredo de assinatura do webhook YCloud", type: "password", help: "Pode ser salvo depois de cadastrar o callback na YCloud. Ao substituir o segredo, execute novamente o teste de saúde." },
+    ], { name: current?.name || "YCloud", companyId: current?.appId || current?.metaAppId || "" }, async (values) => {
+      const credentialId = values.webhookSecret ? await createCredential({ provider: "ycloud", purpose: "ycloud-webhook-secret", secret: values.webhookSecret }) : null;
+      try {
+        await apiFetch(endpoint(`/meta-applications${current ? `/${encoded(current.id)}` : ""}`), { method: current ? "PATCH" : "POST", body: {
+          name: values.name, metaAppId: values.companyId, mode: "ycloud",
+          ...(credentialId ? { appSecretCredentialId: credentialId } : {}),
+          ...(current ? { expectedRevision: current.revision, ...(credentialId ? { state: "pending" } : {}) } : {}),
+        } });
+      } catch (error) { if (credentialId) await revokeCredential(credentialId).catch(() => {}); throw error; }
+      await reloadMeta(); renderStep(); toast("Conexão YCloud salva. Copie o callback exibido para configurar o webhook na YCloud.");
+    });
+  }
+
   async function reloadMeta() {
     const [apps, numbers] = await Promise.all([apiFetch(endpoint("/meta-applications")), apiFetch(endpoint("/numbers?page=1&pageSize=100"))]);
     state.metaApps = list(apps); state.numbers = list(numbers);
@@ -925,11 +943,12 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
   function bindNumberDialog(numberRecord) {
     makeDialog("Vincular número à conexão Meta", [
       { name: "metaAppId", label: "Aplicativo Meta", type: "select", required: true, options: state.metaApps.map((app) => [app.id, `${app.name} · ${app.state}`]) },
-      { name: "accessToken", label: "Access token deste número", type: "password", required: true },
+      { name: "accessToken", label: "Credencial de acesso", type: "password", required: true, help: "YCloud: use a API key. Conexão direta Meta: use o access token." },
     ], {}, async (values) => {
       const replacingBinding = Boolean(numberRecord.metaAppId);
       if (replacingBinding && !await confirmAction("Substituir o token e a conexão deste número? A credencial anterior permanecerá no cofre para revogação auditada.", "Confirmar novo vínculo")) return false;
-      const accessTokenCredentialId = await createCredential({ provider: "meta", purpose: `whatsapp:${numberRecord.id}`, secret: values.accessToken });
+      const ycloud = state.metaApps.find((app) => app.id === values.metaAppId)?.mode === "ycloud";
+      const accessTokenCredentialId = await createCredential({ provider: ycloud ? "ycloud" : "meta", purpose: ycloud ? "ycloud-api-key" : `whatsapp:${numberRecord.id}`, secret: values.accessToken });
       try {
         await apiFetch(endpoint(`/numbers/${encoded(numberRecord.id)}/meta-binding`), { method: "PUT", body: { metaAppId: values.metaAppId, accessTokenCredentialId, expectedRevision: number(numberRecord.bindingRevision, 1) } });
       } catch (error) {
@@ -958,7 +977,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
   function renderMeta(root) {
     const card = section("8. WhatsApp e Meta", "Os identificadores desta etapa são fornecidos pelo Meta Business. Segredos são guardados no cofre.");
     for (const app of state.metaApps) {
-      const edit = button("Editar", "button button-secondary button-small"); edit.addEventListener("click", () => metaAppDialog(app));
+      const edit = button("Editar", "button button-secondary button-small"); edit.addEventListener("click", () => app.mode === "ycloud" ? ycloudDialog(app) : metaAppDialog(app));
       const health = button("Testar saúde", "button button-primary button-small"); health.addEventListener("click", async () => {
         const linkedNumbers = state.numbers.filter((item) => item.metaAppId === app.id);
         const numberRecord = linkedNumbers.find((item) => item.principal) || linkedNumbers[0];
@@ -968,11 +987,12 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       const suspend = button("Suspender", "button button-danger button-small"); suspend.disabled = app.state === "inactive"; suspend.addEventListener("click", async () => { if (!await confirmAction(`Suspender “${app.name}”?`, "Suspender conexão")) return; await apiFetch(endpoint(`/meta-applications/${encoded(app.id)}`), { method: "PATCH", body: { expectedRevision: app.revision, state: "inactive" } }); await reloadMeta(); renderStep(); });
       const rotate = button("Rotacionar App Secret", "button button-secondary button-small"); rotate.disabled = app.mode !== "own"; rotate.addEventListener("click", () => rotateMetaSecretDialog(app));
       const rotateVerify = button("Rotacionar verify token", "button button-secondary button-small"); rotateVerify.disabled = app.mode !== "own" || !app.verifyTokenCredentialId; rotateVerify.addEventListener("click", () => rotateVerifyTokenDialog(app));
-      const callback = `${location.origin}/webhook/meta/${app.webhookPublicId}`;
-      card.append(collectionCard(app.name, `${app.mode === "own" ? "Próprio" : "Compartilhado"} · ${app.state} · callback: ${callback}`, [edit, rotate, rotateVerify, health, suspend]));
+      const callback = `${location.origin}/webhook/${app.mode === "ycloud" ? "ycloud" : "meta"}/${app.webhookPublicId}`;
+      card.append(collectionCard(app.name, `${app.mode === "ycloud" ? "YCloud" : app.mode === "own" ? "Próprio" : "Compartilhado"} · ${app.state} · callback: ${callback}`, [edit, rotate, rotateVerify, health, suspend]));
     }
     if (!state.metaApps.length) card.append(element("p", "wizard-empty", "Nenhum aplicativo Meta configurado."));
     const addApp = button("Adicionar aplicativo Meta", "button button-primary"); addApp.addEventListener("click", () => metaAppDialog(null)); card.append(addApp);
+    const addYCloud = button("Adicionar conexão YCloud", "button button-primary"); addYCloud.addEventListener("click", () => ycloudDialog()); card.append(addYCloud);
     const numbers = section("Números", "Selecione a conexão pelo nome; o vínculo interno é criado pelo painel.");
     for (const numberRecord of state.numbers) {
       const editNumber = button("Editar", "button button-secondary button-small"); editNumber.addEventListener("click", () => numberDialog(numberRecord));

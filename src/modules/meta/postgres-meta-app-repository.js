@@ -5,8 +5,8 @@ import {
 } from "../../infra/postgres/transaction.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const MODE_FROM_DB = Object.freeze({ compartilhado: "shared", proprio: "own" });
-const MODE_TO_DB = Object.freeze({ shared: "compartilhado", own: "proprio" });
+const MODE_FROM_DB = Object.freeze({ compartilhado: "shared", proprio: "own", ycloud: "ycloud" });
+const MODE_TO_DB = Object.freeze({ shared: "compartilhado", own: "proprio", ycloud: "ycloud" });
 const STATE_FROM_DB = Object.freeze({
   pendente: "pending",
   ativo: "active",
@@ -63,7 +63,7 @@ function positiveRevision(value, field = "expectedRevision") {
 }
 
 function normalizeMode(value) {
-  if (!MODE_TO_DB[value]) throw new TypeError("mode deve ser shared ou own.");
+  if (!MODE_TO_DB[value]) throw new TypeError("mode deve ser shared, own ou ycloud.");
   return value;
 }
 
@@ -114,6 +114,7 @@ function mapNumber(row) {
     id: row.id,
     empresaId: row.empresa_id,
     phoneNumberId: row.phone_number_id,
+    numeroE164: row.numero_e164,
     wabaId: row.waba_id,
     metaAppId: row.aplicativo_meta_id,
     accessTokenCredentialId: row.access_token_credencial_id,
@@ -148,6 +149,13 @@ function normalizeApp(input, current = null) {
   };
   if (!value.name) throw new TypeError("name é obrigatório.");
   if (!value.appId) throw new TypeError("metaAppId é obrigatório.");
+  if (current && (value.mode === "ycloud") !== (current.mode === "ycloud")) throw new TypeError("Crie uma nova conexão para trocar o provedor.");
+  if (value.mode === "ycloud" && (value.verifyTokenCredentialId || value.previousAppSecretCredentialId)) {
+    throw new TypeError("YCloud usa somente o segredo de assinatura do webhook.");
+  }
+  if (value.mode === "ycloud" && value.state === "active" && !value.appSecretCredentialId) {
+    throw new TypeError("YCloud exige segredo de assinatura no cofre.");
+  }
   const rotationValues = [
     value.previousAppSecretCredentialId,
     value.appSecretRotatedAt,
@@ -185,10 +193,10 @@ async function assertCredentialPurposes(client, empresaId, requirements) {
     [empresaId, ids],
   )).rows;
   const records = new Map(rows.map((row) => [row.id, row]));
-  const invalid = requirements.some(({ id, purposes }) => {
+  const invalid = requirements.some(({ id, purposes, provider = "meta" }) => {
     if (!id) return false;
     const row = records.get(id);
-    return !row || row.provedor !== "meta" || row.status !== "ativa" || !purposes.includes(row.finalidade);
+    return !row || row.provedor !== provider || row.status !== "ativa" || !purposes.includes(row.finalidade);
   });
   if (invalid) {
     throw repositoryError(
@@ -199,6 +207,7 @@ async function assertCredentialPurposes(client, empresaId, requirements) {
 }
 
 function appCredentialRequirements(app) {
+  if (app.mode === "ycloud") return [{ id: app.appSecretCredentialId, provider: "ycloud", purposes: ["ycloud-webhook-secret"] }];
   return [
     { id: app.appSecretCredentialId, purposes: CREDENTIAL_PURPOSES.appSecret },
     { id: app.previousAppSecretCredentialId, purposes: CREDENTIAL_PURPOSES.appSecret },
@@ -480,16 +489,16 @@ export class PostgresMetaAppRepository {
     const bind = async (tx) => {
       const { client } = assertTenantTransaction(tx, tenantId);
       const app = (await client.query(
-        `SELECT id FROM aplicativos_meta
+        `SELECT id, modo FROM aplicativos_meta
           WHERE empresa_id = $1 AND id = $2 AND deleted_at IS NULL AND estado <> 'revogado'`,
         [tenantId, internalAppId],
       )).rows[0];
       if (!app) throw repositoryError("META_APP_NOT_FOUND", "Aplicativo Meta não encontrado.");
       await assertCredentialPurposes(client, tenantId, [{
         id: credentialId,
+        provider: app.modo === "ycloud" ? "ycloud" : "meta",
         purposes: [
-          ...CREDENTIAL_PURPOSES.accessToken,
-          `whatsapp:${internalNumberId}`,
+          ...(app.modo === "ycloud" ? ["ycloud-api-key"] : [...CREDENTIAL_PURPOSES.accessToken, `whatsapp:${internalNumberId}`]),
         ],
       }]);
       const row = (await client.query(

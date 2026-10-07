@@ -290,9 +290,10 @@ export class PostgresOnboardingRepository {
            SELECT 1 FROM numeros_whatsapp nw
            JOIN credenciais_empresa ce
              ON ce.empresa_id = nw.empresa_id
-            AND ce.provedor = 'meta'
+            AND ce.provedor IN ('meta', 'ycloud')
             AND ce.id = nw.access_token_credencial_id
-            AND ce.finalidade IN ('whatsapp-access-token', 'whatsapp', 'whatsapp:' || nw.id::text)
+            AND ((ce.provedor = 'meta' AND ce.finalidade IN ('whatsapp-access-token', 'whatsapp', 'whatsapp:' || nw.id::text))
+              OR (ce.provedor = 'ycloud' AND ce.finalidade = 'ycloud-api-key'))
             AND ce.status = 'ativa'
            WHERE nw.empresa_id = e.id AND nw.principal AND nw.status = 'ativo' AND nw.deleted_at IS NULL
          ) AS access_token_configured,

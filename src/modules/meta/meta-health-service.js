@@ -81,9 +81,10 @@ function localFailure(code) {
 function assertLocalConfiguration(app, number) {
   const mode = String(app.mode || "").trim().toLowerCase();
   const shared = mode === "shared" || mode === "compartilhado";
+  const ycloud = mode === "ycloud";
   if (!optionalText(app.id) || !optionalText(app.empresaId) || !optionalText(app.state) || !mode
       || !optionalText(app.appId) || !optionalText(app.webhookPublicId)
-      || (!shared && (!optionalText(app.appSecretCredentialId) || !optionalText(app.verifyTokenCredentialId)))) {
+      || (!shared && (!optionalText(app.appSecretCredentialId) || (!ycloud && !optionalText(app.verifyTokenCredentialId))))) {
     localFailure("META_APP_INCOMPLETE");
   }
   if (INACTIVE_APP_STATES.has(String(app.state || "").trim().toLowerCase())) {
@@ -131,7 +132,7 @@ function assertExternalIdentity(external, app, number) {
  *   returning { appId, wabaId, phoneNumberId, tokenValid? }.
  */
 export class MetaHealthService {
-  constructor({ repository, credentialVault, client, clock = () => new Date() } = {}) {
+  constructor({ repository, credentialVault, client, ycloudClient, clock = () => new Date() } = {}) {
     requireMethod(repository, "findAppById", "repository");
     requireMethod(repository, "findNumberBinding", "repository");
     requireMethod(repository, "recordHealthCheck", "repository");
@@ -142,6 +143,7 @@ export class MetaHealthService {
     this.repository = repository;
     this.credentialVault = credentialVault;
     this.client = client;
+    this.ycloudClient = ycloudClient;
     this.clock = clock;
   }
 
@@ -177,10 +179,10 @@ export class MetaHealthService {
       if (!sharedApplication) {
         const [appSecret, verifyToken] = await Promise.all([
           this.credentialVault.getCredentialMetadata({ empresaId: tenantId, credentialId: app.appSecretCredentialId }),
-          this.credentialVault.getCredentialMetadata({ empresaId: tenantId, credentialId: app.verifyTokenCredentialId }),
+          app.mode === "ycloud" ? null : this.credentialVault.getCredentialMetadata({ empresaId: tenantId, credentialId: app.verifyTokenCredentialId }),
         ]);
         assertCredentialMetadata(appSecret);
-        assertCredentialMetadata(verifyToken);
+        if (app.mode !== "ycloud") assertCredentialMetadata(verifyToken);
       }
 
       let accessToken;
@@ -200,10 +202,12 @@ export class MetaHealthService {
       let external;
       try {
         if (signal?.aborted) localFailure("META_EXTERNAL_UNAVAILABLE");
-        external = await this.client.checkConnection({
+        const client = app.mode === "ycloud" ? this.ycloudClient : this.client;
+        external = await client.checkConnection({
           appId: app.appId,
           wabaId: number.wabaId,
           phoneNumberId: number.phoneNumberId,
+          phoneNumber: number.numeroE164,
           accessToken,
           signal,
         });

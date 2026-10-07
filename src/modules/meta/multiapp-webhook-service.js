@@ -136,6 +136,7 @@ function connectionNumbers(connection) {
 }
 
 function validatedConnection(connection, { verification = false } = {}) {
+  if (connection?.mode === "ycloud") fail("META_WEBHOOK_NOT_FOUND");
   if (!connection || !normalizedIdentifier(connection.empresaId)) {
     fail("META_WEBHOOK_NOT_FOUND");
   }

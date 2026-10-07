@@ -3,6 +3,8 @@
 Atualizado em 18/09/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
+Adendo de 07/10/2026: conector YCloud solicitado para a Filaretti e preparado localmente como v1.12.0. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5; commit/push autorizados em 07/10/2026, deploy pendente de autorização específica.
+
 ## Objetivo
 
 Evoluir a base atual para SaaS de autoatendimento: conta individual, empresa própria, assinatura, configuração da IA, conexão WhatsApp guiada e inbox com controle humano/automático.

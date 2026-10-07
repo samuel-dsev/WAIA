@@ -72,3 +72,22 @@ test("bootstrap expõe callback Meta dinâmico e preserva webhook legado", async
     assert.equal(await legacy.text(), "legacy-challenge");
   });
 });
+
+test("bootstrap YCloud encaminha assinatura e bytes brutos por callback separado", async () => {
+  const calls = [];
+  const rt = runtime(calls);
+  rt.ycloudWebhookService = { async ingest(input) { calls.push(input); } };
+  const app = createApiApp({ runtime: rt, config: {
+    environment: "test", whatsapp: { verifyToken: "test", appSecret: "" }, security: { cookieSecure: false },
+  } });
+  await withServer(app, async (url) => {
+    const document = '{ "id":"evt_test", "apiVersion":"v2" }';
+    const response = await fetch(`${url}/webhook/ycloud/00000000-0000-4000-8000-0000000000a1`, {
+      method: "POST", headers: { "content-type": "application/json", "ycloud-signature": "synthetic-signature" }, body: document,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(calls[0].signature, "synthetic-signature");
+    assert.equal(calls[0].rawBody.toString("utf8"), document);
+    assert.equal(calls[0].webhookPublicId, "00000000-0000-4000-8000-0000000000a1");
+  });
+});
