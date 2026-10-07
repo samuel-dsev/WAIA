@@ -5,6 +5,8 @@ Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
 Adendo de 07/10/2026: conector YCloud solicitado para a Filaretti e preparado localmente como v1.12.0. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5; commit/push autorizados em 07/10/2026, deploy pendente de autorização específica.
 
+Preparação de deploy em 07/10/2026: v1.12.0 enviada em `9adaef0`; auditoria da imagem apontou dependências vulneráveis. Correção compatível preparada como v1.12.1, com zero vulnerabilidades e regressão isolada aprovada. Commit/push da correção autorizados em 07/10/2026. SSH restabelecido após regra de firewall explicitamente aprovada; preflight de produção, migrações e backup local em RELATORIO.md. Deploy pendente.
+
 ## Objetivo
 
 Evoluir a base atual para SaaS de autoatendimento: conta individual, empresa própria, assinatura, configuração da IA, conexão WhatsApp guiada e inbox com controle humano/automático.

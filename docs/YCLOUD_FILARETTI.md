@@ -6,7 +6,7 @@ Atualizado em 07/10/2026. Escopo incremental: conector YCloud para atendimento p
 
 - YCloud: número da Filaretti conectado pelo fluxo WhatsApp Business APP Coexistence; conta empresarial ainda indica `In process`.
 - WAIA em produção: empresa Filaretti Advocacia criada pelo painel como rascunho, sem ativação ou credenciais YCloud.
-- Conector preparado localmente em `dev`. Nenhum webhook externo, mensagem real, commit, push ou deploy realizado por esta implementação.
+- Conector v1.12.0 versionado no commit `9adaef0` e enviado à `origin/dev` após autorização. Nenhum webhook externo, mensagem real ou deploy realizado por esta implementação.
 - Alterações anteriores de equipe/MFA (F2) permanecem no checkout. Não incluir automaticamente essas alterações na release do conector.
 
 ## Configuração após publicar o conector
@@ -64,7 +64,17 @@ Validações concluídas:
 - PostgreSQL 16 real no ambiente waia-test: 2 testes aprovados (Meta existente e YCloud), nenhuma falha ou skip, em banco temporário com dados sintéticos. Banco e papéis temporários removidos; PostgreSQL voltou ao estado parado anterior. Dados e volumes existentes preservados.
 - Sintaxe do painel e `git diff --check` aprovados.
 
-Mensagem aprovada: `v1.12.0 - integra YCloud ao WhatsApp multiempresa`. Commit/push somente do conector autorizados em 07/10/2026; deploy ainda depende de autorização específica.
+Mensagem aprovada: `v1.12.0 - integra YCloud ao WhatsApp multiempresa`. Commit/push somente do conector concluídos em `9adaef0`; deploy ainda depende de autorização específica.
+
+## Preparação de deploy e correção 1.12.1
+
+- Auditoria da imagem 1.12.0 detectou `proxy-addr` 2.0.7 (crítica) e `ip-address` 10.5.0 (moderada). Atualização compatível no lockfile para 2.0.8 e 10.7.3, sem modificar os intervalos das dependências diretas. Versão candidata 1.12.1.
+- `npm ci`, build Docker e auditoria aprovados; zero vulnerabilidades reportadas. Snapshot com dependências corrigidas, sem F2: 428 testes aprovados, 15 skips opt-in, nenhuma falha.
+- Commit aprovado: `v1.12.1 - corrige dependências antes do deploy YCloud`. Arquivos: `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Commit/push da correção autorizados em 07/10/2026; deploy depende de autorização específica.
+- SSH restaurado usando a chave existente, após aprovação e sincronização de regra TCP 22 restrita ao IP atual. Sem rotação de chave ou remoção de regras anteriores.
+- Produção atual 1.10.6; readiness 200; backup local de 07/10/2026 com dump, mídia e manifesto verificados. Imagem antiga disponível para rollback; retorno após migrações precisa preservar o schema aditivo. Entrega offsite não verificada nesta rodada.
+- Migrações aplicadas no banco atual: 001–020. A release baseada em dev inclui 021/022 de contas e 024 YCloud; exclui a 023 de equipe/MFA. Revisar esse salto e as configurações obrigatórias antes da promoção.
+- Nenhuma imagem transferida, migração aplicada, serviço reiniciado ou versão publicada nesta preparação.
 
 ## Fontes
 
