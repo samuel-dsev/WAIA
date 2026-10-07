@@ -727,14 +727,24 @@ export class PostgresAdminRepository {
         if (changes.status === "ativo" || changes.principal === true) {
           const credential = await client.query(
             `SELECT 1
-               FROM credenciais_empresa
-              WHERE empresa_id = $1 AND provedor = 'meta' AND status = 'ativa'
-                AND finalidade IN ($2, 'whatsapp')
+               FROM numeros_whatsapp nw
+               LEFT JOIN aplicativos_meta am
+                 ON am.empresa_id = nw.empresa_id AND am.id = nw.aplicativo_meta_id
+               JOIN credenciais_empresa ce ON ce.empresa_id = nw.empresa_id
+              WHERE nw.empresa_id = $1 AND nw.id = $3 AND nw.deleted_at IS NULL
+                AND ce.status = 'ativa'
+                AND (
+                  (am.modo IS DISTINCT FROM 'ycloud' AND ce.provedor = 'meta'
+                    AND ce.finalidade IN ($2, 'whatsapp'))
+                  OR (am.modo = 'ycloud' AND am.estado = 'ativo' AND am.deleted_at IS NULL
+                    AND ce.id = nw.access_token_credencial_id
+                    AND ce.provedor = 'ycloud' AND ce.finalidade = 'ycloud-api-key')
+                )
               LIMIT 1`,
-            [empresaId, `whatsapp:${id}`],
+            [empresaId, `whatsapp:${id}`, id],
           );
           if (!credential.rowCount) {
-            throw new AdminValidationError("Cadastre o token Meta deste número antes de ativá-lo.");
+            throw new AdminValidationError("Cadastre uma credencial válida para este número antes de ativá-lo; conexões YCloud também precisam estar validadas.");
           }
         }
         effectiveChanges = nextStatus === "ativo" ? { ...changes } : { ...changes, principal: false };

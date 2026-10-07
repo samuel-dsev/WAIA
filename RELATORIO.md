@@ -1,7 +1,19 @@
 # Continuidade — WAIA
 
-Atualizado em 18/09/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 07/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Estado mais recente — YCloud, 07/10/2026
+
+- Deploy autorizado de v1.12.1 (`b780ae9`) concluído, sem promoção de main. Imagem `waia:1.12.1-b780ae9` idêntica na estação/VPS; API/worker saudáveis, readiness 200; migrações 021/022/024, contas públicas desligadas e F2/023 excluídas. Release anterior e imagem preservadas para rollback.
+- Backup de banco/mídia/manifesto verificado antes do deploy. Drive recusou OAuth (`invalid_grant`); alternativa AES-256-GCM copiada e autenticada na estação, com chave protegida separadamente. Renovação do Drive pendente. Evidência detalhada local: `.tmp/DEPLOY_V1.12.1_20261007.md`.
+- Assets do onboarding foram publicados com nomes que incluem o commit para contornar cache antigo do navegador; transformação somente de empacotamento, sem mudança de lógica. Automatizar/preservar esse procedimento em releases futuras.
+- Filaretti permanece em rascunho. API key e assinatura salvas no cofre pelo painel; teste de saúde real aprovou a conexão YCloud. Endpoint externo ativo para entrada/status. Número continua pendente/secundário: ativação pelo painel foi recusada pela exigência antiga de token Meta.
+- Correção local v1.12.2: ativação aceita a API key YCloud vinculada ao próprio número/empresa e conexão ativa; preserva o caminho Meta. Não configura clientes por SQL nem duplica credenciais Meta. Commit/push/publicação da correção aguardam aprovação.
+- Validação em snapshot de HEAD + correção, sem F2: suíte Node 22 concluída sem falhas (443 casos, 15 skips opt-in); testes Meta/YCloud em PostgreSQL 16 real: 2 aprovados, incluindo ativação, chave revogada e conexão pendente mesmo com token Meta genérico presente. Banco temporário isolado removido e PostgreSQL de waia-test devolvido ao estado parado. Falhas iniciais do harness (prontidão/permissões e fixture de revogação) corrigidas antes do resultado final.
+- Recebimento/envio de mensagem real e uso simultâneo no celular ainda não testados; IA/FAQ e publicação da empresa continuam pendentes.
+
+Os registros de preparação abaixo descrevem etapas anteriores ao deploy concluído acima.
 
 ## Integração YCloud — 07/10/2026
 

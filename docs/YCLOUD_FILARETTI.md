@@ -5,8 +5,9 @@ Atualizado em 07/10/2026. Escopo incremental: conector YCloud para atendimento p
 ## Estado
 
 - YCloud: número da Filaretti conectado pelo fluxo WhatsApp Business APP Coexistence; conta empresarial ainda indica `In process`.
-- WAIA em produção: empresa Filaretti Advocacia criada pelo painel como rascunho, sem ativação ou credenciais YCloud.
-- Conector v1.12.0 versionado no commit `9adaef0` e enviado à `origin/dev` após autorização. Nenhum webhook externo, mensagem real ou deploy realizado por esta implementação.
+- WAIA em produção: conector v1.12.1 (`b780ae9`) publicado com autorização; empresa Filaretti Advocacia em rascunho, API key e assinatura no cofre, saúde YCloud validada e webhook externo ativo para entrada/status.
+- Número ainda pendente/secundário por bloqueio antigo na ativação administrativa, que exigia token Meta mesmo em conexão YCloud. Correção v1.12.2 preparada e validada localmente; commit/push/publicação aguardam aprovação. A validação passa a exigir a chave YCloud vinculada ao próprio número/empresa e conexão ativa, preservando o fluxo Meta.
+- Mensagem real e uso simultâneo no celular ainda não testados. Atendimento/FAQ/IA e ativação da empresa permanecem pendentes.
 - Alterações anteriores de equipe/MFA (F2) permanecem no checkout. Não incluir automaticamente essas alterações na release do conector.
 
 ## Configuração após publicar o conector

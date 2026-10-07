@@ -130,7 +130,7 @@ test("ativação do número exige token Meta e troca o principal atomicamente", 
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (/SELECT status, principal FROM numeros_whatsapp/u.test(sql)) return { rows: [{ status: "pendente", principal: false }], rowCount: 1 };
-      if (/FROM credenciais_empresa/u.test(sql)) return { rows: hasCredential ? [{ "?column?": 1 }] : [], rowCount: hasCredential ? 1 : 0 };
+      if (/JOIN credenciais_empresa ce/u.test(sql)) return { rows: hasCredential ? [{ "?column?": 1 }] : [], rowCount: hasCredential ? 1 : 0 };
       if (/UPDATE numeros_whatsapp SET status/u.test(sql)) return { rows: [{ id: "number-1" }], rowCount: 1 };
       if (/AS "id".*FROM numeros_whatsapp r/u.test(sql)) return { rows: [{ id: "number-1", empresaId: TENANT_ID, status: "ativo", principal: true }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
@@ -141,7 +141,7 @@ test("ativação do número exige token Meta e troca o principal atomicamente", 
 
   await assert.rejects(
     repository.update({ resource: "numbers", empresaId: TENANT_ID, id: "number-1", changes: { status: "ativo", principal: true } }),
-    /token Meta/u,
+    /credencial válida/u,
   );
 
   hasCredential = true;

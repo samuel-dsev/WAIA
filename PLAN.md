@@ -1,11 +1,11 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 18/09/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 07/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
-Adendo de 07/10/2026: conector YCloud solicitado para a Filaretti e preparado localmente como v1.12.0. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5; commit/push autorizados em 07/10/2026, deploy pendente de autorização específica.
+Adendo de 07/10/2026: conector YCloud da Filaretti publicado em produção como v1.12.1 (`b780ae9`), com autorização explícita. Conexão validada pelo painel e webhook ativo na YCloud. A ativação do número encontrou validação administrativa ainda exclusiva da Meta; correção preparada como v1.12.2, aguardando aprovação de commit/push e publicação. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5.
 
-Preparação de deploy em 07/10/2026: v1.12.0 enviada em `9adaef0`; auditoria da imagem apontou dependências vulneráveis. Correção compatível preparada como v1.12.1, com zero vulnerabilidades e regressão isolada aprovada. Commit/push da correção autorizados em 07/10/2026. SSH restabelecido após regra de firewall explicitamente aprovada; preflight de produção, migrações e backup local em RELATORIO.md. Deploy pendente.
+Deploy de 07/10/2026: imagem v1.12.1 imutável validada em Node 22, com zero vulnerabilidades; migrações 021/022/024 aplicadas, sem F2/023. Serviços saudáveis e rollback preservado. Backup verificado e cópia cifrada na estação; renovação OAuth do backup Google Drive pendente. Evidência operacional em RELATORIO.md.
 
 ## Objetivo
 
