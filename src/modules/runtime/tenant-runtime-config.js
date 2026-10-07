@@ -16,6 +16,14 @@ function optionalText(value, path, options) {
   return requiredText(value, path, options);
 }
 
+function cooldownSeconds(value) {
+  if (value == null) return 0;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 604800) {
+    throw new TypeError("humanHandoff.cooldownSeconds deve ser inteiro entre 0 e 604800.");
+  }
+  return value;
+}
+
 function stringId(value, path) {
   const id = requiredText(value, path, { max: 100 });
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(id)) {
@@ -198,6 +206,7 @@ export function parseTenantRuntimeConfig(input) {
     humanHandoff: {
       message: optionalText(input.humanHandoff?.message, "humanHandoff.message", { max: 1000 }),
       channel: optionalText(input.humanHandoff?.channel, "humanHandoff.channel", { max: 300 }),
+      cooldownSeconds: cooldownSeconds(input.humanHandoff?.cooldownSeconds),
     },
   };
 

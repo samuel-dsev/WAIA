@@ -3,6 +3,15 @@
 Atualizado em 07/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Retomada após encaminhamento — 07/10/2026
+
+- Pedido específico: o mesmo lead deve voltar ao atendimento normal ao enviar mensagem após o encaminhamento; prazo de teste de 60 segundos, posteriormente configurável em horas.
+- Preparada v1.13.0: `humanHandoff.cooldownSeconds` configurável pelo onboarding, de 0 a 604800 segundos; 0 preserva a pausa manual anterior. O prazo fica no estado persistido da conversa e não reinicia a cada mensagem. Na espera, o worker não prepara/envia resposta; vencido o prazo, processa a mensagem atual pelo roteiro normal. Não envia mensagem espontânea ao vencer.
+- Handoff temporizado mantém o modo bot com estado `waiting_operator`; pausas manuais e modo humano continuam bloqueados pelo worker. Estado antigo em modo bot usa o instante persistido da espera; modo pausado antigo requer retomada manual pelo painel para não desfazer decisões de operadores.
+- Escopo geral compatível, sem código especial por cliente, migração ou segredo. Configuração de 60 segundos da Filaretti será feita pelo painel após publicação desta capacidade. Alterações anteriores de F2 preservadas e excluídas da candidata.
+- Testes específicos e regressão de configuração/runtime: 24 aprovados, sem falhas. Candidata de HEAD `d24735e` + somente os 12 arquivos desta alteração, sem F2: suíte completa no host e em Node 22 no Docker; Node 22 com 448 casos, 433 aprovados, 15 skips opt-in, zero falhas. `git diff --check` aprovado. Testes usam relógio controlado/adapters sintéticos; PostgreSQL/Redis opt-in e WhatsApp real não executados nesta mudança. Commit/push e deploy ainda dependem das autorizações próprias do projeto.
+- Contexto anterior confirmado na conversa: v1.12.2 publicada e integração/coexistência confirmadas pelo usuário; roteiro da Filaretti revisão 36 publicado pelo painel. Os registros abaixo sobre pendências de v1.12.2 descrevem etapas anteriores.
+
 ## Estado mais recente — YCloud, 07/10/2026
 
 - Deploy autorizado de v1.12.1 (`b780ae9`) concluído, sem promoção de main. Imagem `waia:1.12.1-b780ae9` idêntica na estação/VPS; API/worker saudáveis, readiness 200; migrações 021/022/024, contas públicas desligadas e F2/023 excluídas. Release anterior e imagem preservadas para rollback.

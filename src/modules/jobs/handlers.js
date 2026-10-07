@@ -265,6 +265,7 @@ export function createWorkerHandlers({
   googleSheetsIntegration,
   logger = console,
   firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
+  clock = () => new Date(),
 } = {}) {
   if (typeof repository?.inboundMessage !== "function") throw new TypeError("repository.inboundMessage e obrigatorio.");
   if (typeof repository?.statusEvent !== "function") throw new TypeError("repository.statusEvent e obrigatorio.");
@@ -359,6 +360,7 @@ export function createWorkerHandlers({
         if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
         const runtime = createConfiguredTenantRuntime({
           definition,
+          clock,
           stateRepository: createRuntimeStateRepository(conversationService),
           orderRepository,
           appointmentRepository,
@@ -404,6 +406,9 @@ export function createWorkerHandlers({
           mediaSizeBytes: message.mediaSizeBytes,
           mediaSha256: message.mediaSha256,
         });
+      }
+      if (reply.code === "HANDOFF_COOLDOWN") {
+        return { skipped: true, reason: "handoff_cooldown" };
       }
       if (repository.prepareReply) {
         prepared = await repository.prepareReply({

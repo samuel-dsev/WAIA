@@ -279,7 +279,15 @@ function appointmentsHandler({ appointmentRepository, logger }) {
   };
 }
 
-function handoffHandler({ handoffRepository }) {
+function waitingHandoffState(config, clock) {
+  const seconds = config.humanHandoff.cooldownSeconds;
+  return {
+    module: "human_handoff", step: "waiting_operator",
+    data: seconds > 0 ? { resumeAt: new Date(Number(clock()) + seconds * 1000).toISOString() } : {},
+  };
+}
+
+function handoffHandler({ handoffRepository, clock }) {
   return {
     key: "human_handoff",
     actions: ["human_handoff.request"],
@@ -291,10 +299,11 @@ function handoffHandler({ handoffRepository }) {
           conversationId: input.conversationId,
           contactId: input.contactId,
           idempotencyKey: `handoff:${input.conversationId}`,
+          ...(config.humanHandoff.cooldownSeconds > 0 ? { cooldownSeconds: config.humanHandoff.cooldownSeconds } : {}),
         });
       }
       return {
-        state: { ...state, module: "human_handoff", step: "waiting_operator", data: {} },
+        state: { ...state, ...waitingHandoffState(config, clock) },
         reply: reply(config.humanHandoff.message || `A automação foi pausada. A equipe de ${config.identity.name} continuará o atendimento.${config.humanHandoff.channel ? ` Contato: ${config.humanHandoff.channel}` : ""}`),
       };
     },
@@ -378,7 +387,7 @@ function flowReply(effects, config, executionState) {
   return reply(texts.join("\n\n"), buttons);
 }
 
-function flowHandler({ flowRepository, handoffRepository }) {
+function flowHandler({ flowRepository, handoffRepository, clock }) {
   return {
     key: "flows",
     actions: ["flows.start", "flows.continue", "flows.cancel"],
@@ -490,10 +499,11 @@ function flowHandler({ flowRepository, handoffRepository }) {
             conversationId: input.conversationId,
             contactId: input.contactId,
             idempotencyKey: `flow-handoff:${persisted.id}`,
+            ...(config.humanHandoff.cooldownSeconds > 0 ? { cooldownSeconds: config.humanHandoff.cooldownSeconds } : {}),
           });
         }
         return {
-          state: { module: "human_handoff", step: "waiting_operator", data: {} },
+          state: waitingHandoffState(config, clock),
           reply: rendered,
         };
       }
@@ -518,6 +528,7 @@ export function createCanonicalModuleDefinitions({
   integrationsHandler,
   flowRepository,
   logger = console,
+  clock = () => new Date(),
 } = {}) {
   return [
     catalogHandler(),
@@ -525,9 +536,9 @@ export function createCanonicalModuleDefinitions({
     eventsHandler(),
     appointmentsHandler({ appointmentRepository, logger }),
     paymentsHandler(),
-    handoffHandler({ handoffRepository }),
+    handoffHandler({ handoffRepository, clock }),
     delegatedHandler("ai_freeform", "ai_freeform.reply", aiHandler),
     delegatedHandler("external_integrations", "external_integrations.run", integrationsHandler),
-    flowHandler({ flowRepository, handoffRepository }),
+    flowHandler({ flowRepository, handoffRepository, clock }),
   ];
 }

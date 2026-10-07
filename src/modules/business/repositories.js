@@ -10,7 +10,7 @@ export function createRuntimeStateRepository(conversationService) {
     async load({ empresaId, conversationId }) {
       const state = await conversationService.getState({ empresaId, conversationId });
       if (state.flowKey === "idle" && state.stage === "idle") return null;
-      return { module: state.flowKey, step: state.stage, data: state.data || {}, version: state.version };
+      return { module: state.flowKey, step: state.stage, data: state.data || {}, version: state.version, updatedAt: state.updatedAt };
     },
     async save({ empresaId, conversationId }, state) {
       const current = await conversationService.getState({ empresaId, conversationId });
@@ -199,7 +199,9 @@ export class PostgresAppointmentRepository {
 
 export class ConversationHandoffRepository {
   constructor(conversationService) { this.conversationService = conversationService; }
-  request({ empresaId, conversationId }) {
+  request({ empresaId, conversationId, cooldownSeconds = 0 }) {
+    // A espera temporizada pertence ao runtime. Pausas manuais continuam soberanas.
+    if (cooldownSeconds > 0) return { requested: true };
     return this.conversationService.pauseBot({ empresaId, conversationId });
   }
 }

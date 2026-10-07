@@ -121,15 +121,31 @@ export function createTenantRuntimeRouter({
   async function handle(input) {
     if (!input?.conversationId) throw new TypeError("input.conversationId é obrigatório.");
     const stateContext = { empresaId: config.empresaId, conversationId: input.conversationId };
-    const state = await stateRepository.load(stateContext) || { module: null, step: null, data: {} };
+    let state = await stateRepository.load(stateContext) || { module: null, step: null, data: {} };
     if (state.module === "human_handoff" && state.step === "waiting_operator") {
-      return {
-        source: "deterministic",
-        module: "human_handoff",
-        code: "AUTOMATION_PAUSED",
-        text: config.humanHandoff.message || "A automação está pausada enquanto você aguarda um operador.",
-        buttons: [],
-      };
+      if (config.humanHandoff.cooldownSeconds > 0) {
+        const now = Number((dependencies.clock || (() => new Date()))());
+        let resumeAt = Date.parse(state.data?.resumeAt);
+        if (!Number.isFinite(resumeAt)) {
+          const since = Date.parse(state.updatedAt);
+          resumeAt = (Number.isFinite(since) ? since : now) + config.humanHandoff.cooldownSeconds * 1000;
+          state = { ...state, data: { ...state.data, resumeAt: new Date(resumeAt).toISOString() } };
+          await stateRepository.save(stateContext, state);
+        }
+        if (now < resumeAt) {
+          return { source: "deterministic", module: "human_handoff", code: "HANDOFF_COOLDOWN", text: "", buttons: [] };
+        }
+        await stateRepository.save(stateContext, null);
+        state = { module: null, step: null, data: {} };
+      } else {
+        return {
+          source: "deterministic",
+          module: "human_handoff",
+          code: "AUTOMATION_PAUSED",
+          text: config.humanHandoff.message || "A automação está pausada enquanto você aguarda um operador.",
+          buttons: [],
+        };
+      }
     }
     if (input.resetToMenu === true) {
       if (state.module === "flows") {

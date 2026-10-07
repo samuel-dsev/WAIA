@@ -156,6 +156,7 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
       humanHandoff: {
         message: config.humanHandoff.message,
         channel: config.humanHandoff.channel,
+        cooldownSeconds: config.humanHandoff.cooldownSeconds,
       },
     },
     publicReplies: config.publicReplies.map((reply) => ({

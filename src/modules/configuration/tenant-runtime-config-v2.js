@@ -134,7 +134,7 @@ const DRAFT_OBJECT_SCHEMAS = Object.freeze([
   [ /^\/orders$/u, [
     "pendingStatus", "selectionPrompt", "paymentPrompt", "receiptPrompt", "namePrompt", "successMessage",
   ] ],
-  [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef"] ],
+  [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef", "cooldownSeconds"] ],
   [ /^\/ai$/u, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
     "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion",
@@ -545,11 +545,14 @@ function parseOrders(value, path) {
 
 function parseHumanHandoff(value, path) {
   const object = plainObject(value, path, { optional: true });
-  allowedKeys(object, path, ["message", "channel", "assigneeRef"]);
+  allowedKeys(object, path, ["message", "channel", "assigneeRef", "cooldownSeconds"]);
   return {
     message: text(object.message, pointer(path, "message"), { max: 1_000, optional: true }),
     channel: text(object.channel, pointer(path, "channel"), { max: 300, optional: true }),
     assigneeRef: reference(object.assigneeRef, pointer(path, "assigneeRef"), { optional: true, type: "user" }),
+    ...(object.cooldownSeconds == null ? {} : {
+      cooldownSeconds: integer(object.cooldownSeconds, pointer(path, "cooldownSeconds"), { min: 0, max: 604800 }),
+    }),
   };
 }
 
