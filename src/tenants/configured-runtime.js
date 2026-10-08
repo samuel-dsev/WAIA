@@ -223,7 +223,9 @@ export function loadConfiguredTenant(definition) {
 
 export function createConfiguredTenantRuntime({ definition, stateRepository, ...dependencies } = {}) {
   const config = loadConfiguredTenant(definition);
-  const followUpQuestion = definition.ai?.followUpQuestion == null
+  const hasScript = definition.ai?.enabled === true && Boolean(String(definition.ai?.prompt || "").trim())
+    && config.enabledModules.includes("ai_freeform");
+  const followUpQuestion = hasScript || definition.ai?.followUpQuestion == null
     ? null
     : requiredText(definition.ai.followUpQuestion, "ai.followUpQuestion", 300);
   const defaultAiHandler = async () => ({
@@ -262,6 +264,9 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     const text = normalized(input?.text);
     if (!text) return router.handle(input);
     if (extensions.greetings.has(text)) return router.handle({ ...input, resetToMenu: true });
+    if (config.menu.options.some((option) => normalized(option.id) === text || normalized(option.label) === text)) {
+      return router.handle(input);
+    }
     if (paymentCompletionIntent(text)) return router.handle({ ...input, preferContinuation: true });
     const selectedEvent = eventIntent(text, config);
     if (selectedEvent) {
@@ -273,8 +278,9 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     }
     const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
     if (alias) return router.handle({ ...input, action: alias.action, payload: alias.payload });
-    if (extensions.fallbackAction) {
-      return router.handle({ ...input, action: extensions.fallbackAction, actionSource: "fallback" });
+    const fallbackAction = hasScript ? "ai_freeform.reply" : extensions.fallbackAction;
+    if (fallbackAction) {
+      return router.handle({ ...input, action: fallbackAction, actionSource: "fallback" });
     }
     return router.handle(input);
   }

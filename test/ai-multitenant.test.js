@@ -54,9 +54,10 @@ function setup({ configs, histories = {}, responder, secretResolver, timeoutMs =
     },
   };
   const clientFactory = new MemoryResponsesClientFactory(responder);
+  const configResolver = new MemoryAiConfigResolver(configs);
   const ledger = new MemoryAiLedger({ clock: () => new Date("2026-08-15T12:00:00Z") });
   const service = new MultiTenantAiService({
-    configResolver: new MemoryAiConfigResolver(configs),
+    configResolver,
     conversationService,
     clientFactory,
     secretResolver: secretResolver || new MemoryAiSecretResolver({ sharedSecret: "shared-test-key" }),
@@ -69,8 +70,26 @@ function setup({ configs, histories = {}, responder, secretResolver, timeoutMs =
     clock: () => new Date("2026-08-15T12:00:00Z"),
     logger: { warn() {} },
   });
-  return { service, clientFactory, ledger, historyRequests };
+  return { service, clientFactory, ledger, historyRequests, configResolver };
 }
+
+test("cada resposta recebe o roteiro inteiro e a configuração atual, acima do estilo complementar", async () => {
+  const roteiro = `INÍCIO DO ROTEIRO\n${"Orientação detalhada.\n".repeat(800)}FIM DO ROTEIRO`;
+  const ai = setup({ configs: [config("tenant-a", { prompt: roteiro, personality: "Tom complementar" })],
+    responder: async () => ({ output_text: "Resposta.", usage: { input_tokens: 10, output_tokens: 2 } }) });
+  for (const id of ["primeira", "segunda"]) {
+    assert.equal((await ai.service.reply(request("tenant-a", { messageId: id }))).source, "ai");
+  }
+  for (const { request: call } of ai.clientFactory.requests) {
+    assert.ok(call.instructions.includes(roteiro));
+    assert.match(call.instructions, /prioridade sobre o estilo complementar/u);
+    assert.ok(call.instructions.indexOf("Tom complementar") < call.instructions.indexOf(roteiro));
+  }
+  ai.configResolver.set(config("tenant-a", { prompt: "NOVO ROTEIRO\nPeça somente o nome.", version: 4 }));
+  await ai.service.reply(request("tenant-a", { messageId: "terceira" }));
+  assert.match(ai.clientFactory.requests.at(-1).request.instructions, /NOVO ROTEIRO\nPeça somente o nome\./u);
+  assert.doesNotMatch(ai.clientFactory.requests.at(-1).request.instructions, /FIM DO ROTEIRO/u);
+});
 
 test("prompt, contexto e histórico permanecem isolados por empresa", async () => {
   const setupAi = setup({

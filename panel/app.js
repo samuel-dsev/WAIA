@@ -1,4 +1,5 @@
 import { createOnboardingWizard } from "./onboarding.js";
+import { createAttendanceScriptEditor, scriptSaveRequest } from "./attendance-script.js";
 
 const API_BASE = "/api/admin";
 const REFRESH_INTERVAL_MS = 30_000;
@@ -230,6 +231,8 @@ const state = {
   requestController: null,
   receiptObjectUrl: null,
   onboardingWizard: null,
+  settingsScriptDirty: false,
+  settingsScriptSaving: false,
 };
 
 const elements = Object.fromEntries([
@@ -464,6 +467,7 @@ async function navigate(view, { updateHash = true } = {}) {
     toast("Você não possui permissão para essa área.");
     return;
   }
+  if (!await leaveSettingsScript()) return;
   if (state.currentView === "onboarding" && next !== "onboarding" && !await disposeOnboardingWizard()) return;
   state.currentView = next;
   state.page = 1;
@@ -500,6 +504,7 @@ function addViewActions(view) {
 }
 
 async function loadCurrentView({ silent = false } = {}) {
+  if (!await leaveSettingsScript()) return;
   const definition = VIEW_DEFINITIONS[state.currentView];
   state.requestController?.abort();
   state.requestController = new AbortController();
@@ -759,19 +764,23 @@ async function loadSettings(signal) {
     setContentState("empty", "Selecione uma empresa para configurar módulos e integrações.");
     return;
   }
-  const [modules, aiConfig, integrations, runtimeConfig, credentials] = await Promise.all([
+  const [modules, aiConfig, integrations, runtimeConfig, credentials, draft] = await Promise.all([
     apiFetch(`${base}/modules`, { signal }),
     apiFetch(`${base}/ai-config`, { signal }),
     apiFetch(`${base}/integrations`, { signal }),
     apiFetch(`${base}/runtime-config`, { signal }),
     apiFetch(`${base}/credentials`, { signal }),
+    apiFetch(`${base}/configuration/draft`, { signal }).catch((error) => {
+      if (error.status === 404) return null;
+      throw error;
+    }),
   ]);
-  elements.viewContent.replaceChildren(settingsForm(modules, aiConfig, integrations, runtimeConfig, credentials));
+  elements.viewContent.replaceChildren(settingsForm(modules, aiConfig, integrations, runtimeConfig, credentials, draft, base));
   elements.pagination.hidden = true;
   setContentState(null);
 }
 
-function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePayload, credentialPayload) {
+function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePayload, credentialPayload, draft, base) {
   const wrapper = node("div", "panel-grid");
   const enabledModules = new Set(listFrom(modulePayload).filter((item) => item.enabled !== false).map((item) => item.moduleKey || item.key || item.module));
   const modulesCard = node("section", "panel-card");
@@ -806,6 +815,46 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   runtimeCard.append(runtimeList, button("Editar atendimento", () => openRuntimeConfig(runtimeConfig), "button button-secondary"));
 
   const ai = listFrom(aiPayload)[0] || aiPayload?.data || aiPayload || {};
+  const scriptForm = document.createElement("form");
+  const script = createAttendanceScriptEditor({
+    value: draft?.configuration ? draft.configuration.ai?.prompt || "" : ai.prompt || "",
+    onInput: () => { state.settingsScriptDirty = true; },
+  });
+  const saveScript = button(draft ? "Salvar roteiro no rascunho" : "Salvar roteiro", null, "button button-primary", "submit");
+  const scriptStatus = paragraph(draft
+    ? "Após salvar, revise e publique pelo onboarding para aplicar o roteiro ao atendimento. A IA para perguntas livres precisa estar habilitada."
+    : "O roteiro salvo será utilizado nas próximas respostas da IA, quando ela estiver habilitada.");
+  scriptStatus.setAttribute("role", "status");
+  scriptForm.append(script.root, scriptStatus, saveScript);
+  if (draft) scriptForm.append(button("Revisar e publicar no onboarding", () => navigate("onboarding"), "button button-secondary"));
+  scriptForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (state.settingsScriptSaving || !scriptForm.reportValidity()) return;
+    state.settingsScriptSaving = true;
+    saveScript.disabled = true;
+    script.textarea.disabled = true;
+    script.root.querySelector("button").disabled = true;
+    try {
+      const request = scriptSaveRequest({ base, draft, value: script.textarea.value.trim() });
+      const result = await apiFetch(request.path, { method: request.method, body: request.body });
+      if (draft) draft = result;
+      state.settingsScriptDirty = false;
+      scriptStatus.textContent = draft ? "Roteiro salvo no rascunho. Revise e publique no onboarding para aplicá-lo." : "Roteiro salvo.";
+      toast(scriptStatus.textContent);
+    } catch (error) {
+      if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+      scriptStatus.textContent = error.status === 409
+        ? "O rascunho foi alterado por outra edição. Copie seu roteiro antes de atualizar a página e tentar novamente."
+        : error.message || "Não foi possível salvar o roteiro. Seu texto foi preservado.";
+      toast(scriptStatus.textContent);
+    } finally {
+      state.settingsScriptSaving = false;
+      saveScript.disabled = false;
+      script.textarea.disabled = false;
+      script.root.querySelector("button").disabled = false;
+    }
+  });
+  runtimeCard.append(scriptForm);
   const aiCard = node("section", "panel-card");
   aiCard.append(nodeWithText("h2", "Configuração da IA"));
   const aiList = node("dl", "detail-list");
@@ -875,7 +924,7 @@ function openAiConfig(current, credentials = []) {
   openFormDialog("Configuração da IA", [
     ["enabled", "IA habilitada", "select", true, [["false", "Não"], ["true", "Sim"]]],
     ["provider", "Provedor", "select", true, [["openai", "OpenAI"], ["simulado", "Simulado (desenvolvimento)"]]],
-    ["model", "Modelo", "text", true], ["prompt", "Prompt", "text", false],
+    ["model", "Modelo", "text", true],
     ["personality", "Personalidade", "text", false],
     ["keyType", "Tipo de chave", "select", true, [["compartilhada", "Compartilhada"], ["propria", "Própria"]]],
     ["ownCredentialId", "Credencial própria", "select", false, [["", "Selecionar"], ...credentials.filter((credential) => credential.provider === "openai").map((credential) => [credential.id, `${credential.purpose} · ${credential.maskedSecret || "mascarada"}`])]],
@@ -1424,10 +1473,21 @@ function startRefresh() {
 
 function canAutoRefreshCurrentView() {
   return document.visibilityState === "visible"
+    && !state.settingsScriptDirty && !state.settingsScriptSaving
+    && !document.activeElement?.closest(".attendance-script")
+    && !document.querySelector("dialog.attendance-script-dialog[open]")
     && !elements.appShell.hidden
     && state.currentView !== "onboarding"
     && !elements.detailDialog.open
     && !document.querySelector("dialog.wizard-dialog[open]");
+}
+
+async function leaveSettingsScript() {
+  if (state.settingsScriptSaving) { toast("Aguarde o salvamento do roteiro."); return false; }
+  if (!state.settingsScriptDirty) return true;
+  if (!await confirmAction("Há alterações no roteiro que ainda não foram salvas. Deseja descartá-las?", "Roteiro não salvo")) return false;
+  state.settingsScriptDirty = false;
+  return true;
 }
 
 function stopRefresh() {
@@ -1463,6 +1523,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
 });
 
 elements.logoutButton.addEventListener("click", async () => {
+  if (!await leaveSettingsScript()) return;
   if (!await disposeOnboardingWizard()) return;
   try { await apiFetch("/auth/logout", { method: "POST", body: {} }); } catch { /* sessão local será encerrada */ }
   showLogin("Sessão encerrada com segurança.");
@@ -1495,6 +1556,10 @@ elements.primaryNav.addEventListener("click", (event) => {
 elements.tenantSelect.addEventListener("change", async () => {
   const previousTenantId = state.selectedEmpresaId;
   const nextTenantId = elements.tenantSelect.value;
+  if (!await leaveSettingsScript()) {
+    elements.tenantSelect.value = previousTenantId;
+    return;
+  }
   if (!await disposeOnboardingWizard()) {
     elements.tenantSelect.value = previousTenantId;
     return;
@@ -1548,6 +1613,9 @@ elements.detailDialog.addEventListener("close", () => {
   state.receiptObjectUrl = null;
 });
 window.addEventListener("hashchange", () => state.session && navigate(location.hash.slice(1), { updateHash: false }));
+window.addEventListener("beforeunload", (event) => {
+  if (state.settingsScriptDirty || state.settingsScriptSaving) { event.preventDefault(); event.returnValue = ""; }
+});
 document.addEventListener("visibilitychange", () => {
   if (state.refreshEnabled && state.session && canAutoRefreshCurrentView()) loadCurrentView({ silent: true });
 });

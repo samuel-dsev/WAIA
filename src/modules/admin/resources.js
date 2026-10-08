@@ -45,7 +45,7 @@ const definitions = {
     write: "admin",
     singleton: true,
     fields: {
-      enabled: "boolean", provider: "string", model: "string", prompt: "string?", personality: "string?",
+      enabled: "boolean", provider: "string", model: "string", prompt: "script?", personality: "string?",
       keyType: "string", ownCredentialId: "string?", monthlyTokenLimit: "number?", monthlyCostLimit: "number?",
       alertPercent: "number", maxHistoryMessages: "number", maxOutputTokens: "number", fallbackMessage: "string?",
     },

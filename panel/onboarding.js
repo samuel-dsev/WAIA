@@ -1,3 +1,5 @@
+import { createAttendanceScriptEditor } from "./attendance-script.js";
+
 const STEPS = Object.freeze([
   [1, "Empresa", "Identidade, idioma e retenção"],
   [2, "Módulos", "Capacidades e dependências"],
@@ -552,7 +554,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
   }
 
   function renderService(root) {
-    const card = section("3. Atendimento", "Tudo aqui é público. Credenciais e chaves devem ser cadastradas somente no cofre.");
+    const card = section("3. Atendimento", "Configure as respostas predefinidas e o roteiro da IA. Credenciais e chaves devem ser cadastradas somente no cofre.");
     const identity = state.configuration.identity;
     const handoff = state.configuration.humanHandoff;
     const schema = [
@@ -573,6 +575,15 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       Object.assign(identity, { welcomeMessage: values.welcomeMessage, fallbackMessage: values.fallbackMessage, address: values.address, schedules: values.schedules, publicRules: values.publicRules, establishmentRules: values.establishmentRules, privacyPolicy: values.privacyPolicy, consentText: values.consentText });
       state.configuration.humanHandoff = { message: values.handoffMessage, channel: values.handoffChannel, cooldownSeconds: Number(values.cooldownSeconds), ...(values.assigneeRef ? { assigneeRef: values.assigneeRef } : {}) };
     }));
+    const script = createAttendanceScriptEditor({ value: state.configuration.ai.prompt || "", onInput: (value) => {
+      state.configuration.ai.prompt = value;
+      scheduleSave();
+    } });
+    const scriptError = element("span", "field-error");
+    scriptError.setAttribute("role", "alert");
+    state.issueNodes.set("ai.prompt", scriptError);
+    script.root.append(scriptError);
+    card.append(script.root);
     root.append(card);
   }
 
@@ -838,7 +849,6 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       { name: "provider", path: "ai.provider", label: "Provedor", value: ai.provider || "openai", type: "select", options: [["openai", "OpenAI"], ["simulated", "Simulado (sem chamada externa)"]] },
       { name: "model", path: "ai.model", label: "Modelo", value: ai.model || "", required: true },
       { name: "personality", path: "ai.personality", label: "Personalidade", value: ai.personality || "", type: "textarea" },
-      { name: "prompt", path: "ai.prompt", label: "Instruções públicas", value: ai.prompt || "", type: "textarea", rows: 6, required: true },
       { name: "maxOutputTokens", path: "ai.maxOutputTokens", label: "Máximo de tokens por resposta", value: ai.maxOutputTokens, type: "number", valueType: "number", min: 1, max: 16384 },
       { name: "monthlyTokenLimit", path: "ai.monthlyTokenLimit", label: "Limite mensal de tokens", value: ai.monthlyTokenLimit, type: "number", valueType: "number", min: 1 },
       { name: "monthlyCostLimit", path: "ai.monthlyCostLimit", label: "Limite mensal de custo", value: ai.monthlyCostLimit, type: "number", valueType: "number", min: 0 },

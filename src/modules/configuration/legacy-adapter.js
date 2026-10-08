@@ -177,6 +177,8 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
       fallbackAction: config.routing.fallbackAction,
     },
     ai: {
+      enabled: config.ai.enabled,
+      prompt: config.ai.prompt,
       fallbackMessage: config.ai.fallbackMessage,
       followUpQuestion: config.ai.followUpQuestion,
     },

@@ -1,7 +1,15 @@
 # Continuidade — WAIA
 
-Atualizado em 07/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 08/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Roteiro único da IA — 08/10/2026
+
+- Pedido específico implementado localmente em `dev`, sobre HEAD `696bfbe`: v1.14.0. Campo único do contrato existente `ai.prompt`, visível em Módulos e configurações / Identidade e atendimento e na etapa Atendimento do onboarding. Editor ampliado ocupa a tela, mantém o texto ao fechar/Escape e protege edições contra atualização automática, navegação e troca de empresa.
+- Saudações, menu, aliases e respostas públicas passam antes da IA. Com roteiro preenchido e IA habilitada, texto sem predefinição usa IA mesmo quando o fallback anterior não a selecionava. Cada requisição recebe o roteiro integral, acima do estilo complementar e do histórico, respeitando regras da plataforma. Pergunta complementar automática desativada nesse caso. Pausa humana, cooldown e continuações transacionais preservados.
+- O painel salva o rascunho V2 com revisão otimista; a aplicação ao runtime exige revisão/publicação pelo onboarding. Sem rascunho, mantém a API legada e passa a aceitar roteiro multilinha de até 20000 caracteres. Nenhuma migração, credencial, configuração de empresa real ou chamada externa nesta alteração.
+- Checkout completo em Node 24: 457 casos, 441 aprovados, 16 skips opt-in, zero falhas. Candidata isolada de HEAD + somente esta atualização, sem F2/equipe/MFA, em Node 22 no Docker sem rede: 453 casos, 438 aprovados, 15 skips opt-in, zero falhas. `git diff --check` aprovado. Navegador com API sintética: carregamento do roteiro V2, tela cheia, Escape, preservação do texto, proteção de descarte, salvamento e recarga conferidos; diálogo medido em 1280 × 720, sem overflow interno.
+- Alterações anteriores de equipe/MFA preservadas e excluídas da candidata; `panel/app.js` contém hunks dos dois trabalhos e exige seleção parcial no commit. Arquivos, limitações e mensagem proposta em [ROTEIRO_ATENDIMENTO.md](docs/ROTEIRO_ATENDIMENTO.md). Usuário autorizou explicitamente commit, push e deploy na VPS em 08/10/2026, após apresentação do conjunto; execução em andamento. Testes locais não comprovam PostgreSQL/Redis opt-in, atendimento real no WhatsApp ou aderência de respostas reais da IA.
 
 ## Retomada após encaminhamento — 07/10/2026
 

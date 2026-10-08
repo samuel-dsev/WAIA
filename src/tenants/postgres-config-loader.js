@@ -150,6 +150,7 @@ export class PostgresTenantDefinitionRepository {
         );
       }
       const settingsResult = await client.query("SELECT * FROM configuracoes_empresa WHERE empresa_id = $1", [empresaId]);
+      const aiResult = await client.query("SELECT habilitada, prompt FROM configuracoes_ia WHERE empresa_id = $1", [empresaId]);
       const modulesResult = await client.query("SELECT module_key, configuracao FROM modulos_empresa WHERE empresa_id = $1 AND habilitado", [empresaId]);
       const menuResult = await client.query(
           `SELECT m.mensagem, i.action_key, i.titulo, i.posicao
@@ -251,6 +252,8 @@ export class PostgresTenantDefinitionRepository {
         publicReplies: [...configuredReplies.filter((reply) => !dynamicActions.has(reply?.action)), ...dynamicReplies],
         routing: settings.roteamento || {},
         ai: {
+          enabled: aiResult.rows[0]?.habilitada === true,
+          prompt: aiResult.rows[0]?.prompt || "",
           fallbackMessage: settings.mensagem_fallback,
           followUpQuestion: settings.roteamento?.aiFollowUpQuestion || null,
         },

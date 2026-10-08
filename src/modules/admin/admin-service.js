@@ -108,6 +108,14 @@ function validateField(type, value, field) {
   const baseType = optional ? type.slice(0, -1) : type;
   if (value == null && optional) return null;
   if (value == null) throw new AdminValidationError(`${field} é obrigatório.`, { field });
+  if (baseType === "script") {
+    if (typeof value !== "string") throw new AdminValidationError(`${field} deve ser texto.`, { field });
+    const script = value.replace(/\r\n?/gu, "\n").trim();
+    if (!script || script.length > 20_000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(script)) {
+      throw new AdminValidationError("O roteiro deve ter entre 1 e 20000 caracteres.", { field });
+    }
+    return script;
+  }
   if (baseType === "string") return requiredText(value, field, 10_000);
   if (baseType === "email") {
     const email = requiredText(value, field, 320).toLowerCase();
