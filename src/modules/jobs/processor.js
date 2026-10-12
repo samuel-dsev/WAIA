@@ -109,6 +109,9 @@ export function createJobProcessor({
           void recordMetric(metrics, "increment", "waia_jobs_duplicate_total");
           return { outcome: "duplicate", reference };
         }
+        if (["busy", "deferred"].includes(claimed?.outcome)) {
+          return { outcome: "deferred", deferUntil: claimed.deferUntil || new Date(Date.now() + 1_000).toISOString() };
+        }
         if (claimed?.outcome !== "claimed") {
           throw new RetryableJobError("Job ainda não pode ser processado em ordem.", "JOB_NOT_CLAIMED");
         }
@@ -120,12 +123,19 @@ export function createJobProcessor({
           throw error;
         }
 
-        const result = await handler(reference, claimed.record);
+        const result = await handler(reference, claimed.record, { canContinue: () => !lockLost });
         if (lockLost) throw new RetryableJobError("Lease de processamento foi perdido.", "PROCESSING_LEASE_LOST");
+        if (result?.deferUntil) {
+          if (!Number.isFinite(Date.parse(result.deferUntil))) throw new TypeError("Horário de envio inválido.");
+          requireMethod(repository, "defer", "repository");
+          await repository.defer(reference, { until: result.deferUntil });
+          return { outcome: "deferred", deferUntil: result.deferUntil };
+        }
         await repository.complete(reference, { attempt, result });
         void recordMetric(metrics, "increment", "waia_jobs_completed_total");
         return { outcome: "completed", reference, result };
       } catch (error) {
+        if (error?.code === "CONVERSATION_BUSY") return { outcome: "deferred", deferUntil: new Date(Date.now() + 1_000).toISOString() };
         await recordFailure(error);
         throw error;
       } finally {

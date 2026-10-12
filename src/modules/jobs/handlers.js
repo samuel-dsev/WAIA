@@ -1,6 +1,7 @@
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
+import { randomInt } from "node:crypto";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -147,6 +148,7 @@ export class PostgresJobHandlerRepository {
         id: row.id,
         text: row.corpo,
         buttons: row.outbound_payload?.buttons || [],
+        sendNotBefore: row.outbound_payload?.sendNotBefore || null,
         externalMessageId: row.external_message_id,
         status: row.status,
       };
@@ -175,17 +177,40 @@ export class PostgresJobHandlerRepository {
           empresaId, message.conversationId, message.contactId, message.numeroWhatsappId,
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
-          message.id, JSON.stringify({ buttons: reply.buttons || [] }),
+          message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}) }),
         ],
       )).rows[0];
-      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], status: row.status };
+      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
       const existing = (await client.query(
         `SELECT id, corpo, outbound_payload, external_message_id, status
            FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
         [empresaId, message.id],
       )).rows[0];
-      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], externalMessageId: existing.external_message_id, status: existing.status };
+      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, externalMessageId: existing.external_message_id, status: existing.status };
     });
+  }
+
+  canSendBotReply({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (await client.query(
+      `SELECT 1 FROM mensagens m
+         JOIN conversas c ON c.empresa_id = m.empresa_id AND c.id = m.conversa_id
+         JOIN contatos ct ON ct.empresa_id = m.empresa_id AND ct.id = m.contato_id
+         JOIN numeros_whatsapp n ON n.empresa_id = m.empresa_id AND n.id = m.numero_whatsapp_id
+        WHERE m.empresa_id = $1 AND m.id = $2 AND m.redacted_at IS NULL
+          AND c.status = 'aberta' AND c.modo_atendimento = 'bot'
+          AND ct.deleted_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
+          AND n.deleted_at IS NULL AND n.status = 'ativo'`,
+      [empresaId, messageId],
+    )).rowCount > 0);
+  }
+
+  cancelPreparedReply({ empresaId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
+      `UPDATE mensagens SET status = 'ignorada_duplicidade', updated_at = now()
+        WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'
+          AND external_message_id IS NULL AND status IN ('processando', 'enfileirada')`,
+      [empresaId, messageId],
+    ));
   }
 
   markReplySent({ empresaId, replyId, externalMessageId }) {
@@ -266,6 +291,7 @@ export function createWorkerHandlers({
   logger = console,
   firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
   clock = () => new Date(),
+  aiReplyDelayMs = () => randomInt(30_000, 45_001),
 } = {}) {
   if (typeof repository?.inboundMessage !== "function") throw new TypeError("repository.inboundMessage e obrigatorio.");
   if (typeof repository?.statusEvent !== "function") throw new TypeError("repository.statusEvent e obrigatorio.");
@@ -275,7 +301,7 @@ export function createWorkerHandlers({
   if (typeof tenantDefinitionRepository?.load !== "function") throw new TypeError("tenantDefinitionRepository.load e obrigatorio.");
   if (typeof metaGateway?.sendReply !== "function") throw new TypeError("metaGateway.sendReply e obrigatorio.");
 
-  async function processInboundMessage(reference) {
+  async function processInboundMessage(reference, _record, execution = {}) {
     const message = await repository.inboundMessage(reference);
     if (!message) throw permanent("Mensagem de entrada nao encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
     const conversation = await conversationService.getConversation({
@@ -328,6 +354,7 @@ export function createWorkerHandlers({
       }
     }
     if (conversation.mode !== "bot") {
+      await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
       logger.info?.("conversation_automation_skipped", {
         empresaId: reference.empresaId,
         conversationId: message.conversationId,
@@ -341,6 +368,7 @@ export function createWorkerHandlers({
     }
     let reply;
     if (!prepared) {
+      let generatedByAi = false;
       try {
         await metaGateway.markRead?.({
           empresaId: reference.empresaId,
@@ -367,8 +395,8 @@ export function createWorkerHandlers({
           handoffRepository,
           flowRepository,
           aiHandler: aiService
-            ? async ({ config, input }) => ({
-              reply: await aiService.reply({
+            ? async ({ config, input }) => {
+              const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
                 conversationId: input.conversationId,
                 messageId: message.id,
@@ -387,8 +415,10 @@ export function createWorkerHandlers({
                     .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
                     .map(({ module, action, text }) => ({ module, action, text })),
                 },
-              }),
-            })
+              });
+              generatedByAi = aiReply.source === "ai";
+              return { reply: aiReply };
+            }
             : null,
           logger,
         });
@@ -410,6 +440,12 @@ export function createWorkerHandlers({
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };
       }
+      if (generatedByAi) {
+        if (typeof repository.prepareReply !== "function") throw permanent("Persistência da resposta da IA não configurada.", "BOT_REPLY_CHECKPOINT_REQUIRED");
+        const delayMs = aiReplyDelayMs();
+        if (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
+        reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
+      }
       if (repository.prepareReply) {
         prepared = await repository.prepareReply({
           empresaId: reference.empresaId,
@@ -420,6 +456,22 @@ export function createWorkerHandlers({
       }
     } else {
       reply = { text: prepared.text, buttons: prepared.buttons };
+    }
+    const sendNotBefore = prepared?.sendNotBefore || reply.sendNotBefore;
+    if (sendNotBefore && !Number.isFinite(Date.parse(sendNotBefore))) throw permanent("Horário de envio da resposta inválido.", "BOT_REPLY_SCHEDULE_INVALID");
+    if (prepared?.status === "ignorada_duplicidade") return { skipped: true, reason: "bot_reply_cancelled" };
+    if (sendNotBefore && Date.parse(sendNotBefore) > clock().getTime()) {
+      return { deferUntil: sendNotBefore };
+    }
+    if (sendNotBefore) {
+      const currentConversation = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
+      if (currentConversation.mode !== "bot" || (repository.canSendBotReply && !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id }))) {
+        await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+        return { skipped: true, reason: "bot_reply_cancelled" };
+      }
+    }
+    if (execution.canContinue && !execution.canContinue()) {
+      throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
     }
     const sent = await metaGateway.sendReply({
       empresaId: reference.empresaId,

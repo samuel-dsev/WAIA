@@ -88,6 +88,15 @@ export class MemoryJobQueue {
     if (record.conversationKey) this.store.activeConversations.delete(record.conversationKey);
   }
 
+  defer(record, until) {
+    record.state = "waiting";
+    record.availableAt = Date.parse(until);
+    record.attempts = Math.max(0, record.attempts - 1);
+    record.lockedUntil = 0;
+    this.#releaseTenant(record);
+    if (record.conversationKey) this.store.activeConversations.delete(record.conversationKey);
+  }
+
   reject(record, error, options = {}) {
     record.error = error;
     record.lockedUntil = 0;
@@ -130,7 +139,8 @@ export function createMemoryWorker({
         attempt: record.attempts,
         maxAttempts: record.maxAttempts,
       });
-      queue.complete(record, result);
+      if (result?.outcome === "deferred") queue.defer(record, result.deferUntil);
+      else queue.complete(record, result);
     } catch (error) {
       queue.reject(record, error, retry);
     }
@@ -160,8 +170,9 @@ export function createMemoryWorker({
 }
 
 export class MemoryJobRepository {
-  constructor({ records = new Map() } = {}) {
+  constructor({ records = new Map(), now = Date.now } = {}) {
     this.records = records;
+    this.now = now;
     this.failed = new Map();
   }
 
@@ -175,6 +186,13 @@ export class MemoryJobRepository {
     if (record.state === "completed") return { outcome: "completed" };
     if (record.state === "processing") return { outcome: "busy" };
     if (record.state === "failed") return { outcome: "failed" };
+    if (record.availableAt > this.now()) return { outcome: "deferred", deferUntil: new Date(record.availableAt).toISOString() };
+    for (const earlier of this.records.values()) {
+      if (earlier === record) break;
+      if (reference.conversationId && earlier.reference.empresaId === reference.empresaId && earlier.reference.conversationId === reference.conversationId && !["completed", "failed"].includes(earlier.state)) {
+        return { outcome: "busy", deferUntil: new Date(Math.max(this.now() + 1_000, earlier.availableAt || 0)).toISOString() };
+      }
+    }
     record.state = "processing";
     record.attempts = Math.max(record.attempts, attempt || 1);
     return { outcome: "claimed", record };
@@ -183,6 +201,11 @@ export class MemoryJobRepository {
   async complete(reference) {
     const record = this.records.get(queueJobId(reference));
     if (record) record.state = "completed";
+  }
+
+  async defer(reference, { until }) {
+    const record = this.records.get(queueJobId(reference));
+    if (record) { record.state = "published"; record.availableAt = Date.parse(until); }
   }
 
   async retry(reference, { error } = {}) {

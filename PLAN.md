@@ -3,6 +3,8 @@
 Atualizado em 08/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
+Adendo de 11/10/2026: espera das respostas de IA preparada como v1.14.2, sobre v1.14.1/`84f13d9` já publicada. Após uma resposta bem-sucedida da IA, aguarda intervalo aleatório de 30–45 segundos antes do envio, com prazo persistido e revalidação da conversa. Escopo e evidência em [ESPERA_RESPOSTAS_IA.md](docs/ESPERA_RESPOSTAS_IA.md). Commit, push e deploy explicitamente aprovados após apresentação; execução em andamento. Não conclui a F6.
+
 Adendo de 11/10/2026: pedido específico de contatos no painel preparado como v1.14.1, versão definida pelo usuário pelo tamanho da alteração. Conversas exibem nome (padrão `none`) e telefone real do cliente; administradores podem editar o nome e excluir o contato para reiniciar o atendimento. Escopo, arquivos, validações e limites em [CONTATOS_PAINEL.md](docs/CONTATOS_PAINEL.md). Commit, push e deploy explicitamente aprovados após apresentação; execução em andamento. Não conclui a F6.
 
 Adendo de 08/10/2026: roteiro único da IA preparado localmente como v1.14.0, por pedido específico, em Módulos e configurações / Identidade e atendimento, com editor em tela cheia. Predefinições continuam determinísticas; mensagens livres recebem o roteiro completo em cada chamada. Publicação versionada, pausas humanas e fluxos operacionais preservados. Escopo, arquivos e evidência em [ROTEIRO_ATENDIMENTO.md](docs/ROTEIRO_ATENDIMENTO.md). Commit/push e deploy na VPS explicitamente autorizados em 08/10/2026, após apresentação do conjunto; execução em andamento. Não conclui a F3 do SaaS.

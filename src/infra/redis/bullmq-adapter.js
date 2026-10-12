@@ -1,4 +1,4 @@
-import { Queue, Worker } from "bullmq";
+import { DelayedError, Queue, Worker } from "bullmq";
 import { normalizeJobReference, queueJobId } from "../../modules/jobs/job-reference.js";
 
 export class BullMqJobQueue {
@@ -44,11 +44,18 @@ export function createBullMqWorker({
   logger = console,
 } = {}) {
   if (typeof processor?.process !== "function") throw new TypeError("processor.process é obrigatório.");
-  const worker = new Worker(queueName, async (job) => processor.process(job.data, {
-    attempt: job.attemptsMade + 1,
-    maxAttempts: Number(job.opts.attempts) || 1,
-    discard: () => job.discard(),
-  }), { connection, concurrency });
+  const worker = new Worker(queueName, async (job, token) => {
+    const result = await processor.process(job.data, {
+      attempt: job.attemptsMade + 1,
+      maxAttempts: Number(job.opts.attempts) || 1,
+      discard: () => job.discard(),
+    });
+    if (result?.outcome === "deferred") {
+      await job.moveToDelayed(Date.parse(result.deferUntil), token);
+      throw new DelayedError();
+    }
+    return result;
+  }, { connection, concurrency });
   worker.on("error", (error) => logger.error?.("bullmq_worker_error", {
     code: typeof error?.code === "string" ? error.code : "BULLMQ_WORKER_ERROR",
   }));

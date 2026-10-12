@@ -230,6 +230,7 @@ test("worker preserva o ID do botão interativo e não o encaminha à IA", async
 test("worker envia somente a base pública à IA e acrescenta pergunta de continuidade", async () => {
   const sent = [];
   const requests = [];
+  let now = Date.now(), prepared;
   const definition = structuredClone(tenantDefinition);
   definition.runtime.enabledModules = ["catalog", "ai_freeform"];
   definition.runtime.payments = {
@@ -254,6 +255,8 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
         };
       },
       async statusEvent() { return null; },
+      async preparedReply() { return prepared; },
+      async prepareReply({ reply }) { prepared = { id: "prepared-ai", ...reply }; return prepared; },
     },
     conversationService: {
       async getConversation() { return { mode: "bot" }; },
@@ -274,8 +277,13 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
         return { text: "Há informações públicas disponíveis.", source: "ai" };
       },
     },
+    clock: () => new Date(now),
+    aiReplyDelayMs: () => 30_000,
   });
 
+  assert.ok((await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-ai" })).deferUntil);
+  assert.equal(sent.length, 0);
+  now = Date.parse(prepared.sendNotBefore);
   await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-ai" });
   assert.match(sent[0].text, /Quer saber mais alguma coisa\?$/u);
   assert.match(JSON.stringify(requests[0].context), /Endereço público/u);

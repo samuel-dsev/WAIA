@@ -83,12 +83,13 @@ export class PostgresJobRepository {
   claim(reference, { attempt = 1, leaseMs = 30_000 } = {}) {
     return withTenantTransaction(this.pool, { empresaId: reference.empresaId }, async ({ client }) => {
       const current = await client.query(
-        `SELECT id, status FROM outbox_jobs WHERE empresa_id = $1 AND id = $2 FOR UPDATE`,
+        `SELECT id, status, disponivel_at FROM outbox_jobs WHERE empresa_id = $1 AND id = $2 FOR UPDATE`,
         [reference.empresaId, reference.jobId],
       );
       if (!current.rows[0]) return { outcome: "missing" };
       if (current.rows[0].status === "concluido") return { outcome: "completed" };
       if (current.rows[0].status === "falhou") return { outcome: "failed" };
+      if (new Date(current.rows[0].disponivel_at).getTime() > Date.now()) return { outcome: "deferred", deferUntil: new Date(current.rows[0].disponivel_at).toISOString() };
 
       const result = await client.query(
         `UPDATE outbox_jobs current_job
@@ -124,6 +125,15 @@ export class PostgresJobRepository {
       }
       return { outcome: "claimed", record: result.rows[0] };
     });
+  }
+
+  defer(reference, { until }) {
+    return withTenantTransaction(this.pool, { empresaId: reference.empresaId }, ({ client }) => client.query(
+      `UPDATE outbox_jobs SET status = 'publicado', disponivel_at = $3,
+          published_at = now(), locked_until = NULL, error_sanitized = NULL
+        WHERE empresa_id = $1 AND id = $2 AND status = 'em_publicacao'`,
+      [reference.empresaId, reference.jobId, until],
+    ));
   }
 
   complete(reference, { attempt = 1, result } = {}) {

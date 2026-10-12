@@ -142,6 +142,8 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
   const aiRequests = [];
   const sends = [];
   const records = [];
+  const prepared = new Map();
+  let now = Date.now();
   const handlers = createWorkerHandlers({
     repository: {
       async inboundMessage({ empresaId }) {
@@ -160,6 +162,8 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
         };
       },
       async statusEvent() { return null; },
+      async preparedReply({ empresaId }) { return prepared.get(empresaId); },
+      async prepareReply({ empresaId, reply }) { const record = { id: "prepared-shared", ...reply }; prepared.set(empresaId, record); return record; },
     },
     conversationService: {
       async getConversation() { return { mode: "bot" }; },
@@ -185,6 +189,8 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
       },
     },
     logger: { info() {}, warn() {}, error() {} },
+    clock: () => new Date(now),
+    aiReplyDelayMs: () => 30_000,
   });
 
   await Promise.all([CAPITAO_MOR_DEMO_TENANT_ID, TENANT_B].map((empresaId) => (
@@ -198,6 +204,10 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
       payloadVersion: 1,
     })
   )));
+
+  assert.equal(sends.length, 0);
+  now += 30_000;
+  await Promise.all([CAPITAO_MOR_DEMO_TENANT_ID, TENANT_B].map(empresaId => handlers.process_inbound_message({ empresaId, messageId: SHARED_MESSAGE_ID })));
 
   assert.equal(aiRequests.length, 2);
   for (const request of aiRequests) {

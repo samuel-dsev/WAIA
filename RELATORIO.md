@@ -3,6 +3,15 @@
 Atualizado em 08/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Espera das respostas de IA — 11/10/2026
+
+- Base atual: `84f13d9`, v1.14.1, commit/push e deploy concluídos com autorização anterior; evidência operacional local em `.tmp/DEPLOY_V1.14.1_20261011.md`. Os registros de preparação abaixo são históricos.
+- Novo pedido implementado localmente como v1.14.2: uma resposta bem-sucedida da IA recebe prazo aleatório de 30–45 segundos após a geração. Resposta/prazo ficam no checkpoint existente; PostgreSQL/BullMQ adiam o mesmo job, liberando slots/locks durante a espera e preservando a ordem por conversa. Reentrada reutiliza resposta e prazo, sem chamar novamente a IA por causa da espera. Respostas determinísticas, contingência e envio humano mantêm o comportamento anterior.
+- Antes do envio agendado, verifica conversa aberta/em modo bot, contato disponível e número ativo; pausa/assunção/bloqueio cancelam a resposta pendente. Exclusão conclui o job e impede reenvio. Prazo corrompido ou lease perdido impedem o envio. Sem migração ou configuração por tenant/segredo nesta entrega.
+- Candidata isolada, sem F2: Node 22, 471 casos, 453 aprovados, 18 skips opt-in, zero falhas. Dois testes adicionais com PostgreSQL 16/Redis reais aprovados: persistência/adiamento/revalidação, ordem por conversa e outra conversa avançando durante a espera, sem consumir tentativas de falha. Banco temporário e fila sintética removidos; banco/filas/volumes existentes de `waia-test` preservados e PostgreSQL/Redis devolvidos ao estado parado.
+- Checkout completo com alterações anteriores preservadas: Node 24, 475 casos, 456 aprovados, 19 skips opt-in, zero falhas. Whitespace e versões 1.14.2 conferidos.
+- Sem envio WhatsApp real ou chamada à IA nesta validação. Após apresentação, commit, push de dev e deploy da v1.14.2 explicitamente aprovados em 11/10/2026; execução em andamento, com backup e rollback para v1.14.1. Alterações anteriores de equipe/MFA preservadas. Arquivos, mensagem proposta e limites em [ESPERA_RESPOSTAS_IA.md](docs/ESPERA_RESPOSTAS_IA.md).
+
 ## Contatos e reinício do atendimento — 11/10/2026
 
 - Pedido específico implementado localmente em `dev`, sobre HEAD `2b7ce50`: candidata v1.14.1. Colunas Contato/Número e detalhes da conversa mostram nome (padrão `none`) e telefone real do cliente; edição de nome e exclusão disponíveis a administradores nas telas Contatos e Conversas e mensagens.

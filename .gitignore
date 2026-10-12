@@ -16,6 +16,7 @@ docs/*
 !docs/CONTAS_CLIENTE_F1.md
 !docs/YCLOUD_FILARETTI.md
 !docs/CONTATOS_PAINEL.md
+!docs/ESPERA_RESPOSTAS_IA.md
 RELATORIO.md
 AGENTS.md
 package-lock.json
