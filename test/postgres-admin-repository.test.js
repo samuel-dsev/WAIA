@@ -20,6 +20,39 @@ function fakePool() {
   return { calls, pool: { async connect() { return client; } } };
 }
 
+test("conversas consultam nome e telefone do cliente e ocultam contatos excluídos também por ID", async () => {
+  const { calls, pool } = fakePool();
+  const repository = new PostgresAdminRepository(pool);
+  await repository.list({ resource: "conversations", empresaId: TENANT_ID });
+  await repository.get({ resource: "conversations", empresaId: TENANT_ID, id: ACTOR_ID });
+  await repository.get({ resource: "messages", empresaId: TENANT_ID, id: ACTOR_ID });
+  const selects = calls.filter(({ sql }) => /FROM (conversas|mensagens) r/u.test(sql) && !/count\(\*\)/u.test(sql));
+  assert.equal(selects.length, 3);
+  for (const { sql, params } of selects) {
+    assert.match(sql, /EXISTS \(SELECT 1 FROM contatos ct WHERE ct\.empresa_id = r\.empresa_id AND ct\.id = r\.contato_id AND ct\.deleted_at IS NULL\)/u);
+    assert.equal(params[0], TENANT_ID);
+  }
+  assert.match(selects[0].sql, /COALESCE\(.+AS "contactName"/u);
+  assert.match(selects[0].sql, /ct\.telefone_normalizado.+AS "contactPhone"/u);
+});
+
+test("exclusão bloqueia job em processamento e reverte a transação PostgreSQL", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT id FROM contatos/u.test(sql)) return { rows: [{ id: ACTOR_ID }], rowCount: 1 };
+      if (/SELECT j.id, j.status FROM outbox_jobs/u.test(sql)) return { rows: [{ id: "job", status: "em_publicacao" }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const repository = new PostgresAdminRepository({ async connect() { return client; } });
+  await assert.rejects(repository.remove({ resource: "contacts", empresaId: TENANT_ID, id: ACTOR_ID }), (error) => error.status === 409);
+  assert.ok(calls.some(({ sql }) => sql === "ROLLBACK"));
+  assert.equal(calls.some(({ sql }) => /^UPDATE/u.test(sql)), false);
+});
+
 test("repositório PostgreSQL usa descritor fixo e filtro redundante de empresa", async () => {
   const { calls, pool } = fakePool();
   const repository = new PostgresAdminRepository(pool);

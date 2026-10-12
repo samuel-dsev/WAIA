@@ -3,6 +3,14 @@
 Atualizado em 08/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Contatos e reinício do atendimento — 11/10/2026
+
+- Pedido específico implementado localmente em `dev`, sobre HEAD `2b7ce50`: candidata v1.14.1. Colunas Contato/Número e detalhes da conversa mostram nome (padrão `none`) e telefone real do cliente; edição de nome e exclusão disponíveis a administradores nas telas Contatos e Conversas e mensagens.
+- Exclusão auditada e transacional aposenta o contato, arquiva todas as suas conversas na empresa, apaga texto/payload das mensagens e limpa estado/cooldown. Cancela jobs pendentes de IA/envio humano e recusa exclusão enquanto algum deles estiver em processamento. Próximo webhook inédito usa novo contato/conversa, sem reaproveitar histórico. Identificadores de mensagens preservam deduplicação; pedidos, agendamentos, consumo, auditoria e mídia sob retenção preservam referências. Não é expurgo de todos os registros nem exclusão no WhatsApp do cliente.
+- Candidata isolada de HEAD + somente este escopo, excluindo equipe/MFA: Node 24, 462 casos, 446 aprovados, 16 skips opt-in, zero falhas. Checkout completo também passou a suíte antes dos últimos ajustes de apresentação/fila; evidência principal é a candidata final. Navegador Chrome, API em memória e dados sintéticos: editar nome, número/detalhe, cancelar/Escape, conflito, exclusão, lista vazia e novo contato conferidos em desktop/mobile; 390px sem overflow ou erro JS. Corrigidos estado vazio apagado pelo carregamento e valor antigo do diálogo de confirmação.
+- Após apresentação, usuário definiu versão 1.14.1 pelo tamanho da alteração e aprovou commit, push e deploy. Docker disponível na rodada de publicação: candidata isolada Node 22 com 462 casos, 446 aprovados, 16 skips, zero falhas. PostgreSQL 16 de `waia-test`, banco temporário isolado: teste opt-in de exclusão/409, isolamento, deduplicação e próximo webhook aprovado com role da aplicação; transação revertida e banco temporário removido. Banco/volumes existentes preservados. Redis e concorrência com workers ativos não exercitados; sem chamada real à IA/WhatsApp.
+- Commit/push/publicação autorizados e em andamento, sem migração nova ou mudança de tenant real. Alterações anteriores de F2 preservadas; `panel/app.js` exige seleção parcial. Detalhes em [CONTATOS_PAINEL.md](docs/CONTATOS_PAINEL.md).
+
 ## Roteiro único da IA — 08/10/2026
 
 - Pedido específico implementado localmente em `dev`, sobre HEAD `696bfbe`: v1.14.0. Campo único do contrato existente `ai.prompt`, visível em Módulos e configurações / Identidade e atendimento e na etapa Atendimento do onboarding. Editor ampliado ocupa a tela, mantém o texto ao fechar/Escape e protege edições contra atualização automática, navegação e troca de empresa.

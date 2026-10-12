@@ -1,6 +1,6 @@
 import { hashPassword } from "../auth/password.js";
 import { withPlatformTransaction, withTenantTransaction } from "../../infra/postgres/transaction.js";
-import { AdminForbiddenError, AdminValidationError } from "./errors.js";
+import { AdminConflictError, AdminForbiddenError, AdminValidationError } from "./errors.js";
 
 const TENANT_STATUS_TO_DB = Object.freeze({ draft: "rascunho", active: "ativa", suspended: "suspensa", archived: "arquivada" });
 const TENANT_STATUS_FROM_DB = Object.freeze(Object.fromEntries(Object.entries(TENANT_STATUS_TO_DB).map(([key, value]) => [value, key])));
@@ -22,6 +22,16 @@ const toMemberStatus = mapValue(MEMBER_STATUS_TO_DB);
 const fromMemberStatus = mapValue(MEMBER_STATUS_FROM_DB);
 
 const commonDates = { createdAt: "created_at", updatedAt: "updated_at" };
+const contactDisplay = {
+  contactName: "COALESCE((SELECT NULLIF(btrim(ct.nome), '') FROM contatos ct WHERE ct.empresa_id = r.empresa_id AND ct.id = r.contato_id AND ct.deleted_at IS NULL), 'none')",
+  contactPhone: "(SELECT ct.telefone_normalizado FROM contatos ct WHERE ct.empresa_id = r.empresa_id AND ct.id = r.contato_id AND ct.deleted_at IS NULL)",
+};
+
+function activeContactCondition(definition) {
+  return ["conversas", "mensagens"].includes(definition.table)
+    ? [`EXISTS (SELECT 1 FROM contatos ct WHERE ct.empresa_id = ${definition.alias}.empresa_id AND ct.id = ${definition.alias}.contato_id AND ct.deleted_at IS NULL)`]
+    : [];
+}
 
 function descriptor({ table, alias = "r", id = "id", fields, select = {}, dates = commonDates, filters = {}, sorts = {}, search = [], softDelete = false, singleton = false }) {
   return Object.freeze({ table, alias, id, fields: Object.freeze(fields), select: Object.freeze({ id, empresaId: "empresa_id", ...fields, ...dates, ...select }), filters: Object.freeze(filters), sorts: Object.freeze(sorts), search: Object.freeze(search), softDelete, singleton });
@@ -98,12 +108,12 @@ const RESOURCES = Object.freeze({
   }),
   contacts: descriptor({
     table: "contatos", fields: { name: "nome", consentStatus: "consentimento_status", botPaused: "bot_pausado", blocked: "bloqueado", deletionRequestedAt: "exclusao_solicitada_at" },
-    select: { phoneMasked: "telefone_mascarado", firstInteractionAt: "primeira_interacao_at", lastInteractionAt: "ultima_interacao_at", anonymizedAt: "anonimizado_at" },
+    select: { phone: "telefone_normalizado", phoneMasked: "telefone_mascarado", firstInteractionAt: "primeira_interacao_at", lastInteractionAt: "ultima_interacao_at", anonymizedAt: "anonimizado_at" },
     filters: { botPaused: "bot_pausado", blocked: "bloqueado", consentStatus: "consentimento_status" }, sorts: { lastInteractionAt: "ultima_interacao_at", firstInteractionAt: "primeira_interacao_at", name: "nome", createdAt: "created_at" }, search: ["nome", "telefone_mascarado"], softDelete: true,
   }),
   conversations: descriptor({
     table: "conversas", fields: { status: "status", mode: "modo_atendimento", operatorId: "operador_usuario_id" },
-    select: { contactId: "contato_id", numberId: "numero_whatsapp_id", lastMessageAt: "ultima_mensagem_at", correlationId: "correlation_id" },
+    select: { ...contactDisplay, contactId: "contato_id", numberId: "numero_whatsapp_id", lastMessageAt: "ultima_mensagem_at", correlationId: "correlation_id" },
     filters: { status: "status", mode: "modo_atendimento", contactId: "contato_id", numberId: "numero_whatsapp_id" }, sorts: { lastMessageAt: "ultima_mensagem_at", createdAt: "created_at", status: "status" }, search: ["correlation_id::text"],
   }),
   messages: descriptor({
@@ -142,6 +152,7 @@ const RESOURCES = Object.freeze({
 
 function quoteIdentifier(value) { return `"${String(value).replaceAll('"', '""')}"`; }
 function qualified(alias, expression) {
+  if (expression.startsWith("COALESCE(")) return expression;
   if (expression.startsWith("(") || expression.startsWith("'") || expression.includes("::")) return expression.replace(/^([a-z_]+)/u, `${alias}.$1`);
   return `${alias}.${expression}`;
 }
@@ -203,6 +214,7 @@ function baseConditions(definition, empresaId, params) {
   params.push(empresaId);
   const conditions = [`${definition.alias}.empresa_id = $${params.length}`];
   if (definition.softDelete) conditions.push(`${definition.alias}.deleted_at IS NULL`);
+  conditions.push(...activeContactCondition(definition));
   return conditions;
 }
 function filterConditions(definition, filters, params) {
@@ -424,6 +436,7 @@ export class PostgresAdminRepository {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const conditions = [`${definition.alias}.empresa_id = $1`, `${qualified(definition.alias, definition.id)} = $2`];
       if (definition.softDelete) conditions.push(`${definition.alias}.deleted_at IS NULL`);
+      conditions.push(...activeContactCondition(definition));
       return outputRow(resource, (await client.query(`SELECT ${selectSql(definition)} FROM ${definition.table} ${definition.alias} WHERE ${conditions.join(" AND ")} LIMIT 1`, [empresaId, id])).rows[0]);
     });
   }
@@ -436,6 +449,7 @@ export class PostgresAdminRepository {
            FROM mensagens
           WHERE empresa_id = $1 AND id = $2 AND direcao = 'entrada'
             AND tipo IN ('imagem', 'documento') AND media_storage_key IS NOT NULL
+            AND EXISTS (SELECT 1 FROM contatos ct WHERE ct.empresa_id = mensagens.empresa_id AND ct.id = mensagens.contato_id AND ct.deleted_at IS NULL)
           LIMIT 1`,
         [empresaId, messageId],
       )
@@ -450,7 +464,7 @@ export class PostgresAdminRepository {
            FROM conversas c
            JOIN contatos ct ON ct.empresa_id = c.empresa_id AND ct.id = c.contato_id
            JOIN numeros_whatsapp n ON n.empresa_id = c.empresa_id AND n.id = c.numero_whatsapp_id
-          WHERE c.empresa_id = $1 AND c.id = $2
+          WHERE c.empresa_id = $1 AND c.id = $2 AND ct.deleted_at IS NULL
           FOR UPDATE OF c`,
         [empresaId, conversationId],
       )).rows[0];
@@ -861,6 +875,7 @@ export class PostgresAdminRepository {
   }
 
   async remove({ resource, empresaId, id, transaction }) {
+    if (resource === "contacts") return this.forgetContact({ empresaId, id, transaction });
     if (resource === "users") return usePlatformTransaction(this.pool, { transaction }, async ({ client }) => (await client.query("DELETE FROM usuarios_empresas WHERE empresa_id = $1 AND usuario_id = $2", [empresaId, id])).rowCount > 0);
     const definition = resourceDefinition(resource);
     return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
@@ -868,6 +883,68 @@ export class PostgresAdminRepository {
         ? `UPDATE ${definition.table} SET deleted_at = now() WHERE empresa_id = $1 AND ${definition.id} = $2 AND deleted_at IS NULL`
         : `DELETE FROM ${definition.table} WHERE empresa_id = $1 AND ${definition.id} = $2`;
       return (await client.query(sql, [empresaId, id])).rowCount > 0;
+    });
+  }
+
+  // Keep references required by orders, billing and audit; retire the identity used by the bot.
+  forgetContact({ empresaId, id, transaction }) {
+    return useTenantTransaction(this.pool, { empresaId, transaction }, async ({ client }) => {
+      const contact = (await client.query(
+        "SELECT id FROM contatos WHERE empresa_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
+        [empresaId, id],
+      )).rows[0];
+      if (!contact) return false;
+      await client.query(
+        "SELECT id FROM conversas WHERE empresa_id = $1 AND contato_id = $2 ORDER BY id FOR UPDATE",
+        [empresaId, id],
+      );
+      const jobs = (await client.query(
+        `SELECT j.id, j.status FROM outbox_jobs j
+          WHERE j.empresa_id = $1
+            AND j.job_type IN ('process_inbound_message', 'send_human_message')
+            AND EXISTS (SELECT 1 FROM conversas c WHERE c.empresa_id = j.empresa_id AND c.id = j.conversa_id AND c.contato_id = $2)
+          ORDER BY j.id FOR UPDATE OF j`,
+        [empresaId, id],
+      )).rows;
+      if (jobs.some((job) => job.status === "em_publicacao")) {
+        throw new AdminConflictError("Há uma mensagem em processamento para este contato. Aguarde a conclusão e tente excluir novamente.");
+      }
+      await client.query(
+        `UPDATE outbox_jobs j SET status = 'concluido', completed_at = COALESCE(completed_at, now()), locked_until = NULL
+          WHERE j.empresa_id = $1 AND j.status IN ('pendente', 'publicado', 'falhou')
+            AND j.job_type IN ('process_inbound_message', 'send_human_message')
+            AND EXISTS (SELECT 1 FROM conversas c WHERE c.empresa_id = j.empresa_id AND c.id = j.conversa_id AND c.contato_id = $2)`,
+        [empresaId, id],
+      );
+      await client.query(
+        `UPDATE estados_conversa s SET flow_key = 'menu_principal', stage = 'inicio', evento_id = NULL,
+            pedido_id = NULL, comprovante_mensagem_id = NULL, state_data = '{}'::jsonb,
+            expires_at = NULL, lock_version = lock_version + 1, updated_at = now()
+          WHERE s.empresa_id = $1
+            AND EXISTS (SELECT 1 FROM conversas c WHERE c.empresa_id = s.empresa_id AND c.id = s.conversa_id AND c.contato_id = $2)`,
+        [empresaId, id],
+      );
+      await client.query(
+        `UPDATE mensagens SET corpo = NULL, outbound_payload = '{}'::jsonb,
+            media_external_id = NULL, error_code = NULL, error_sanitized = NULL,
+            redacted_at = CASE WHEN media_storage_key IS NULL THEN COALESCE(redacted_at, now()) ELSE redacted_at END, updated_at = now(),
+            status = CASE WHEN status IN ('recebida', 'enfileirada', 'processando', 'falhou') THEN 'ignorada_duplicidade' ELSE status END
+          WHERE empresa_id = $1 AND contato_id = $2`,
+        [empresaId, id],
+      );
+      await client.query(
+        `UPDATE conversas SET status = 'arquivada', modo_atendimento = 'pausado',
+            operador_usuario_id = NULL, fechada_at = COALESCE(fechada_at, now()),
+            lock_version = lock_version + 1, updated_at = now()
+          WHERE empresa_id = $1 AND contato_id = $2`,
+        [empresaId, id],
+      );
+      await client.query(
+        `UPDATE contatos SET nome = NULL, bot_pausado = true, bloqueado = true,
+            deleted_at = now(), updated_at = now() WHERE empresa_id = $1 AND id = $2`,
+        [empresaId, id],
+      );
+      return true;
     });
   }
 

@@ -106,7 +106,7 @@ const VIEW_DEFINITIONS = {
     resource: "contacts",
     permission: "operations",
     columns: [
-      ["name", "Contato"], ["phoneMasked", "Telefone"], ["firstInteractionAt", "Primeira interação"],
+      ["name", "Contato"], ["phone", "Telefone"], ["firstInteractionAt", "Primeira interação"],
       ["lastInteractionAt", "Última interação"], ["automationStatus", "Automação"], ["tags", "Etiquetas"],
     ],
   },
@@ -117,7 +117,7 @@ const VIEW_DEFINITIONS = {
     resource: "conversations",
     permission: "operations",
     columns: [
-      ["contactId", "Contato"], ["numberId", "Número"], ["status", "Estado"],
+      ["contactName", "Contato"], ["contactPhone", "Número"], ["status", "Estado"],
       ["mode", "Modo"], ["operatorId", "Responsável"], ["lastMessageAt", "Última mensagem"],
     ],
   },
@@ -524,10 +524,10 @@ async function loadCurrentView({ silent = false } = {}) {
     }
     const usesPagination = definition.filters !== false || state.currentView === "companies";
     const payload = await apiFetch(`${endpoint}${usesPagination ? `?${queryString()}` : ""}`, { signal: state.requestController.signal });
+    setContentState(null);
     if (state.currentView === "dashboard") renderDashboard(payload);
     else if (state.currentView === "diagnostics") renderDiagnostics(payload);
     else renderList(definition, payload);
-    setContentState(null);
   } catch (error) {
     if (error.name === "AbortError") return;
     if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
@@ -637,7 +637,14 @@ function renderList(definition, payload) {
     for (const [key, label] of definition.columns) {
       const cell = document.createElement("td");
       cell.dataset.label = label;
-      cell.append(valueNode(item[key], key));
+      cell.append(valueNode(state.currentView === "contacts" && key === "name" ? item[key] || "none" : item[key], key));
+      if (["contacts", "conversations"].includes(state.currentView) && ["name", "contactName"].includes(key) && allowed("settings")) {
+        const edit = button("Editar nome", () => editContactName(item), "button button-quiet button-small");
+        edit.setAttribute("aria-label", `Editar nome de ${item.contactName || item.name || "none"}`);
+        const contactName = node("div", "contact-name");
+        contactName.append(cell.firstChild, edit);
+        cell.replaceChildren(contactName);
+      }
       row.append(cell);
     }
     const actions = document.createElement("td");
@@ -670,7 +677,40 @@ function rowActions(view, item) {
     group.append(button("Configurar", () => openNumberSettings(item), "button button-secondary button-small"));
     group.append(button("Rotacionar credencial", () => openCredentialRotation(id), "button button-quiet button-small"));
   }
+  if (["contacts", "conversations"].includes(view) && allowed("settings")) {
+    group.append(button("Excluir número", () => forgetContact(item), "button button-danger button-small"));
+  }
   return group;
+}
+
+function editContactName(item) {
+  const empresaId = state.selectedEmpresaId;
+  const contactId = item.contactId || item.id;
+  if (!empresaId || !contactId || !allowed("settings")) return;
+  openFormDialog("Editar nome do contato", [["name", "Nome do contato (vazio para none)", "text", false]], async (values) => {
+    await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/contacts/${encodeURIComponent(contactId)}`, {
+      method: "PATCH", body: { name: values.name.trim() || null },
+    });
+    toast("Nome do contato atualizado.");
+    if (state.selectedEmpresaId === empresaId) await loadCurrentView();
+  }, { name: item.contactName === "none" ? "" : item.contactName || item.name || "" });
+}
+
+async function forgetContact(item) {
+  const empresaId = state.selectedEmpresaId;
+  const contactId = item.contactId || item.id;
+  if (!empresaId || !contactId || !allowed("settings")) return;
+  const phone = item.contactPhone || item.phone || item.phoneMasked || "este número";
+  if (!await confirmAction(`Excluir ${phone}? Todas as conversas desse contato nesta empresa sairão da lista, o histórico e o estado de atendimento serão reiniciados e mensagens pendentes serão canceladas. Na próxima mensagem, a IA atenderá como um novo contato.`, "Excluir número e reiniciar atendimento")) return;
+  try {
+    await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/contacts/${encodeURIComponent(contactId)}`, { method: "DELETE" });
+    elements.detailDialog.close();
+    toast("Número excluído. A próxima mensagem iniciará um novo atendimento.");
+    if (state.selectedEmpresaId === empresaId) await loadCurrentView();
+  } catch (error) {
+    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    toast(error.message || "Não foi possível excluir o número.");
+  }
 }
 
 async function openFailedJob(id) {
@@ -1069,7 +1109,7 @@ async function openConversation(id) {
     elements.detailTitle.textContent = conversation.contactName || "Conversa";
     const details = node("dl", "detail-list");
     for (const [label, value, key] of [
-      ["Contato", conversation.contactId], ["Número", conversation.numberId], ["Estado", conversation.status, "status"],
+      ["Contato", conversation.contactName || "none"], ["Número", conversation.contactPhone], ["Estado", conversation.status, "status"],
       ["Modo", conversation.mode], ["Responsável", conversation.operatorId], ["Correlação", conversation.correlationId],
     ]) details.append(nodeWithText("dt", label), valueNode(value, key));
     const messages = node("div", "message-list");
@@ -1091,6 +1131,10 @@ async function openConversation(id) {
       button("Assumir conversa", () => conversationAction(id, "assume"), "button button-primary button-small"),
       button("Pausar bot", () => conversationAction(id, "pause"), "button button-secondary button-small"),
       button("Devolver ao bot", () => conversationAction(id, "resume"), "button button-secondary button-small"),
+    );
+    if (allowed("settings")) tools.append(
+      button("Editar nome", () => editContactName(conversation), "button button-secondary button-small"),
+      button("Excluir número", () => forgetContact(conversation), "button button-danger button-small"),
     );
     elements.detailContent.replaceChildren(details, messages, tools, humanMessageComposer(id, conversation));
   } catch (error) {
@@ -1363,6 +1407,7 @@ async function performMutation(path, { method, body, success }) {
 
 function confirmAction(message, title = "Confirmar ação") {
   return new Promise((resolve) => {
+    elements.confirmDialog.returnValue = "";
     elements.confirmTitle.textContent = title;
     elements.confirmMessage.textContent = message;
     const onClose = () => resolve(elements.confirmDialog.returnValue === "confirm");

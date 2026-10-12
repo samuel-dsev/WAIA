@@ -41,7 +41,7 @@ export class PostgresJobHandlerRepository {
                 m.correlation_id, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
-          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'entrada'
+          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'entrada' AND c.deleted_at IS NULL
           LIMIT 1`,
         [empresaId, messageId],
       );
@@ -74,7 +74,7 @@ export class PostgresJobHandlerRepository {
                 m.status, m.correlation_id, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
-          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'saida'
+          WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'saida' AND c.deleted_at IS NULL
             AND m.tipo = 'texto' AND m.origem_resposta = 'operador'
           LIMIT 1`,
         [empresaId, messageId],

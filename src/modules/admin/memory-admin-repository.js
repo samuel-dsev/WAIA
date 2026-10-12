@@ -1,4 +1,4 @@
-import { AdminValidationError } from "./errors.js";
+import { AdminConflictError, AdminValidationError } from "./errors.js";
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
@@ -19,6 +19,16 @@ export class MemoryAdminRepository {
     this.health = diagnostics;
   }
   #resource(name) { if (!this.records.has(name)) this.records.set(name, new Map()); return this.records.get(name); }
+  #visible(resource, item) {
+    if (item.deletedAt) return false;
+    if (!["conversations", "messages"].includes(resource)) return true;
+    return !this.#resource("contacts").get(item.contactId)?.deletedAt;
+  }
+  #display(resource, item) {
+    if (resource !== "conversations") return clone(item);
+    const contact = this.#resource("contacts").get(item.contactId);
+    return { ...clone(item), contactName: contact?.name?.trim() || "none", contactPhone: contact?.phone || null };
+  }
   async withAuditedMutation(_context, callback) {
     if (typeof callback !== "function") throw new TypeError("Callback transacional administrativo é obrigatório.");
     const rollbackHandlers = [];
@@ -96,13 +106,13 @@ export class MemoryAdminRepository {
       }).slice(0, limit);
       return { items, pagination: { total: items.length, page: 1, pageSize: limit } };
     }
-    const items = [...this.#resource(resource).values()].filter((item) => item.empresaId === empresaId).slice(0, limit).map(clone);
+    const items = [...this.#resource(resource).values()].filter((item) => item.empresaId === empresaId && this.#visible(resource, item)).slice(0, limit).map((item) => this.#display(resource, item));
     return { items, pagination: { total: items.length, page: 1, pageSize: limit } };
   }
   async get({ resource, empresaId, id }) {
     if (resource === "users") return (await this.list({ resource, empresaId, limit: Number.MAX_SAFE_INTEGER })).items.find((item) => item.id === id) || null;
     const item = this.#resource(resource).get(id);
-    return item?.empresaId === empresaId ? clone(item) : null;
+    return item?.empresaId === empresaId && this.#visible(resource, item) ? this.#display(resource, item) : null;
   }
   async create({ resource, empresaId, id, data }) {
     const recordId = resource === "memberships" ? data.userId : id;
@@ -110,7 +120,7 @@ export class MemoryAdminRepository {
     this.#resource(resource).set(recordId, item);
     return clone(item);
   }
-  async update({ resource, empresaId, id, changes }) { const item = this.#resource(resource).get(id); if (!item || item.empresaId !== empresaId) return null; Object.assign(item, clone(changes), { updatedAt: new Date().toISOString() }); return clone(item); }
+  async update({ resource, empresaId, id, changes }) { const item = this.#resource(resource).get(id); if (!item || item.empresaId !== empresaId || !this.#visible(resource, item)) return null; Object.assign(item, clone(changes), { updatedAt: new Date().toISOString() }); return clone(item); }
   async assertTenantAdminContinuity({ empresaId, userId, resource, changes = {}, remove = false }) {
     const records = (await this.list({ resource: "users", empresaId, limit: Number.MAX_SAFE_INTEGER })).items;
     const current = records.find((item) => item.id === userId);
@@ -127,6 +137,24 @@ export class MemoryAdminRepository {
     }
   }
   async remove({ resource, empresaId, id }) {
+    if (resource === "contacts") {
+      const contact = this.#resource("contacts").get(id);
+      if (!contact || contact.empresaId !== empresaId || contact.deletedAt) return false;
+      const conversations = [...this.#resource("conversations").values()].filter((item) => item.empresaId === empresaId && item.contactId === id);
+      const ids = new Set(conversations.map((item) => item.id));
+      const jobs = [...this.#resource("outbox-jobs").values()].filter((item) => item.empresaId === empresaId && ids.has(item.conversationId) && ["process_inbound_message", "send_human_message"].includes(item.jobType));
+      if (jobs.some((item) => item.status === "em_publicacao")) throw new AdminConflictError("Há uma mensagem em processamento para este contato. Aguarde a conclusão e tente excluir novamente.");
+      for (const job of jobs) job.status = "concluido";
+      for (const conversation of conversations) Object.assign(conversation, { status: "arquivada", mode: "pausado", operatorId: null });
+      for (const message of this.#resource("messages").values()) {
+        if (message.empresaId === empresaId && message.contactId === id) Object.assign(message, { body: null, outboundPayload: {} });
+      }
+      for (const item of this.#resource("conversation-states").values()) {
+        if (item.empresaId === empresaId && ids.has(item.conversationId)) Object.assign(item, { flowKey: "menu_principal", stage: "inicio", data: {}, eventId: null, orderId: null, receiptMessageId: null, expiresAt: null });
+      }
+      Object.assign(contact, { name: null, deletedAt: new Date().toISOString(), botPaused: true, blocked: true });
+      return true;
+    }
     if (resource === "users") {
       const membership = this.#resource("memberships").get(id);
       if (membership?.empresaId === empresaId) return this.#resource("memberships").delete(id);
