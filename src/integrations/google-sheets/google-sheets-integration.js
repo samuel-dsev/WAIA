@@ -18,6 +18,7 @@ function normalizeConfiguration(value) {
       .map(([name, range]) => [name, range.trim()]),
   );
   return {
+    profile: value.profile === "products" ? "products" : "agenda",
     integrationId: String(value.integrationId),
     spreadsheetId: String(value.spreadsheetId),
     imports,
@@ -99,7 +100,7 @@ export function createGoogleSheetsIntegration({
       }
       const rawEntries = await Promise.all(Object.entries(scoped.config.imports).map(async ([name, range]) => [
         name,
-        await scoped.client.getValues(range),
+        await scoped.client.getValues(range, scoped.config.profile === "products" ? { valueRenderOption: "UNFORMATTED_VALUE" } : undefined),
       ]));
       const snapshot = await snapshotMapper(Object.fromEntries(rawEntries), scoped.config, scoped.tenant);
       if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {

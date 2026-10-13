@@ -934,6 +934,7 @@ export class AdminService {
       stale: Boolean(result.stale),
       errorCode: result.errorCode || null,
       eventsImported: Array.isArray(result.snapshot?.events) ? result.snapshot.events.length : 0,
+      productsImported: Array.isArray(result.snapshot?.products) ? result.snapshot.products.length : 0,
     };
   }
 

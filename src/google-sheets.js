@@ -69,8 +69,12 @@ export class GoogleSheetsClient {
     return response.json();
   }
 
-  async getValues(range, { signal } = {}) {
-    const payload = await this.request(`/values/${encodeURIComponent(range)}?majorDimension=ROWS`, { signal });
+  async getValues(range, { signal, valueRenderOption } = {}) {
+    if (valueRenderOption && !["FORMATTED_VALUE", "UNFORMATTED_VALUE"].includes(valueRenderOption)) {
+      throw new TypeError("Formato de leitura Google Sheets inválido.");
+    }
+    const render = valueRenderOption ? `&valueRenderOption=${valueRenderOption}` : "";
+    const payload = await this.request(`/values/${encodeURIComponent(range)}?majorDimension=ROWS${render}`, { signal });
     return payload.values || [];
   }
 

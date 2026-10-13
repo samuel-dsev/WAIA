@@ -60,7 +60,7 @@ test("painel captura módulos antes de aguardar a confirmação", async () => {
 test("configurações permitem criar a integração Google Sheets ausente", async () => {
   const js = await readFile(new URL("../panel/app.js", import.meta.url), "utf8");
   assert.match(js, /button\("Adicionar Google Sheets", \(\) => createGoogleSheetsIntegration/u);
-  assert.match(js, /type: "google_sheets",\s*name: "Google Sheets",\s*enabled: false/u);
+  assert.match(js, /type: "google_sheets",\s*name: [^\n]+"Google Sheets",\s*enabled: false/u);
   assert.match(js, /openGoogleSheetsConfig\(integration, credentials\)/u);
 });
 

@@ -1,7 +1,14 @@
 # Continuidade — WAIA
 
-Atualizado em 08/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Catálogo Google Sheets — 13/10/2026
+
+- Candidata v1.15.0 preparada para importar fichas de produtos A:L e disponibilizá-las ao atendimento, preservando a agenda anterior e sem migração/dependência nova. Conta de serviço Leitor, limite de 100 produtos ativos, validação sanitizada e catálogo indisponível em falha/cache antigo. Fotos fornecidas como links; anexos e grupo interno não foram implementados.
+- Planilha ALFATECH estruturada com Produtos/Instruções, filtros, congelamento e listas; nenhum modelo inventado. Exportação conferida e duas abas revisadas visualmente. Bloco de catálogo adicionado pelo painel ao roteiro da ALFATECH e salvo no rascunho; ainda não publicado.
+- Google Cloud liberado pelo usuário, que indicou samuelfelipeleao@gmail.com como a conta a utilizar; projeto existente waia-production disponível. Criação da conta de serviço/JSON, compartilhamento Leitor, importação real e vínculo publicado continuam pendentes. Não há comprovação de Google/WhatsApp real para produtos.
+- Dez testes específicos e formulário com API sintética aprovados. Checkout completo: 485 casos, 466 aprovados, 19 skips opt-in, zero falhas. Candidata isolada em Node 22 sem rede: 481 casos, 463 aprovados, 18 skips opt-in, zero falhas. `git diff --check` aprovado. PostgreSQL/Redis opt-in não executados nesta alteração. Alterações anteriores de equipe/MFA preservadas e excluídas da candidata; `panel/app.js` exige seleção parcial. Detalhes/arquivos/mensagem de commit em [CATALOGO_GOOGLE_SHEETS.md](docs/CATALOGO_GOOGLE_SHEETS.md). Usuário autorizou explicitamente commit, push de dev e deploy da v1.15.0 em 13/10/2026 após revisão; execução em andamento, sem promoção de main.
 
 ## Espera das respostas de IA — 11/10/2026
 

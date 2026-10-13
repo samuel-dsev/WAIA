@@ -1,4 +1,5 @@
 import { withTenantTransaction } from "../infra/postgres/transaction.js";
+import { catalogFromProductsCache } from "../integrations/google-sheets/products-snapshot.js";
 import {
   materializeLegacyTenantDefinition,
   verifyCompiledTenantRuntimeConfigV2,
@@ -55,6 +56,22 @@ async function loadGoogleSheetsEvents(client, company, empresaId) {
     price: Number(row.preco),
     active: true,
   }));
+}
+
+async function loadGoogleSheetsProducts(client, empresaId, publishedIntegrations) {
+  const references = publishedIntegrations?.filter((item) => item.enabled && item.type === "google_sheets")
+    .map((item) => item.id.startsWith("integration:") ? item.id.slice("integration:".length) : item.id)
+    .filter((id) => /^[0-9a-f-]{36}$/iu.test(id));
+  if (references && !references.length) return null;
+  const row = (await client.query(
+    `SELECT configuracao, cache_snapshot, cache_version, status, last_success_at
+       FROM integracoes WHERE empresa_id = $1 AND tipo = 'google_sheets'
+        AND habilitada AND deleted_at IS NULL AND configuracao->>'profile' = 'products'
+        AND ($2::text[] IS NULL OR id::text = ANY($2::text[]))
+       ORDER BY created_at, id LIMIT 1`,
+    [empresaId, references || null],
+  )).rows[0];
+  return row ? catalogFromProductsCache(row) : null;
 }
 
 async function loadVersionedDefinition(client, company, empresaId, paymentResolver) {
@@ -114,13 +131,18 @@ async function loadVersionedDefinition(client, company, empresaId, paymentResolv
       instructions: payment.instructions,
     } } : {}),
   });
-  if (!usesGoogleSheetsAgenda(compiled)) return definition;
-  const events = await loadGoogleSheetsEvents(client, company, empresaId);
+  const sheetProducts = compiled.configuration.modules.includes("catalog") || usesGoogleSheetsAgenda(compiled)
+    ? await loadGoogleSheetsProducts(client, empresaId, compiled.configuration.integrations) : null;
+  const catalog = compiled.configuration.modules.includes("catalog") ? sheetProducts : null;
+  const usesAgenda = !sheetProducts && usesGoogleSheetsAgenda(compiled);
+  if (!usesAgenda && !catalog) return definition;
+  const events = usesAgenda ? await loadGoogleSheetsEvents(client, company, empresaId) : null;
   return {
     ...definition,
     runtime: {
       ...definition.runtime,
-      events: { items: events },
+      ...(events ? { events: { items: events } } : {}),
+      ...(catalog ? { catalog } : {}),
     },
   };
 }
@@ -191,6 +213,7 @@ export class PostgresTenantDefinitionRepository {
         );
       const settings = settingsResult.rows[0] || {};
       const enabledModules = modulesResult.rows.map((row) => row.module_key);
+      const sheetsCatalog = enabledModules.includes("catalog") ? await loadGoogleSheetsProducts(client, empresaId) : null;
       const moduleConfigurations = new Map(modulesResult.rows.map((row) => [row.module_key, row.configuracao || {}]));
       const orderConfig = moduleConfigurations.get("orders") || {};
       const payment = enabledModules.includes("payments") && this.paymentResolver
@@ -223,7 +246,7 @@ export class PostgresTenantDefinitionRepository {
             text: menuRows[0]?.mensagem || settings.saudacao,
             options: menuRows.map((row) => ({ id: row.action_key, label: row.titulo, module: actionModule(row.action_key), action: row.action_key })),
           },
-          catalog: { items: productsResult.rows.map((row) => ({ id: row.sku || row.id, name: row.nome, description: row.descricao, price: Number(row.preco), active: row.ativo })) },
+          catalog: sheetsCatalog || { items: productsResult.rows.map((row) => ({ id: row.sku || row.id, name: row.nome, description: row.descricao, price: Number(row.preco), active: row.ativo })) },
           events: { items: eventsResult.rows.map((row) => ({
             id: row.external_id || row.id,
             name: row.nome,

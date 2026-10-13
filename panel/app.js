@@ -1005,34 +1005,37 @@ function openPaymentCredential() {
 }
 
 async function createGoogleSheetsIntegration(credentials) {
-  try {
+  openFormDialog("Adicionar Google Sheets", [
+    ["profile", "Conteúdo da planilha", "select", true, [["agenda", "Agenda de eventos"], ["products", "Catálogo de produtos"]]],
+  ], async (values) => {
     const integration = await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations`, {
       method: "POST",
       body: {
         type: "google_sheets",
-        name: "Google Sheets",
+        name: values.profile === "products" ? "Google Sheets — Produtos" : "Google Sheets",
         enabled: false,
         requiredForConfirmation: false,
         status: "nao_configurada",
-        configuration: {},
+        configuration: { profile: values.profile },
       },
     });
-    openGoogleSheetsConfig(integration, credentials);
-  } catch (error) {
-    if (error.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
-    toast(error.message || "Não foi possível criar a integração Google Sheets.");
-  }
+    return () => openGoogleSheetsConfig(integration, credentials);
+  }, { profile: "agenda" });
 }
 
 function openGoogleSheetsConfig(integration, credentials) {
   const configuration = integration.configuration || {};
+  const products = configuration.profile === "products";
+  const empresaId = state.selectedEmpresaId;
   const purpose = `google_sheets:${integration.id}`;
   const credential = credentials.find((item) => item.provider === "google" && [purpose, "google_sheets"].includes(item.purpose));
-  openFormDialog("Configurar Google Sheets", [
+  openFormDialog(products ? "Configurar catálogo Google Sheets" : "Configurar Google Sheets", [
     ["spreadsheetId", "ID da planilha", "text", true],
-    ["agendaRange", "Range da agenda", "text", true],
-    ["settingsRange", "Range das configurações", "text", true],
-    ["ordersRange", "Range de pedidos", "text", true],
+    ...(products ? [["productsRange", "Intervalo de produtos (A:L; até 100 produtos ativos)", "text", true]] : [
+      ["agendaRange", "Range da agenda", "text", true],
+      ["settingsRange", "Range das configurações", "text", true],
+      ["ordersRange", "Range de pedidos", "text", true],
+    ]),
     ["serviceAccountJson", credential ? "Novo JSON da conta de serviço (opcional)" : "JSON da conta de serviço", "textarea", !credential],
   ], async (values) => {
     if (values.serviceAccountJson) {
@@ -1040,35 +1043,39 @@ function openGoogleSheetsConfig(integration, credentials) {
       try { parsed = JSON.parse(values.serviceAccountJson); } catch { throw new Error("O JSON da conta de serviço é inválido."); }
       if (parsed.type !== "service_account" || !parsed.client_email || !parsed.private_key) throw new Error("O JSON precisa ser de uma conta de serviço Google válida.");
       if (credential) {
-        await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials/${encodeURIComponent(credential.id)}/rotate`, {
+        await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/credentials/${encodeURIComponent(credential.id)}/rotate`, {
           method: "POST", body: { secret: values.serviceAccountJson },
         });
       } else {
-        await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/credentials`, {
+        await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/credentials`, {
           method: "POST", body: { provider: "google", purpose, secret: values.serviceAccountJson },
         });
       }
     }
     const version = Number(configuration.version || 0) + 1;
-    await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations/${encodeURIComponent(integration.id)}`, {
+    await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/integrations/${encodeURIComponent(integration.id)}`, {
       method: "PATCH",
       body: {
         enabled: true,
         status: "nao_configurada",
         configuration: {
+          profile: products ? "products" : "agenda",
           spreadsheetId: values.spreadsheetId.trim(),
-          imports: { agenda: values.agendaRange.trim(), settings: values.settingsRange.trim() },
-          exports: { orders: values.ordersRange.trim() },
-          healthRange: values.agendaRange.trim(),
+          imports: products ? { products: values.productsRange.trim() } : { agenda: values.agendaRange.trim(), settings: values.settingsRange.trim() },
+          exports: products ? {} : { orders: values.ordersRange.trim() },
+          healthRange: products ? values.productsRange.trim() : values.agendaRange.trim(),
           version,
         },
       },
     });
-    const sync = await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/integrations/google-sheets/sync`, { method: "POST", body: {} });
-    toast(sync.health === "healthy" ? `${sync.eventsImported} evento(s) importado(s) do Google Sheets.` : "Configuração salva, mas o Google Sheets ainda não respondeu.");
+    const sync = await apiFetch(`/tenants/${encodeURIComponent(empresaId)}/integrations/google-sheets/sync`, { method: "POST", body: {} });
+    toast(sync.health === "healthy"
+      ? products ? `${sync.productsImported} produto(s) importado(s). Publique o vínculo no onboarding para usar o catálogo no atendimento.` : `${sync.eventsImported} evento(s) importado(s) do Google Sheets.`
+      : `Configuração salva; sincronização pendente (${sync.errorCode || sync.health}).`);
     await loadCurrentView();
   }, {
     spreadsheetId: configuration.spreadsheetId || "",
+    productsRange: configuration.imports?.products || "Produtos!A2:L1000",
     agendaRange: configuration.imports?.agenda || "Agenda!A2:I",
     settingsRange: configuration.imports?.settings || "Configurações!A2:C",
     ordersRange: configuration.exports?.orders || "Pedidos!A:G",
@@ -1363,9 +1370,10 @@ function openFormDialog(title, fields, onSubmit, initialValues = {}) {
     if (!form.reportValidity()) return;
     const values = Object.fromEntries(new FormData(form));
     try {
-      await onSubmit(values);
+      const afterSubmit = await onSubmit(values);
       form.reset();
       elements.detailDialog.close();
+      if (typeof afterSubmit === "function") afterSubmit();
     } catch (error) {
       toast(error.message || "Não foi possível salvar.");
     }

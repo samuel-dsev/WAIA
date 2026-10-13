@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { withPlatformTransaction, withTenantTransaction } from "../../infra/postgres/transaction.js";
+import { mapProductsSnapshot, PRODUCT_IMPORT_RANGE, PRODUCT_HEALTH_RANGE } from "./products-snapshot.js";
 
 const DEFAULT_IMPORTS = Object.freeze({ agenda: "Agenda!A2:I", settings: "Configurações!A2:C" });
 const DEFAULT_ORDER_RANGE = "Pedidos!A:G";
@@ -103,6 +104,7 @@ export class PostgresGoogleSheetsSnapshotMapper {
   constructor(pool, { clock = () => new Date() } = {}) { this.pool = pool; this.clock = clock; }
 
   async map(raw, _config, { empresaId }) {
+    if (_config.profile === "products") return mapProductsSnapshot(raw);
     const snapshot = mapCapitaoMorSnapshot(raw, { now: this.clock() });
     await withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const company = (await client.query("SELECT timezone FROM empresas WHERE id = $1", [empresaId])).rows[0];
@@ -186,13 +188,15 @@ export class PostgresGoogleSheetsConfigurationResolver {
       )).rows[0];
       if (!row) return null;
       const config = row.configuracao || {};
+      const products = config.profile === "products";
       return {
+        profile: products ? "products" : "agenda",
         enabled: row.habilitada,
         integrationId: row.id,
         spreadsheetId: config.spreadsheetId,
-        imports: config.imports || DEFAULT_IMPORTS,
-        exports: config.exports || { orders: DEFAULT_ORDER_RANGE },
-        healthRange: config.healthRange,
+        imports: products ? { products: config.imports?.products || PRODUCT_IMPORT_RANGE } : config.imports || DEFAULT_IMPORTS,
+        exports: products ? {} : config.exports || { orders: DEFAULT_ORDER_RANGE },
+        healthRange: config.healthRange || (products ? PRODUCT_HEALTH_RANGE : undefined),
         version: Number(config.version || row.cache_version + 1 || 1),
       };
     });

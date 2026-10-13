@@ -82,6 +82,14 @@ function parseCatalogItem(value, path) {
     description: optionalText(value.description, `${path}.description`, { max: 500 }),
     price: value.price == null ? undefined : finiteAmount(value.price, `${path}.price`),
     active: value.active !== false,
+    ...(value.sku != null ? { sku: requiredText(value.sku, `${path}.sku`, { max: 100 }) } : {}),
+    ...(value.category ? { category: requiredText(value.category, `${path}.category`, { max: 100 }) } : {}),
+    ...(value.brand ? { brand: requiredText(value.brand, `${path}.brand`, { max: 100 }) } : {}),
+    ...(value.powerWatts != null ? { powerWatts: finiteAmount(value.powerWatts, `${path}.powerWatts`) } : {}),
+    ...(value.autonomyKm != null ? { autonomyKm: finiteAmount(value.autonomyKm, `${path}.autonomyKm`) } : {}),
+    ...(value.availability ? { availability: requiredText(value.availability, `${path}.availability`, { max: 20 }) } : {}),
+    ...(value.units ? { units: list(value.units, `${path}.units`, (unit, unitPath) => requiredText(unit, unitPath, { max: 100 }), { max: 20 }) } : {}),
+    ...(value.imageUrl ? { imageUrl: requiredText(value.imageUrl, `${path}.imageUrl`, { max: 2000 }) } : {}),
   };
 }
 
@@ -184,7 +192,14 @@ export function parseTenantRuntimeConfig(input) {
       text: optionalText(input.menu?.text, "menu.text", { max: 1000 }),
       options,
     },
-    catalog: { items },
+    catalog: {
+      items,
+      ...(input.catalog?.source?.type === "google_sheets" ? { source: {
+        type: "google_sheets",
+        status: input.catalog.source.status === "healthy" ? "healthy" : "unavailable",
+        lastSyncedAt: optionalText(input.catalog.source.lastSyncedAt, "catalog.source.lastSyncedAt", { max: 80 }),
+      } } : {}),
+    },
     events: { items: events },
     payments: {
       pix: pix ? {
