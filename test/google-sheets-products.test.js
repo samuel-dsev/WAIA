@@ -159,3 +159,33 @@ test("runtime só lê catálogo do vínculo publicado e habilitado dentro do ten
     else assert.equal(pool.queries.some(({ sql }) => sql.includes("FROM integracoes")), false);
   }
 });
+
+test("vínculo lógico do editor resolve catálogo único pelo tipo sem relaxar referência concreta", async () => {
+  for (const [reference, scopedId, enabledCount] of [
+    ["google_sheets_produtos", null, 1],
+    [INTEGRATION_ID.replaceAll("-", "_"), null, 1],
+    [`integration:${INTEGRATION_ID}`, INTEGRATION_ID, 1],
+    ["integration:00000000-0000-4000-8000-000000000298", "00000000-0000-4000-8000-000000000298", 1],
+    ["google_sheets_produtos", null, 2],
+  ]) {
+    const compiled = compileTenantRuntimeConfigV2({
+      schemaVersion: 2, identity: { name: "Teste lógico" }, modules: ["catalog"],
+      menu: { text: "Produtos", options: [{ id: "produtos", label: "Produtos", action: "catalog.list", params: {} }] },
+      integrations: [{ id: reference, type: "google_sheets", name: "Produtos", enabled: true, required: true }],
+    }, { empresaId: EMPRESA_ID, configVersion: 9, draftVersion: 4 });
+    const pool = fakePool((sql, params) => {
+      if (sql.includes("FROM empresas")) return { rows: [{ id: EMPRESA_ID, configuracao_runtime_modo: "versionado", configuracao_ativa_versao: 9, versao_configuracao: 9 }] };
+      if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{ config_version: 9, checksum: compiled.checksum, configuracao_compilada: compiled }] };
+      if (sql.includes("FROM integracoes i")) {
+        assert.deepEqual(params, [EMPRESA_ID, scopedId ? [scopedId] : null]);
+        assert.match(sql, /NOT EXISTS[^]*other\.empresa_id = \$1[^]*other\.habilitada[^]*other\.id <> i\.id/u);
+        const matches = scopedId ? scopedId === INTEGRATION_ID : enabledCount === 1;
+        return { rows: matches ? [cache({ last_success_at: new Date() })] : [] };
+      }
+      assert.fail(sql);
+    });
+    const definition = await new PostgresTenantDefinitionRepository(pool).load(EMPRESA_ID);
+    const found = scopedId ? scopedId === INTEGRATION_ID : enabledCount === 1;
+    assert.equal(definition.runtime.catalog.source?.status, found ? "healthy" : undefined);
+  }
+});

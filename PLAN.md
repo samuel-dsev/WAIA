@@ -3,6 +3,8 @@
 Atualizado em 13/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
+Correção de 13/10/2026: v1.15.0 publicada como `4c9e8ad`; a conferência real do runtime identificou incompatibilidade com IDs lógicos gerados pelo painel. Correção compatível preparada como v1.15.1, mantendo o isolamento por empresa e recusando conexões ambíguas. Escopo/testes em [CATALOGO_GOOGLE_SHEETS.md](docs/CATALOGO_GOOGLE_SHEETS.md). Commit, push de dev e deploy explicitamente autorizados; execução em andamento. O usuário decidiu manter a ALFATECH suspensa.
+
 Adendo de 13/10/2026: catálogo de produtos por Google Sheets preparado como candidata v1.15.0, por pedido específico da ALFATECH. Preserva o perfil de agenda e prepara fichas/valores/unidades/links de fotos para o contexto da IA; roteiro salvo no rascunho e planilha estruturada. Conta de serviço, vínculo real e publicação ainda pendentes. Escopo, limites e arquivos em [CATALOGO_GOOGLE_SHEETS.md](docs/CATALOGO_GOOGLE_SHEETS.md). Commit/push e deploy explicitamente autorizados após revisão em 13/10/2026; execução em andamento. Não conclui a F7.
 
 Adendo de 11/10/2026: espera das respostas de IA preparada como v1.14.2, sobre v1.14.1/`84f13d9` já publicada. Após uma resposta bem-sucedida da IA, aguarda intervalo aleatório de 30–45 segundos antes do envio, com prazo persistido e revalidação da conversa. Escopo e evidência em [ESPERA_RESPOSTAS_IA.md](docs/ESPERA_RESPOSTAS_IA.md). Commit, push e deploy explicitamente aprovados após apresentação; execução em andamento. Não conclui a F6.

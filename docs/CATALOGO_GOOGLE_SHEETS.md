@@ -1,5 +1,17 @@
 # Catálogo de produtos por Google Sheets — candidata v1.15.0
 
+## Correção do vínculo lógico — candidata v1.15.1
+
+A v1.15.0 foi commitada e publicada com autorização (`4c9e8ad`). Google Sheets e preflight real passaram, e o roteiro/vínculo da ALFATECH foram publicados como configVersion 7. A conferência do runtime revelou que o editor cria IDs lógicos a partir do nome (incluindo UUIDs com sublinhados), enquanto o loader novo aceitava somente UUID/referência física. Assim, o catálogo sincronizado não chegava ao contexto da IA.
+
+A v1.15.1 preparada localmente mantém referências físicas exatas e acrescenta a resolução por tipo para um único vínculo lógico publicado, somente quando há uma única conexão Google Sheets ativa dentro da própria empresa. Conexões ambíguas e UUIDs concretos de outra integração não recebem fallback. A agenda existente continua preservada. Não modifica credenciais, esquema, produtos ou o formato da planilha.
+
+Validação: teste de referência lógica comum e ID gerado pelo editor; referência concreta correta/incorreta; ambiguidade; isolamento dos filtros por empresa; regressão de agenda. Candidata isolada em Node 22: 482 casos, 464 aprovados, 18 skips opt-in, zero falhas. Consulta da correção exercitada em PostgreSQL de produção em transação somente leitura, com saída restrita a status/contagem; não substitui a publicação da correção nem comprova resposta WhatsApp com um produto.
+
+Arquivos da correção: `src/tenants/postgres-config-loader.js`, `test/google-sheets-products.test.js`, `test/versioned-config-loader.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Mensagem aprovada: `fix: v1.15.1 resolve vínculo lógico do catálogo Google Sheets`. Commit, push de dev e deploy explicitamente autorizados em 13/10/2026; execução em andamento.
+
+Também foi observado que a ALFATECH está **suspensa**, portanto seu ciclo automático de sincronização não roda enquanto permanecer assim. O JSON e o acesso Leitor estão cadastrados e a sincronização manual funciona. O usuário decidiu manter a empresa suspensa após esta correção. Evidência operacional da v1.15.0 em `.tmp/DEPLOY_V1.15.0_20261013.md`; resultado final da correção será registrado em `.tmp/DEPLOY_V1.15.1_20261013.md`.
+
 Pedido específico de 13/10/2026: manter os produtos na planilha da empresa e disponibilizar suas fichas ao atendimento. Preparado no checkout `dev`, sobre v1.14.2, sem publicar código em produção. Não conclui a F7 do plano SaaS.
 
 ## Comportamento

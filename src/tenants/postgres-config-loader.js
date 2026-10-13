@@ -59,17 +59,27 @@ async function loadGoogleSheetsEvents(client, company, empresaId) {
 }
 
 async function loadGoogleSheetsProducts(client, empresaId, publishedIntegrations) {
-  const references = publishedIntegrations?.filter((item) => item.enabled && item.type === "google_sheets")
-    .map((item) => item.id.startsWith("integration:") ? item.id.slice("integration:".length) : item.id)
+  const googleIntegrations = publishedIntegrations?.filter((item) => item.enabled && item.type === "google_sheets");
+  if (googleIntegrations && !googleIntegrations.length) return null;
+  const references = googleIntegrations
+    ?.map((item) => item.id.startsWith("integration:") ? item.id.slice("integration:".length) : item.id)
     .filter((id) => /^[0-9a-f-]{36}$/iu.test(id));
-  if (references && !references.length) return null;
+  // The onboarding editor generates logical IDs from names. As in readiness,
+  // resolve a logical reference by type only when the tenant has one connection.
+  // A concrete UUID remains strict: it cannot fall back to another connection.
+  if (googleIntegrations && !references.length && googleIntegrations.length !== 1) return null;
   const row = (await client.query(
     `SELECT configuracao, cache_snapshot, cache_version, status, last_success_at
-       FROM integracoes WHERE empresa_id = $1 AND tipo = 'google_sheets'
-        AND habilitada AND deleted_at IS NULL AND configuracao->>'profile' = 'products'
-        AND ($2::text[] IS NULL OR id::text = ANY($2::text[]))
-       ORDER BY created_at, id LIMIT 1`,
-    [empresaId, references || null],
+       FROM integracoes i WHERE i.empresa_id = $1 AND i.tipo = 'google_sheets'
+        AND i.habilitada AND i.deleted_at IS NULL AND i.configuracao->>'profile' = 'products'
+        AND ($2::text[] IS NULL OR i.id::text = ANY($2::text[]))
+        AND ($2::text[] IS NOT NULL OR NOT EXISTS (
+          SELECT 1 FROM integracoes other WHERE other.empresa_id = $1
+            AND other.tipo = 'google_sheets' AND other.habilitada AND other.deleted_at IS NULL
+            AND other.id <> i.id
+        ))
+       ORDER BY i.created_at, i.id LIMIT 1`,
+    [empresaId, references?.length ? references : null],
   )).rows[0];
   return row ? catalogFromProductsCache(row) : null;
 }

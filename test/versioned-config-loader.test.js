@@ -159,6 +159,7 @@ test("loader versionado usa a agenda operacional sincronizada quando Google Shee
         preco: "35.00",
       }] };
     }
+    if (sql.includes("configuracao->>'profile' = 'products'")) return { rows: [] };
     assert.fail(`consulta inesperada: ${sql}`);
   });
 
