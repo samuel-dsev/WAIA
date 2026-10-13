@@ -37,6 +37,31 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     await owner.query("UPDATE contatos SET bot_pausado=true WHERE id=$1", [contactId]);
     assert.equal(await handlers.canSendBotReply({ empresaId, messageId }), false);
     assert.equal(await handlers.canSendBotReply({ empresaId: randomUUID(), messageId }), false);
+    // Exercise the product batch in the same isolated synthetic tenant.
+    const sequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
+    const batchMessageId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Catálogo','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, sequence, randomUUID()])).rows[0].id;
+    const batchInput = { empresaId, message: { id: batchMessageId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() },
+      reply: { text: "Catálogo", sendNotBefore, messages: ["A", "B", "C"].map((text) => ({ text, imageUrl: `https://example.com/${text}.jpg` })) }, origin: "ai" };
+    const batch = await handlers.prepareReply(batchInput);
+    assert.equal(batch.messages.length, 3);
+    assert.deepEqual(batch.messages.map((part) => part.text), ["A", "B", "C"]);
+    assert.deepEqual((await handlers.prepareReply(batchInput)).messages.map((part) => part.id), batch.messages.map((part) => part.id));
+    assert.equal((await handlers.preparedReply({ empresaId: randomUUID(), messageId: batchMessageId })), undefined);
+    await handlers.markReplySent({ empresaId, replyId: batch.messages[0].id, externalMessageId: "wamid." + randomUUID() });
+    const hydrated = await new PostgresJobHandlerRepository(pool).preparedReply({ empresaId, messageId: batchMessageId });
+    assert.ok(hydrated.messages[0].externalMessageId); assert.equal(hydrated.messages[1].externalMessageId, null);
+    assert.equal(hydrated.sendNotBefore, sendNotBefore);
+    await handlers.cancelPreparedReply({ empresaId, messageId: batchMessageId });
+    const cancelled = await handlers.preparedReply({ empresaId, messageId: batchMessageId });
+    assert.equal(cancelled.messages[0].status, "enviada");
+    assert.deepEqual(cancelled.messages.slice(1).map((part) => part.status), ["ignorada_duplicidade", "ignorada_duplicidade"]);
+    const stored = (await owner.query("SELECT tipo, sequence FROM mensagens WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY sequence", [empresaId, batch.messages.map((part) => part.id)])).rows;
+    assert.deepEqual(stored.map((part) => part.tipo), ["imagem", "imagem", "imagem"]);
+    assert.deepEqual(stored.map((part) => Number(part.sequence)), [sequence+1, sequence+2, sequence+3]);
+    await owner.query("UPDATE contatos SET bot_pausado=false WHERE id=$1", [contactId]);
+    assert.equal(await handlers.canSendBotReply({ empresaId, messageId: batchMessageId }), true);
+    await owner.query("UPDATE empresas SET status='suspensa' WHERE id=$1", [empresaId]);
+    assert.equal(await handlers.canSendBotReply({ empresaId, messageId: batchMessageId }), false);
   } finally {
     if (empresaId) {
       for (const table of ["outbox_jobs", "mensagens", "conversas", "contatos", "numeros_whatsapp"]) await owner.query(`DELETE FROM ${table} WHERE empresa_id=$1`, [empresaId]);

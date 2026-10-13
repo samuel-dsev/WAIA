@@ -208,13 +208,13 @@ test("alerta de aproximação é emitido uma vez e sem afetar outro tenant", asy
   const alerts = new MemoryAiAlertSink();
   const setupAi = setup({
     configs: [
-      config("tenant-a", { monthlyCostLimit: 0.001, alertPercent: 50 }),
-      config("tenant-b", { monthlyCostLimit: 0.001, alertPercent: 50 }),
+      config("tenant-a", { monthlyCostLimit: 0.004, alertPercent: 50 }),
+      config("tenant-b", { monthlyCostLimit: 0.004, alertPercent: 50 }),
     ],
     alertSink: alerts,
-    responder: async () => ({ output_text: "ok", usage: { input_tokens: 100, output_tokens: 50 } }),
+    responder: async () => ({ output_text: "ok", usage: { input_tokens: 700, output_tokens: 200 } }),
   });
-  await setupAi.service.reply(request("tenant-a"));
+  assert.equal((await setupAi.service.reply(request("tenant-a"))).source, "ai");
   await setupAi.service.reply(request("tenant-a", { messageId: "a-second" }));
   assert.equal(alerts.alerts.length, 1);
   assert.equal(alerts.alerts[0].empresaId, "tenant-a");
@@ -301,4 +301,37 @@ test("catálogo de preços aceita revisão versionada por configuração sem reb
   })).get({ model: "avaliado-sintetico" });
   assert.deepEqual(pricing, { inputPerMillion: 1, outputPerMillion: 2, version: "review-2026-09" });
   assert.throws(() => new VersionedPricingCatalog("{invalido"), /JSON válido/u);
+});
+
+test("IA seleciona IDs do catálogo validado sem controlar imagem ou preço e usa legendas no histórico", async () => {
+  const catalog = { source: { type: "google_sheets", status: "healthy" }, items: [
+    { id: "approved-a", name: "Modelo A", price: 4990, imageUrl: "https://example.com/a.jpg", active: true },
+    { id: "unavailable", name: "Indisponível", availability: "unavailable" },
+  ] };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })],
+    histories: { "tenant-a": [{ type: "image", direction: "outbound", body: "Ficha do modelo já enviada" }, { type: "image", direction: "inbound", body: "Imagem não analisada" }] },
+    responder: async () => ({ output_text: '{"text":"Qual sua cidade?","productIds":["approved-a"]}', usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { context: { catalog } }));
+  assert.equal(reply.source, "ai"); assert.equal(reply.messages.length, 2);
+  assert.equal(reply.messages[0].imageUrl, "https://example.com/a.jpg");
+  assert.match(reply.messages[0].text, /4\.990,00/u);
+  const call = ai.clientFactory.requests[0].request;
+  assert.equal(call.text.format.strict, true);
+  assert.deepEqual(call.text.format.schema.properties.productIds.items.enum, ["approved-a"]);
+  assert.match(JSON.stringify(call.input), /Ficha do modelo já enviada/u);
+  assert.doesNotMatch(JSON.stringify(call.input), /Imagem não analisada/u);
+});
+
+test("resposta estruturada desconhecida, truncada ou recusada não vaza JSON ao cliente", async () => {
+  const catalog = { source: { type: "google_sheets", status: "healthy" }, items: [{ id: "approved-a", name: "A", imageUrl: "https://example.com/a.jpg" }] };
+  for (const response of [{ output_text: '{"text":"Modelo externo","productIds":["other-tenant"]}' },
+    { output_text: '{"text":"oi","productIds":[]}', status: "incomplete" }, { output_text: '{"text":' }, { output_text: "" }]) {
+    const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })], responder: async () => ({ ...response, usage: { input_tokens: 20, output_tokens: 4 } }) });
+    const reply = await ai.service.reply(request("tenant-a", { context: { catalog } }));
+    assert.equal(reply.source, "fallback"); assert.equal(reply.messages, undefined);
+    assert.equal(reply.text, "Contingência tenant-a.");
+    assert.equal(ai.ledger.events[0].inputTokens, 20);
+    assert.equal(ai.ledger.events[0].outputTokens, 4);
+    assert.ok(ai.ledger.events[0].cost > 0);
+  }
 });

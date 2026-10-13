@@ -1,0 +1,71 @@
+import { randomUUID } from "node:crypto";
+import { createWhatsAppReplyPayload } from "../whatsapp/outbound.js";
+
+const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
+const columns = "id, corpo, outbound_payload, external_message_id, status";
+
+export function replyFromRow(row) {
+  return row && {
+    id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [],
+    ...(row.outbound_payload?.imageUrl ? { imageUrl: row.outbound_payload.imageUrl } : {}),
+    sendNotBefore: row.outbound_payload?.sendNotBefore || null,
+    externalMessageId: row.external_message_id, status: row.status,
+  };
+}
+
+export async function hydrateReply(client, empresaId, row) {
+  const reply = replyFromRow(row);
+  const ids = row?.outbound_payload?.partIds;
+  if (ids == null) return reply;
+  if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids[0] !== row.id
+    || new Set(ids).size !== ids.length || ids.some((id) => !/^[0-9a-f-]{36}$/iu.test(id))) throw invalid();
+  const rows = (await client.query(
+    `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND id = ANY($2::uuid[])
+       AND direcao = 'saida' ORDER BY array_position($2::uuid[], id)`, [empresaId, ids],
+  )).rows;
+  if (rows.length !== ids.length || rows.some((part, index) => part.id !== ids[index]
+    || (index > 0 && part.outbound_payload?.parentReplyId !== row.id))) throw invalid();
+  return { ...reply, messages: rows.map(replyFromRow) };
+}
+
+/** All parts and their order are committed atomically, using the existing checkpoint. */
+export async function prepareReplyBatch(client, { empresaId, message, reply, origin }) {
+  if (!Array.isArray(reply.messages) || !reply.messages.length || reply.messages.length > 100) throw invalid();
+  const messages = reply.messages.map((part) => {
+    const payload = createWhatsAppReplyPayload({ to: "validation", ...part });
+    return { text: payload.type === "image" ? payload.image.caption : part.text.trim(),
+      buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}) };
+  });
+  const existing = async () => (await client.query(
+    `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
+    [empresaId, message.id],
+  )).rows[0];
+  const before = await existing();
+  if (before) return hydrateReply(client, empresaId, before);
+  const sequence = Number((await client.query(
+    `UPDATE conversas SET next_sequence = next_sequence + $3 WHERE empresa_id = $1 AND id = $2
+       RETURNING next_sequence - $3 AS sequence`, [empresaId, message.conversationId, messages.length],
+  )).rows[0]?.sequence);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) throw invalid();
+  const ids = messages.map(() => randomUUID());
+  let parent;
+  for (const [index, part] of messages.entries()) {
+    const payload = { buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
+      ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}) } : { parentReplyId: ids[0] }) };
+    const row = (await client.query(
+      `INSERT INTO mensagens (id, empresa_id, conversa_id, contato_id, numero_whatsapp_id,
+         direcao, tipo, corpo, status, origem_resposta, sequence, correlation_id, source_message_id, outbound_payload, processing_at)
+       VALUES ($1,$2,$3,$4,$5,'saida',$6,$7,'processando',$8,$9,$10,$11,$12::jsonb,now())
+       ON CONFLICT (empresa_id, source_message_id) WHERE source_message_id IS NOT NULL AND direcao = 'saida'
+       DO NOTHING RETURNING ${columns}`,
+      [ids[index], empresaId, message.conversationId, message.contactId, message.numeroWhatsappId,
+        part.imageUrl ? "imagem" : part.buttons.length ? "interativo" : "texto", part.text,
+        origin === "ai" ? "ia" : "fluxo_deterministico", sequence + index, message.correlationId,
+        index === 0 ? message.id : null, JSON.stringify(payload)],
+    )).rows[0];
+    if (index === 0 && !row) return hydrateReply(client, empresaId, await existing());
+    if (!row) throw invalid();
+    if (index === 0) parent = row;
+  }
+  return hydrateReply(client, empresaId, parent);
+}

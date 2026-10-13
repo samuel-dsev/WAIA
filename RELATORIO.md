@@ -3,6 +3,14 @@
 Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Catálogo em mensagens com imagem — 13/10/2026
+
+- Base v1.15.1 (`7d82895`) publicada e vínculo real confirmado; posteriormente, valores `1000W`/`50km` impediam importar os três produtos. Seis células corrigidas pelo navegador para números e sincronização recuperada: catálogo saudável com três fichas no runtime configVersion 9. Empresa já ativa na conferência posterior; não foi reativada pela intervenção. Evidências `.tmp/DEPLOY_V1.15.1_20261013.md` e `.tmp/ALFATECH_SHEETS_RECUPERADO_20261013.md`.
+- Novo pedido implementado localmente como v1.16.0: um produto por mensagem, foto da ficha e legenda determinística, seleção da IA por IDs permitidos, suporte Meta/YCloud. Mantém catálogo legado textual, agenda, condições comerciais e grupos fora deste escopo.
+- Checkpoint existente passa a gravar cada bloco/status individual em uma transação, sem migração; envio em ordem, revalidação por bloco e retomada dos não confirmados. Guarda a espera da IA e cancela blocos pendentes quando o bot perde autorização. Rollback exige concluir/cancelar lotes antes de voltar à versão antiga.
+- Candidata isolada Node 22: 495 casos, 477 aprovados, 18 skips, zero falhas. PostgreSQL real em `waia-test` passou checkpoint/lote/isolamento/cancelamento; volumes e dados anteriores preservados e serviço devolvido ao estado parado. Fotos atuais verificadas por metadados HEAD somente; nenhum envio WhatsApp/OpenAI real. Resposta inválida preserva consumo informado pelo provedor; aceitação sem ID impede retry automático do lote.
+- Roteiro atualizado pelo painel no rascunho. Arquivos, mensagem aprovada e limites em [CATALOGO_MENSAGENS.md](docs/CATALOGO_MENSAGENS.md). Usuário autorizou explicitamente commit, push de dev, deploy e publicação do roteiro; execução em andamento. Evidência final será registrada em `.tmp/DEPLOY_V1.16.0_20261013.md`. Trabalho anterior de equipe/MFA preservado e fora da candidata.
+
 ## Catálogo Google Sheets — 13/10/2026
 
 - v1.15.0 (`4c9e8ad`) enviada a dev e publicada na VPS após autorização, com backup cifrado e smoke aprovados; detalhes em `.tmp/DEPLOY_V1.15.0_20261013.md`. Conta de serviço dedicada sem papéis de projeto, JSON cadastrado pelo usuário e acesso Leitor à planilha confirmados. Preflight 3/3 aprovado; roteiro/vínculo publicados como configVersion 7.

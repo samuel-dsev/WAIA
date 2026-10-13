@@ -2,6 +2,7 @@ import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
 import { randomInt } from "node:crypto";
+import { hydrateReply, prepareReplyBatch } from "./reply-batch.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -144,19 +145,13 @@ export class PostgresJobHandlerRepository {
           LIMIT 1`,
         [empresaId, messageId],
       )).rows[0];
-      return row && {
-        id: row.id,
-        text: row.corpo,
-        buttons: row.outbound_payload?.buttons || [],
-        sendNotBefore: row.outbound_payload?.sendNotBefore || null,
-        externalMessageId: row.external_message_id,
-        status: row.status,
-      };
+      return hydrateReply(client, empresaId, row);
     });
   }
 
   prepareReply({ empresaId, message, reply, origin }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      if (reply.messages != null) return prepareReplyBatch(client, { empresaId, message, reply, origin });
       const sequence = (await client.query(
         `UPDATE conversas SET next_sequence = next_sequence + 1
           WHERE empresa_id = $1 AND id = $2
@@ -193,6 +188,7 @@ export class PostgresJobHandlerRepository {
   canSendBotReply({ empresaId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (await client.query(
       `SELECT 1 FROM mensagens m
+         JOIN empresas e ON e.id = m.empresa_id AND e.status = 'ativa'
          JOIN conversas c ON c.empresa_id = m.empresa_id AND c.id = m.conversa_id
          JOIN contatos ct ON ct.empresa_id = m.empresa_id AND ct.id = m.contato_id
          JOIN numeros_whatsapp n ON n.empresa_id = m.empresa_id AND n.id = m.numero_whatsapp_id
@@ -207,7 +203,10 @@ export class PostgresJobHandlerRepository {
   cancelPreparedReply({ empresaId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
       `UPDATE mensagens SET status = 'ignorada_duplicidade', updated_at = now()
-        WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'
+        WHERE empresa_id = $1 AND direcao = 'saida'
+          AND (source_message_id = $2 OR outbound_payload->>'parentReplyId' IN (
+            SELECT id::text FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'
+          ))
           AND external_message_id IS NULL AND status IN ('processando', 'enfileirada')`,
       [empresaId, messageId],
     ));
@@ -363,7 +362,7 @@ export function createWorkerHandlers({
       return { skipped: true, reason: "conversation_not_in_bot_mode" };
     }
     let prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
-    if (prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
+    if (!prepared?.messages && prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
       return { replied: true, resumed: true };
     }
     let reply;
@@ -453,13 +452,16 @@ export function createWorkerHandlers({
           reply,
           origin: reply.module === "ai_freeform" ? "ai" : "deterministic_flow",
         });
+        if (reply.messages && !prepared?.messages?.length) throw permanent("Persistência de cada mensagem obrigatória.", "BOT_REPLY_CHECKPOINT_REQUIRED");
       }
     } else {
-      reply = { text: prepared.text, buttons: prepared.buttons };
+      reply = { text: prepared.text, buttons: prepared.buttons, ...(prepared.messages ? { messages: prepared.messages } : {}) };
     }
     const sendNotBefore = prepared?.sendNotBefore || reply.sendNotBefore;
     if (sendNotBefore && !Number.isFinite(Date.parse(sendNotBefore))) throw permanent("Horário de envio da resposta inválido.", "BOT_REPLY_SCHEDULE_INVALID");
     if (prepared?.status === "ignorada_duplicidade") return { skipped: true, reason: "bot_reply_cancelled" };
+    if (prepared?.messages?.some((part) => part.status === "ignorada_duplicidade")) return { skipped: true, reason: "bot_reply_cancelled" };
+    if (prepared?.messages?.every((part) => part.externalMessageId)) return { replied: true, resumed: true };
     if (sendNotBefore && Date.parse(sendNotBefore) > clock().getTime()) {
       return { deferUntil: sendNotBefore };
     }
@@ -472,6 +474,27 @@ export function createWorkerHandlers({
     }
     if (execution.canContinue && !execution.canContinue()) {
       throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
+    }
+    if (reply.messages) {
+      if (!prepared?.messages || typeof repository.markReplySent !== "function" || typeof repository.canSendBotReply !== "function") {
+        throw permanent("Persistência de cada mensagem obrigatória.", "BOT_REPLY_CHECKPOINT_REQUIRED");
+      }
+      for (const part of prepared.messages) {
+        if (part.externalMessageId) continue;
+        const current = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
+        if (current.mode !== "bot" || !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id })) {
+          await repository.cancelPreparedReply({ empresaId: reference.empresaId, messageId: message.id });
+          return { skipped: true, reason: "bot_reply_cancelled" };
+        }
+        if (execution.canContinue && !execution.canContinue()) throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
+        const sent = await metaGateway.sendReply({ empresaId: reference.empresaId, numeroWhatsappId: message.numeroWhatsappId }, {
+          to: message.senderPhone, text: part.text, buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
+        });
+        const externalMessageId = firstMetaMessageId(sent);
+        if (typeof externalMessageId !== "string" || !externalMessageId) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
+        await repository.markReplySent({ empresaId: reference.empresaId, replyId: part.id, externalMessageId });
+      }
+      return { replied: true };
     }
     const sent = await metaGateway.sendReply({
       empresaId: reference.empresaId,

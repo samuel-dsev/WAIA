@@ -1,5 +1,6 @@
 import { paginateInteractiveOptions, withPageIndicator } from "../runtime/interactive-pagination.js";
 import { executeFlowAction } from "../flows/index.js";
+import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -78,8 +79,12 @@ function catalogHandler() {
     key: "catalog",
     actions: ["catalog.list"],
     async handle({ config }) {
-      const items = active(config.catalog.items);
+      const items = availableCatalogProducts(config.catalog);
       if (items.length === 0) return { reply: reply("O catálogo ainda não possui itens disponíveis.") };
+      if (config.catalog.source?.type === "google_sheets" || items.some((item) => item.imageUrl)) {
+        const messages = items.map(productMessage);
+        return { reply: { text: messages.map((item) => item.text).join("\n\n"), buttons: [], messages } };
+      }
       const lines = items.map((item) => {
         const price = item.price == null ? "" : ` — ${MONEY.format(item.price)}`;
         const description = item.description ? `\n${item.description}` : "";

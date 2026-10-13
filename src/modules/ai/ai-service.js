@@ -7,11 +7,13 @@ import {
   serializeTenantContext,
 } from "./guardrails.js";
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
+import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 
 function historyInput(messages, messageId) {
   return messages
     .filter((item) => item?.id !== messageId)
-    .filter((item) => item?.type === "text" && typeof item.body === "string" && item.body.trim())
+    .filter((item) => ["text", "image"].includes(item?.type) && typeof item.body === "string" && item.body.trim())
+    .filter((item) => item.type !== "image" || item.direction === "outbound")
     .filter((item) => item.direction === "inbound" || item.direction === "outbound")
     .filter((item) => item.direction !== "inbound" || !isPromptInjectionAttempt(item.body))
     .map((item) => ({
@@ -114,6 +116,7 @@ export class MultiTenantAiService {
 
     let reservation;
     let pricing;
+    let providerUsage;
     let keyType = config.keyType;
     const occurredAt = this.clock();
     try {
@@ -126,7 +129,8 @@ export class MultiTenantAiService {
         : [];
       const safeContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(safeContext)}\nTENANT_DATA_END`;
-      const instructions = buildInstructions(config);
+      const selectionFormat = catalogSelectionFormat(safeContext.catalog);
+      const instructions = [buildInstructions(config), selectionFormat ? CATALOG_SELECTION_INSTRUCTIONS : ""].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...historyInput(history, request.messageId),
@@ -136,7 +140,7 @@ export class MultiTenantAiService {
         provider: config.provider,
         model: config.model,
       }), config.model);
-      const estimatedInputTokens = estimateTokens(`${instructions}\n${JSON.stringify(inputMessages)}`);
+      const estimatedInputTokens = estimateTokens(`${instructions}\n${JSON.stringify(inputMessages)}${selectionFormat ? `\n${JSON.stringify(selectionFormat)}` : ""}`);
       const estimatedTokens = estimatedInputTokens + config.maxOutputTokens;
       const estimatedCost = calculateCost(pricing, {
         inputTokens: estimatedInputTokens,
@@ -177,16 +181,20 @@ export class MultiTenantAiService {
         max_output_tokens: config.maxOutputTokens,
         instructions,
         input: inputMessages,
+        ...(selectionFormat ? { text: { format: selectionFormat } } : {}),
       }, this.timeoutMs, {
         headers: { "X-Client-Request-Id": String(request.correlationId).slice(0, 512) },
       });
+      providerUsage = normalizeUsage(response);
       const text = String(response?.output_text || "").trim();
       if (!text) {
         const error = new Error("A IA não retornou texto.");
         error.code = "AI_EMPTY_RESPONSE";
         throw error;
       }
-      const usage = normalizeUsage(response);
+      if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
+      const reply = selectionFormat ? parseCatalogSelection(text, safeContext.catalog) : { text };
+      const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({
         reservationId: reservation.reservationId,
@@ -214,7 +222,7 @@ export class MultiTenantAiService {
         pricingVersion: pricing.version,
       });
       return Object.freeze({
-        text,
+        ...reply,
         source: "ai",
         reason: "completed",
         usage: Object.freeze({ ...usage, cost, pricingVersion: pricing.version }),
@@ -233,9 +241,9 @@ export class MultiTenantAiService {
             provider: config.provider,
             model: config.model,
             keyType,
-            inputTokens: 0,
-            outputTokens: 0,
-            cost: 0,
+            inputTokens: providerUsage?.inputTokens || 0,
+            outputTokens: providerUsage?.outputTokens || 0,
+            cost: providerUsage && pricing ? calculateCost(pricing, providerUsage) : 0,
             pricingVersion: pricing?.version || "unknown",
             configVersion: config.version,
             success: false,

@@ -1,4 +1,7 @@
+import { publicProductImageUrl } from "../../integrations/google-sheets/products-snapshot.js";
+
 const LIMITS = Object.freeze({
+  imageCaption: 1_024,
   text: 4_096,
   interactiveBody: 1_024,
   optionId: 256,
@@ -42,7 +45,7 @@ function options(value) {
   });
 }
 
-export function createWhatsAppReplyPayload({ to, text, buttons = [] } = {}) {
+export function createWhatsAppReplyPayload({ to, text, buttons = [], imageUrl } = {}) {
   const recipient = requiredText(to, "to", LIMITS.recipient);
   const body = requiredText(text, "text", LIMITS.text);
   const choices = options(buttons);
@@ -51,6 +54,11 @@ export function createWhatsAppReplyPayload({ to, text, buttons = [] } = {}) {
     recipient_type: "individual",
     to: recipient,
   };
+  if (imageUrl) {
+    if (choices.length) throw new TypeError("Uma imagem com legenda não aceita botões.");
+    if ([...body].length > LIMITS.imageCaption) throw new TypeError("A legenda da imagem excede 1024 caracteres.");
+    return { ...base, type: "image", image: { link: publicProductImageUrl(imageUrl), caption: body } };
+  }
   if (choices.length === 0) {
     return { ...base, type: "text", text: { preview_url: false, body } };
   }

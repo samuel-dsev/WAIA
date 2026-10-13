@@ -194,6 +194,7 @@ export function createTenantRuntimeRouter({
       module: command.module.key,
       text: outcome.reply?.text || "",
       buttons: outcome.reply?.buttons || [],
+      ...(outcome.reply?.messages ? { messages: outcome.reply.messages } : {}),
     };
   }
 

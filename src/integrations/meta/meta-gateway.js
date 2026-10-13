@@ -149,12 +149,12 @@ export function createMetaGateway({
     }
   }
 
-  async function sendReply(context, { to, text, buttons = [] } = {}) {
+  async function sendReply(context, { to, text, buttons = [], imageUrl } = {}) {
     const scoped = await resolve(context);
     const { credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
-    if (credentials.provider === "ycloud") return ycloud.sendReply(credentials, { to, text, buttons });
-    const message = createWhatsAppReplyPayload({ to, text, buttons });
+    if (credentials.provider === "ycloud") return ycloud.sendReply(credentials, { to, text, buttons, imageUrl });
+    const message = createWhatsAppReplyPayload({ to, text, buttons, imageUrl });
     return request(context, `${credentials.phoneNumberId}/messages`, {
       method: "POST",
       body: JSON.stringify(message),
