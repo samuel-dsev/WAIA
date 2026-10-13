@@ -45,9 +45,42 @@ export function catalogSelectionFormat(catalog) {
   };
 }
 
-export const CATALOG_SELECTION_INSTRUCTIONS = "FORMATO DA RESPOSTA: preencha productIds com até três IDs exatos do catálogo validado quando for apresentar modelos ou fotos ao cliente. Use o interesse, a cidade/unidade e o histórico para selecionar produtos pertinentes; não envie modelos em toda resposta nem repita fichas já enviadas sem necessidade. O sistema enviará cada produto em uma mensagem própria com sua imagem e legenda de dados confirmados. Não escreva URLs, fichas, preços ou especificações dos produtos selecionados em text, pois suas legendas serão montadas pelo sistema. text contém apenas a resposta conversacional ou uma pergunta útil após as fichas; pode ficar vazio quando as fichas bastarem. Se nenhum produto precisar ser apresentado, use productIds vazio e responda normalmente em text. Nunca diga que a foto já foi entregue.";
+export const CATALOG_SELECTION_INSTRUCTIONS = "FORMATO DA RESPOSTA: preencha productIds com até três IDs exatos do catálogo validado quando for apresentar modelos ou fotos ao cliente. Quando o cliente pedir três modelos ou todos os modelos, selecione todos os IDs pertinentes, até três; não selecione apenas o primeiro nem prometa uma quantidade maior do que a seleção. Use o interesse, a cidade/unidade e o histórico para selecionar produtos pertinentes; não envie modelos em toda resposta nem repita fichas já enviadas sem necessidade. O sistema enviará cada produto em uma mensagem própria com sua imagem e legenda de dados confirmados. Não escreva URLs, fichas, preços ou especificações dos produtos selecionados em text, pois suas legendas serão montadas pelo sistema. text contém apenas a resposta conversacional ou uma pergunta útil após as fichas; pode ficar vazio quando as fichas bastarem. Se nenhum produto precisar ser apresentado, use productIds vazio e responda normalmente em text. Nunca diga que a foto já foi entregue.";
 
-export function parseCatalogSelection(output, catalog) {
+const normalizeRequest = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+
+// Only complete an explicit, unfiltered list request. Named models, exclusions,
+// specifications and follow-up questions remain selections made by the model.
+function completeListSelection(ids, products, message) {
+  if (!ids.length) return ids; // Preserve the script's city/name question before offering products.
+  const normalized = normalizeRequest(message);
+  if (/\b(?:nao|apenas|somente|exceto|menos)\b/u.test(normalized)) return ids;
+  const sentences = normalized.split(/[.!?;\n]+/u).map((part) => part.trim()).filter(Boolean);
+  if (sentences.length > 2) return ids;
+  const prefix = sentences.length === 2 ? sentences[0] : "";
+  if (prefix && !/^(?:sou|falo|estou falando) de [a-z ]+$/u.test(prefix)) return ids;
+  const match = sentences.at(-1)?.match(/^(?:(?:pode|poderia) (?:me )?)?(?:mostrar|mostre|enviar|envie|mandar|mande|apresentar|apresente|quero ver|quero conhecer) (?:os |as )?(todos(?: os)?|todas(?: as)?|tres|3|dois|duas|2) (?:modelos|produtos|opcoes)(?: disponiveis| do catalogo)?(?: com (?:fotos?|imagens?)(?: e (?:precos?|valores?))?)?(?:,? por favor)?$/u);
+  if (!match) return ids;
+  const target = /^(?:dois|duas|2)$/u.test(match[1]) ? 2 : 3;
+  let eligible = products;
+  if (prefix) {
+    const city = prefix.replace(/^(?:sou|falo|estou falando) de /u, "");
+    eligible = products.filter((item) => !item.units?.length || item.units.some((unit) => normalizeRequest(unit) === city));
+    if (!eligible.some((item) => ids.includes(item.id))) return ids;
+  } else {
+    const selectedUnits = new Set(products.filter((item) => ids.includes(item.id)).flatMap((item) => item.units || []).map(normalizeRequest));
+    if (selectedUnits.size) eligible = products.filter((item) => !item.units?.length || item.units.some((unit) => selectedUnits.has(normalizeRequest(unit))));
+  }
+  // Never replace the model's chosen products or exceed the three-card limit.
+  const result = [...ids];
+  for (const item of eligible) {
+    if (result.length >= target) break;
+    if (!result.includes(item.id)) result.push(item.id);
+  }
+  return result;
+}
+
+export function parseCatalogSelection(output, catalog, { message } = {}) {
   let value;
   try { value = JSON.parse(output); } catch { value = null; }
   const products = availableCatalogProducts(catalog);
@@ -59,9 +92,10 @@ export function parseCatalogSelection(output, catalog) {
     || Object.keys(value).some((key) => !["text", "productIds"].includes(key))) {
     throw Object.assign(new Error("Seleção de catálogo inválida."), { code: "AI_INVALID_CATALOG_SELECTION" });
   }
-  const messages = value.productIds.map((id) => productMessage(byId.get(id)));
+  const selectedIds = completeListSelection(value.productIds, products, message);
+  const messages = selectedIds.map((id) => productMessage(byId.get(id)));
   const text = value.text.trim();
   if (text) messages.push({ text, buttons: [] });
   if (!messages.length) throw Object.assign(new Error("Resposta de catálogo vazia."), { code: "AI_EMPTY_RESPONSE" });
-  return { text: messages.map((item) => item.text).join("\n\n"), ...(value.productIds.length ? { messages } : {}) };
+  return { text: messages.map((item) => item.text).join("\n\n"), ...(selectedIds.length ? { messages } : {}) };
 }

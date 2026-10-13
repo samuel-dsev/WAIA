@@ -193,7 +193,7 @@ export class MultiTenantAiService {
         throw error;
       }
       if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
-      const reply = selectionFormat ? parseCatalogSelection(text, safeContext.catalog) : { text };
+      const reply = selectionFormat ? parseCatalogSelection(text, safeContext.catalog, { message: request.message }) : { text };
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

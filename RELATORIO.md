@@ -3,6 +3,15 @@
 Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Seleção completa do catálogo e espera por empresa — 13/10/2026
+
+- v1.16.0 (`ffcc557`) efetivamente publicada; roteiro da revisão 21 publicado como configuração 10 e reativação autorizada pelo painel gerou configuração 11. Catálogo saudável com três produtos. Evidência em `.tmp/DEPLOY_V1.16.0_20261013.md`.
+- Teste real às 20:27 UTC: uma imagem e um texto gerados pela IA foram entregues/lidos. Não foi falha de transporte: o checkpoint continha apenas esses dois blocos, embora o cliente tivesse pedido os três modelos e o texto prometesse apresentá-los. Espera observada entre geração e envio: cerca de 35 segundos.
+- Candidata v1.17.0 completa seleção parcial quando a mensagem pede explicitamente dois/três/todos os modelos sem filtros. Mantém IDs permitidos, disponibilidade, unidades, limite de três e perguntas prévias quando a IA ainda não oferece produtos; modelos específicos, exclusões e filtros permanecem sob seleção contextual. O formato também orienta a IA a selecionar a quantidade prometida.
+- Novo `ai.responseDelayEnabled` no onboarding: ausência mantém a espera atual; falso envia após geração sem aguardar 30–45 segundos, com checkpoint e revalidação mantidos. Prazo de lote já persistido não é alterado. Campo omitido em revisões antigas preserva a compatibilidade de checksum; nenhuma migração/dependência nova.
+- Validação Node 22 da candidata isolada: 503 casos, 485 aprovados, 18 skips opt-in, zero falhas. Novos casos exercitam o pedido real, unidade/filtros, seleção inválida, espera desativada, isolamento, bloqueio durante geração e retomada de envio parcial. Interface sintética salvou a opção falsa e manteve-a após recarregar. Não houve chamada OpenAI/WhatsApp nesta correção nem nova execução PostgreSQL/Redis; as operações de persistência não foram alteradas.
+- 16 arquivos em [CATALOGO_MENSAGENS.md](docs/CATALOGO_MENSAGENS.md). Versão minor pelo controle compatível novo. Commit, push e deploy ainda não executados; suspensão humana, outras empresas e alterações preexistentes de equipe/MFA preservadas. Após aprovação/deploy, desativar a espera da ALFATECH e publicar pelo painel, então repetir o teste real.
+
 ## Catálogo em mensagens com imagem — 13/10/2026
 
 - Base v1.15.1 (`7d82895`) publicada e vínculo real confirmado; posteriormente, valores `1000W`/`50km` impediam importar os três produtos. Seis células corrigidas pelo navegador para números e sincronização recuperada: catálogo saudável com três fichas no runtime configVersion 9. Empresa já ativa na conferência posterior; não foi reativada pela intervenção. Evidências `.tmp/DEPLOY_V1.15.1_20261013.md` e `.tmp/ALFATECH_SHEETS_RECUPERADO_20261013.md`.

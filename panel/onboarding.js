@@ -846,6 +846,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     const ai = state.configuration.ai;
     const schema = [
       { name: "enabled", path: "ai.enabled", label: "IA habilitada", type: "checkbox", value: ai.enabled },
+      { name: "responseDelayEnabled", path: "ai.responseDelayEnabled", label: "Aguardar 30–45 segundos antes de enviar a resposta da IA", type: "checkbox", value: ai.responseDelayEnabled !== false },
       { name: "provider", path: "ai.provider", label: "Provedor", value: ai.provider || "openai", type: "select", options: [["openai", "OpenAI"], ["simulated", "Simulado (sem chamada externa)"]] },
       { name: "model", path: "ai.model", label: "Modelo", value: ai.model || "", required: true },
       { name: "personality", path: "ai.personality", label: "Personalidade", value: ai.personality || "", type: "textarea" },

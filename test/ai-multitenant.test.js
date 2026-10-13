@@ -335,3 +335,12 @@ test("resposta estruturada desconhecida, truncada ou recusada não vaza JSON ao 
     assert.ok(ai.ledger.events[0].cost > 0);
   }
 });
+
+test("serviço completa os três modelos pedidos quando a IA seleciona apenas um", async () => {
+  const catalog = { source: { type: "google_sheets", status: "healthy" }, items: ["a", "b", "c"].map((id) => ({ id, name: `Modelo ${id}`, units: ["Taubaté"], imageUrl: `https://example.com/${id}.jpg` })) };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })],
+    responder: async () => ({ output_text: '{"text":"","productIds":["a"]}', usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { message: "Sou de Taubaté. Pode me mostrar os três modelos disponíveis com fotos e preços?", context: { catalog } }));
+  assert.equal(reply.source, "ai");
+  assert.deepEqual(reply.messages.map((item) => item.imageUrl), ["https://example.com/a.jpg", "https://example.com/b.jpg", "https://example.com/c.jpg"]);
+});

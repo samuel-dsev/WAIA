@@ -45,6 +45,19 @@ test("três imagens seguem em ordem; retry retoma só o bloco não confirmado e 
   assert.equal(f.sent.length, 3);
 });
 
+test("três imagens sem espera mantêm checkpoint, ordem e retomada após falha parcial", async () => {
+  const f = fixture();
+  const load = f.dependencies.tenantDefinitionRepository.load;
+  f.dependencies.tenantDefinitionRepository.load = async () => { const definition = await load(); definition.ai.responseDelayEnabled = false; return definition; };
+  await assert.rejects(f.handler()(f.reference), /Provider temporariamente/u);
+  assert.ok(f.state().prepared.sendNotBefore);
+  assert.deepEqual(f.sent.map((part) => part.text), ["A"]);
+  f.fail(null);
+  assert.equal((await f.handler()(f.reference)).replied, true);
+  assert.deepEqual(f.sent.map((part) => part.text), ["A", "B", "C"]);
+  assert.equal(f.state().aiCalls, 1);
+});
+
 test("assunção humana ou bloqueio após primeiro produto cancela os demais", async () => {
   for (const mode of ["human", "blocked"]) {
     const f = fixture(); f.fail(null);

@@ -368,6 +368,7 @@ export function createWorkerHandlers({
     let reply;
     if (!prepared) {
       let generatedByAi = false;
+      let responseDelayEnabled = true;
       try {
         await metaGateway.markRead?.({
           empresaId: reference.empresaId,
@@ -385,6 +386,7 @@ export function createWorkerHandlers({
       } else {
         const definition = await tenantDefinitionRepository.load(reference.empresaId);
         if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
+        responseDelayEnabled = definition.ai?.responseDelayEnabled !== false;
         const runtime = createConfiguredTenantRuntime({
           definition,
           clock,
@@ -441,8 +443,8 @@ export function createWorkerHandlers({
       }
       if (generatedByAi) {
         if (typeof repository.prepareReply !== "function") throw permanent("Persistência da resposta da IA não configurada.", "BOT_REPLY_CHECKPOINT_REQUIRED");
-        const delayMs = aiReplyDelayMs();
-        if (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
+        const delayMs = responseDelayEnabled ? aiReplyDelayMs() : 0;
+        if (responseDelayEnabled && (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000)) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
       }
       if (repository.prepareReply) {

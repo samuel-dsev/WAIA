@@ -3,6 +3,8 @@
 Atualizado em 13/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
+Correção e controle de testes em 13/10/2026: v1.16.0 (`ffcc557`) publicada e ALFATECH reativada por autorização. Teste real entregou uma ficha; a IA havia selecionado somente um produto apesar do pedido de três. Candidata v1.17.0 completa seleções parciais em pedidos explícitos de lista sem filtros e permite desativar a espera de 30–45 segundos por empresa no onboarding. Escopo de 16 arquivos e validações em [CATALOGO_MENSAGENS.md](docs/CATALOGO_MENSAGENS.md). Commit/push/deploy aguardam confirmação própria; nenhuma configuração de produção alterada nesta correção.
+
 Adendo de 13/10/2026: pedido de mensagens individuais do catálogo preparado como v1.16.0. Cada produto com foto usa imagem e legenda com fatos validados; seleção da IA por IDs, persistência/status por bloco e retomada sem repetir envios confirmados. Roteiro da ALFATECH salvo no rascunho. Arquivos, validações e limites em [CATALOGO_MENSAGENS.md](docs/CATALOGO_MENSAGENS.md). Commit, push de dev, deploy e publicação do roteiro explicitamente autorizados; execução em andamento. Não estende a fase autorizada para outras pendências.
 
 Correção de 13/10/2026: v1.15.0 publicada como `4c9e8ad`; a conferência real do runtime identificou incompatibilidade com IDs lógicos gerados pelo painel. Correção compatível preparada como v1.15.1, mantendo o isolamento por empresa e recusando conexões ambíguas. Escopo/testes em [CATALOGO_GOOGLE_SHEETS.md](docs/CATALOGO_GOOGLE_SHEETS.md). Commit, push de dev e deploy explicitamente autorizados; execução em andamento. O usuário decidiu manter a ALFATECH suspensa.

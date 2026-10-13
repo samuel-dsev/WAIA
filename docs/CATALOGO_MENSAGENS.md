@@ -1,4 +1,39 @@
-# Catálogo: um produto por mensagem — candidata v1.16.0
+# Catálogo: um produto por mensagem
+
+## Candidata v1.17.0 — seleção completa e testes sem espera
+
+v1.16.0 publicada como `ffcc557`. ALFATECH reativada com autorização e configuração 11 ativa. Teste real enviou uma imagem e um texto, ambos entregues/lidos: a IA selecionou só um ID apesar do pedido dos três modelos. O transporte confirmou todos os blocos preparados; não havia dois produtos pendentes na fila.
+
+A correção completa uma seleção válida parcial em pedidos explícitos de dois/três/todos os modelos sem filtros (incluindo a frase exata do teste). Acrescenta somente produtos elegíveis da própria empresa e unidade pertinente, até três. Modelos específicos, exclusões, especificações e mensagens compostas fora dessa forma permanecem sob seleção contextual da IA. Se ela ainda pergunta cidade/nome sem selecionar nenhum produto, essa pergunta é preservada. A seleção inválida continua recusada antes de qualquer complementação; fotos/preços continuam vindos das fichas validadas.
+
+`ai.responseDelayEnabled` permite desmarcar “Aguardar 30–45 segundos antes de enviar a resposta da IA” em Onboarding → IA. Não altera o retorno após handoff ou limites de uso. Configurações antigas mantêm a espera por padrão e seu checksum: o campo só é materializado quando fornecido. Sem espera, prazo imediato é persistido e a autorização de envio continua revalidada; prazos de respostas já preparadas são preservados nas retentativas.
+
+Validação: candidata isolada em Node 22, 503 casos/485 aprovados/18 skips/zero falhas. Testes específicos cobrem pedido real com seleção de um ID, disponibilidade, unidade, filtros/exclusões, IDs estrangeiros, ausência de seleção, envio imediato, isolamento da opção por empresa, bloqueio durante geração e retomada sem repetir blocos confirmados. UI local sintética confirmou falso salvo após recarregar. Sem nova chamada OpenAI/WhatsApp ou testes PostgreSQL/Redis nesta correção; checkpoint/banco não mudaram. Produção ainda usa v1.16.0 com espera ativa; aplicação depende de publicação da candidata e configuração da ALFATECH pelo painel.
+
+Mensagem proposta: `feat: v1.17.0 completa catálogo solicitado e permite resposta sem espera`.
+
+16 arquivos para esta candidata:
+
+1. `src/modules/business/catalog-messages.js`
+2. `src/modules/ai/ai-service.js`
+3. `src/modules/configuration/tenant-runtime-config-v2.js`
+4. `src/modules/configuration/legacy-adapter.js`
+5. `src/modules/jobs/handlers.js`
+6. `panel/onboarding.js`
+7. `test/catalog-product-messages.test.js`
+8. `test/catalog-message-delivery.test.js`
+9. `test/ai-reply-delay.test.js`
+10. `test/configuration-v2.test.js`
+11. `test/ai-multitenant.test.js`
+12. `package.json`
+13. `package-lock.json`
+14. `PLAN.md`
+15. `RELATORIO.md`
+16. `docs/CATALOGO_MENSAGENS.md`
+
+Após aprovação de commit/push/deploy: publicar a mesma candidata, desativar a espera somente na ALFATECH pelo onboarding e publicar a configuração. Nenhuma alteração no roteiro é necessária para a instrução de quantidade incluída pelo runtime. Lotes persistidos permanecem compatíveis com v1.16.0; antes de voltar a ela, republicar a configuração sem o campo novo, que a versão anterior não reconhece. Rollback para versões anteriores a v1.16.0 mantém o cuidado com lotes descrito abaixo.
+
+## Registro da entrega v1.16.0
 
 Pedido de 13/10/2026: substituir o bloco único de produtos por mensagens individuais, cada uma com a foto do produto e as informações na legenda. Base publicada v1.15.1 (`7d82895`). Implementação local concluída; commit, push de dev, deploy e publicação do roteiro explicitamente autorizados pelo usuário; execução em andamento. Evidência final será registrada em `.tmp/DEPLOY_V1.16.0_20261013.md`.
 

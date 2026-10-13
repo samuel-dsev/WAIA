@@ -100,6 +100,7 @@ export function adaptLegacyTenantDefinitionToV2(definition, {
       keyMode: "own",
       fallbackMessage: legacy.ai?.fallbackMessage || runtime.identity?.fallbackMessage,
       followUpQuestion: legacy.ai?.followUpQuestion,
+      ...(legacy.ai?.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: legacy.ai.responseDelayEnabled }),
     } : { enabled: false },
     flows: { definitions: [] },
     integrations: [],
@@ -178,6 +179,7 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
     },
     ai: {
       enabled: config.ai.enabled,
+      ...(config.ai.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: config.ai.responseDelayEnabled }),
       prompt: config.ai.prompt,
       fallbackMessage: config.ai.fallbackMessage,
       followUpQuestion: config.ai.followUpQuestion,

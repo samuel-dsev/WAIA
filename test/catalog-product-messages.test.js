@@ -23,6 +23,30 @@ test("cada ficha usa imagem e legenda somente do produto selecionado", () => {
   assert.equal(reply.messages[2].imageUrl, undefined);
 });
 
+test("pedido explícito de três modelos completa uma seleção parcial sem misturar as fichas", () => {
+  const data = catalog([product(), product({ id: "b", name: "Modelo B", imageUrl: "https://example.com/b.jpg" }),
+    product({ id: "c", name: "Modelo C", imageUrl: "https://example.com/c.jpg" }), product({ id: "off", active: false })]);
+  const output = '{"text":"","productIds":["product-a"]}';
+  const reply = parseCatalogSelection(output, data, { message: "Sou de Taubaté. Pode me mostrar os três modelos disponíveis com fotos e preços?" });
+  assert.deepEqual(reply.messages.map((item) => item.imageUrl), ["https://example.com/a.jpg", "https://example.com/b.jpg", "https://example.com/c.jpg"]);
+  assert.match(reply.messages[1].text, /^\*Modelo B\*/u);
+  assert.doesNotMatch(reply.messages[1].text, /Modelo C/u);
+  assert.equal(parseCatalogSelection(output, data, { message: "Envie todos os produtos do catálogo" }).messages.length, 3);
+  assert.equal(parseCatalogSelection(output, data, { message: "Mostre dois modelos, por favor" }).messages.length, 2);
+});
+
+test("completar a lista respeita cidade, filtros, perguntas prévias e limite do catálogo", () => {
+  const data = catalog([product(), product({ id: "b", units: ["Outra cidade"] }), product({ id: "out", availability: "unavailable" }), product({ id: "c", units: ["Taubaté"] })]);
+  const output = '{"text":"","productIds":["product-a"]}';
+  assert.equal(parseCatalogSelection(output, data, { message: "Sou de Taubaté. Mostre os três modelos disponíveis" }).messages.length, 2);
+  assert.equal(parseCatalogSelection(output, data, { message: "Mostre os três modelos disponíveis" }).messages.length, 2);
+  for (const message of ["Não envie todos os modelos", "Mostre apenas dois modelos", "Mostre os três modelos de 2000W", "Mostre todos os modelos exceto o A", "Quero ver o Modelo B", "Gostei. Sou de Taubaté. Mostre os três modelos"]) {
+    assert.equal(parseCatalogSelection(output, data, { message }).messages.length, 1);
+  }
+  assert.deepEqual(parseCatalogSelection('{"text":"Qual sua cidade?","productIds":[]}', data, { message: "Mostre os três modelos disponíveis" }), { text: "Qual sua cidade?" });
+  assert.throws(() => parseCatalogSelection('{"text":"","productIds":["foreign"]}', data, { message: "Mostre os três modelos disponíveis" }));
+});
+
 test("inativos, indisponíveis e fonte expirada não são oferecidos; sob consulta permanece explícito", () => {
   const data = catalog([product({ active: false }), product({ id: "out", availability: "unavailable" }), product({ id: "ask", availability: "on_request", price: undefined, imageUrl: undefined })]);
   assert.deepEqual(availableCatalogProducts(data).map((item) => item.id), ["ask"]);

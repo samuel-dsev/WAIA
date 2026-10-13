@@ -4,7 +4,7 @@ import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 import { compileTenantRuntimeConfigV2, materializeLegacyTenantDefinition } from "../src/modules/configuration/index.js";
 import { createJobProcessor, MemoryJobRepository, MemoryLockManager } from "../src/modules/jobs/index.js";
 
-function fixture({ delayMs = 30_000, source = "ai" } = {}) {
+function fixture({ delayMs = 30_000, source = "ai", responseDelayEnabled } = {}) {
   let now = Date.parse("2026-10-11T12:00:00Z");
   let prepared = null, aiCalls = 0, draws = 0, allowed = true, failSend = false;
   const conversation = { mode: "bot" };
@@ -15,7 +15,7 @@ function fixture({ delayMs = 30_000, source = "ai" } = {}) {
     schemaVersion: 2, identity: { name: "Teste" }, modules: ["catalog", "human_handoff", "ai_freeform"],
     menu: { text: "Menu", options: [{ id: "equipe", label: "Equipe", action: "human_handoff.request", params: {} }] },
     routing: { greetings: ["oi"], aliases: [], fallbackAction: "ai_freeform.reply" },
-    ai: { enabled: true, provider: "simulated", model: "test", prompt: "Atenda a empresa", keyMode: "simulated" },
+    ai: { enabled: true, provider: "simulated", model: "test", prompt: "Atenda a empresa", keyMode: "simulated", ...(responseDelayEnabled === undefined ? {} : { responseDelayEnabled }) },
   }, { empresaId: "tenant", configVersion: 1, draftVersion: 1 }));
   const repository = {
     async inboundMessage() { return message; }, async statusEvent() {},
@@ -39,6 +39,7 @@ function fixture({ delayMs = 30_000, source = "ai" } = {}) {
     advance(ms) { now += ms; }, now: () => now,
     block() { allowed = false; }, failSend(value) { failSend = value; },
     state: () => ({ prepared, aiCalls, draws }),
+    setDelayEnabled(value) { definition.ai.responseDelayEnabled = value; },
   };
 }
 
@@ -59,6 +60,39 @@ test("IA termina, salva a resposta e aguarda 30 ou 45 segundos sem enviar antes"
     assert.deepEqual(await f.handler()(f.reference), { replied: true, resumed: true });
     assert.equal(f.sent.length, 1);
   }
+});
+
+test("empresa com espera desabilitada persiste e envia imediatamente sem alterar outras empresas", async () => {
+  const immediate = fixture({ responseDelayEnabled: false });
+  assert.deepEqual(await immediate.handler()(immediate.reference), { replied: true });
+  assert.equal(immediate.sent.length, 1);
+  assert.equal(immediate.state().draws, 0);
+  assert.equal(Date.parse(immediate.state().prepared.sendNotBefore), immediate.now());
+  assert.equal((await immediate.handler()(immediate.reference)).resumed, true);
+  assert.equal(immediate.state().aiCalls, 1);
+  const delayed = fixture();
+  assert.ok((await delayed.handler()(delayed.reference)).deferUntil);
+  assert.equal(delayed.sent.length, 0);
+});
+
+test("sem espera, pausa ou bloqueio durante a geração ainda impede o envio", async () => {
+  for (const blocked of [false, true]) {
+    const f = fixture({ responseDelayEnabled: false });
+    const generate = f.dependencies.aiService.reply;
+    f.dependencies.aiService.reply = async () => { const result = await generate(); if (blocked) f.block(); else f.conversation.mode = "human"; return result; };
+    assert.equal((await f.handler()(f.reference)).skipped, true);
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.state().prepared.status, "ignorada_duplicidade");
+  }
+});
+
+test("trocar configuração não altera o prazo de uma resposta já persistida", async () => {
+  const f = fixture();
+  const first = await f.handler()(f.reference);
+  f.setDelayEnabled(false);
+  assert.equal((await f.handler()(f.reference)).deferUntil, first.deferUntil);
+  assert.equal(f.state().aiCalls, 1);
+  assert.equal(f.state().draws, 1);
 });
 
 test("reinício e retry de envio reutilizam o prazo e a resposta sem chamar IA novamente", async () => {

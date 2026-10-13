@@ -45,6 +45,18 @@ function memoryStateRepository() {
   };
 }
 
+test("espera da IA é opcional, booleana e preserva checksum das revisões existentes", () => {
+  const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
+  assert.equal(Object.hasOwn(old.configuration.ai, "responseDelayEnabled"), false);
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(old), true);
+  for (const value of [false, true]) {
+    const compiled = compileTenantRuntimeConfigV2(minimalConfig({ ai: { responseDelayEnabled: value } }), { empresaId: "tenant-a", configVersion: 2 });
+    assert.equal(materializeLegacyTenantDefinition(compiled).ai.responseDelayEnabled, value);
+    assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled), true);
+  }
+  for (const value of [null, 0, "false"]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ ai: { responseDelayEnabled: value } })).valid, false);
+});
+
 test("catálogo V2 congela capacidades, ações, contextos e parâmetros sem alterar o V1", () => {
   assert.deepEqual(CAPABILITY_KEYS_V2, [
     "catalog", "orders", "events", "appointments", "payments",
