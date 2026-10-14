@@ -220,6 +220,7 @@ export function parseTenantRuntimeConfig(input) {
     flows: { definitions: flows },
     humanHandoff: {
       message: optionalText(input.humanHandoff?.message, "humanHandoff.message", { max: 1000 }),
+      ...(input.humanHandoff?.salesInterestMessage == null ? {} : { salesInterestMessage: optionalText(input.humanHandoff.salesInterestMessage, "humanHandoff.salesInterestMessage", { max: 1000 }) }),
       channel: optionalText(input.humanHandoff?.channel, "humanHandoff.channel", { max: 300 }),
       cooldownSeconds: cooldownSeconds(input.humanHandoff?.cooldownSeconds),
     },

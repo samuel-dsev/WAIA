@@ -3,6 +3,8 @@ import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
 import { randomInt } from "node:crypto";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
+import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
+import { acknowledgeReply } from "./sales-interest.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -40,7 +42,7 @@ export class PostgresJobHandlerRepository {
         `SELECT m.id, m.empresa_id, m.conversa_id, m.contato_id, m.numero_whatsapp_id,
                 m.tipo, m.corpo, m.media_external_id, m.media_storage_key,
                 m.media_mime_type, m.media_size_bytes, m.media_sha256, m.external_message_id,
-                m.correlation_id, c.telefone_normalizado
+                m.correlation_id, m.outbound_payload, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
           WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'entrada' AND c.deleted_at IS NULL
@@ -57,6 +59,7 @@ export class PostgresJobHandlerRepository {
         numeroWhatsappId: row.numero_whatsapp_id,
         type: fromDatabase(row.tipo),
         text: row.corpo || "",
+        adReferral: normalizeAdReferral(row.outbound_payload?.adReferral),
         mediaId: row.media_external_id || null,
         mediaStorageKey: row.media_storage_key || null,
         mediaMimeType: row.media_mime_type || null,
@@ -153,6 +156,20 @@ export class PostgresJobHandlerRepository {
     return withTenantTransaction(this.pool, { empresaId }, ({ client }) => loadCatalogBrowseState(client, empresaId, conversationId));
   }
 
+  adReferral({ empresaId, conversationId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(
+        `SELECT m.outbound_payload FROM mensagens m
+          JOIN mensagens anchor ON anchor.empresa_id=m.empresa_id AND anchor.conversa_id=m.conversa_id AND anchor.id=$3
+         WHERE m.empresa_id=$1 AND m.conversa_id=$2 AND m.direcao='entrada'
+           AND m.redacted_at IS NULL AND anchor.redacted_at IS NULL AND m.sequence<=anchor.sequence
+           AND m.outbound_payload ? 'adReferral'
+         ORDER BY m.sequence DESC LIMIT 1`, [empresaId, conversationId, messageId],
+      )).rows[0];
+      return normalizeAdReferral(row?.outbound_payload?.adReferral);
+    });
+  }
+
   prepareReply({ empresaId, message, reply, origin }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       if (reply.messages != null) return prepareReplyBatch(client, { empresaId, message, reply, origin });
@@ -176,7 +193,8 @@ export class PostgresJobHandlerRepository {
           empresaId, message.conversationId, message.contactId, message.numeroWhatsappId,
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
-          message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}) }),
+          message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
+            ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}) }),
         ],
       )).rows[0];
       if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
@@ -217,12 +235,7 @@ export class PostgresJobHandlerRepository {
   }
 
   markReplySent({ empresaId, replyId, externalMessageId }) {
-    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
-      `UPDATE mensagens
-          SET external_message_id = $3, status = 'enviada', sent_at = now(), error_code = NULL, error_sanitized = NULL
-        WHERE empresa_id = $1 AND id = $2 AND direcao = 'saida'`,
-      [empresaId, replyId, externalMessageId],
-    ));
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => acknowledgeReply(client, { empresaId, replyId, externalMessageId }));
   }
 
   markHumanMessageSent({ empresaId, messageId, externalMessageId }) {
@@ -420,7 +433,10 @@ export function createWorkerHandlers({
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
                   events: config.events,
-                  catalog: { ...config.catalog, ...(salesMode ? { salesMode: true, browseState } : {}) },
+                  catalog: { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
+                    adContext: catalogAdContext(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }), config.catalog, { current: Boolean(message.adReferral) }),
+                    interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
+                  } : {}) },
                   services: config.appointments?.services || [],
                   knowledgeBase: (definition.publicReplies || [])
                     .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
@@ -517,6 +533,7 @@ export function createWorkerHandlers({
       buttons: reply.buttons,
     });
     const externalMessageId = firstMetaMessageId(sent);
+    if (reply.salesInterest && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {
       await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
     } else {

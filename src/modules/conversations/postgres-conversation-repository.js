@@ -431,7 +431,7 @@ export class PostgresConversationRepository {
             FOR UPDATE SKIP LOCKED
          )
          UPDATE mensagens message
-            SET corpo = NULL, media_external_id = NULL, media_storage_key = NULL,
+            SET corpo = NULL, outbound_payload = '{}'::jsonb, media_external_id = NULL, media_storage_key = NULL,
                 media_mime_type = NULL, media_size_bytes = NULL,
                 media_sha256 = NULL, media_stored_at = NULL,
                 error_code = NULL, error_sanitized = NULL,

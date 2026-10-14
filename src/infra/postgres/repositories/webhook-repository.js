@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { withPlatformTransaction, withTenantTransaction } from "../transaction.js";
+import { normalizeAdReferral } from "../../../modules/whatsapp/ad-referral.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -129,8 +130,8 @@ export class PostgresWebhookRepository {
       `INSERT INTO mensagens (
          empresa_id, conversa_id, contato_id, numero_whatsapp_id, direcao, tipo,
          corpo, media_external_id, external_message_id, status, sequence,
-         provider_timestamp, correlation_id, enqueued_at
-       ) VALUES ($1,$2,$3,$4,'entrada',$5,$6,$7,$8,'enfileirada',$9,$10,$11,now())
+         provider_timestamp, correlation_id, enqueued_at, outbound_payload
+       ) VALUES ($1,$2,$3,$4,'entrada',$5,$6,$7,$8,'enfileirada',$9,$10,$11,now(),$12::jsonb)
        ON CONFLICT (empresa_id, external_message_id) WHERE external_message_id IS NOT NULL
        DO NOTHING
        RETURNING id`,
@@ -146,6 +147,7 @@ export class PostgresWebhookRepository {
         sequenceResult.rows[0].sequence,
         event.occurredAt,
         uuidOrNew(correlationId),
+        JSON.stringify(event.adReferral ? { adReferral: normalizeAdReferral(event.adReferral) } : {}),
       ],
     );
     if (!inserted.rows[0]) {

@@ -69,6 +69,19 @@ test("modo comercial do catálogo é opt-in por empresa e não altera revisões 
   for (const value of [0, "true", null]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ ai: { catalogSalesEnabled: value } })).valid, false);
 });
 
+test("encerramento comercial é opcional, validado e preservado na compilação e no runtime", () => {
+  const message = "Ótimo, anotei seu interesse aqui!";
+  const previous = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
+  assert.equal(Object.hasOwn(previous.configuration.humanHandoff, "salesInterestMessage"), false);
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(previous), true);
+  const compiled = compileTenantRuntimeConfigV2(minimalConfig({ humanHandoff: { salesInterestMessage: message } }), { empresaId: "tenant-a", configVersion: 2 });
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled), true);
+  const definition = materializeLegacyTenantDefinition(compiled);
+  const runtime = createConfiguredTenantRuntime({ definition, stateRepository: memoryStateRepository() });
+  assert.equal(runtime.config.humanHandoff.salesInterestMessage, message);
+  for (const value of [42, {}, "x".repeat(1001)]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ humanHandoff: { salesInterestMessage: value } })).valid, false);
+});
+
 test("catálogo V2 congela capacidades, ações, contextos e parâmetros sem alterar o V1", () => {
   assert.deepEqual(CAPABILITY_KEYS_V2, [
     "catalog", "orders", "events", "appointments", "payments",

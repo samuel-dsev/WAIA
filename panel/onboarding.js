@@ -567,13 +567,14 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       { name: "privacyPolicy", path: "identity.privacyPolicy", label: "Política de privacidade", value: identity.privacyPolicy, type: "textarea", rows: 5 },
       { name: "consentText", path: "identity.consentText", label: "Texto de consentimento", value: identity.consentText, type: "textarea" },
       { name: "handoffMessage", path: "humanHandoff.message", label: "Mensagem de atendimento humano", value: handoff.message || "", type: "textarea" },
+      { name: "salesInterestMessage", path: "humanHandoff.salesInterestMessage", label: "Encerramento por interesse em produto (vazio = desativado)", value: handoff.salesInterestMessage || "", type: "textarea" },
       { name: "handoffChannel", path: "humanHandoff.channel", label: "Canal humano", value: handoff.channel || "" },
       { name: "cooldownSeconds", path: "humanHandoff.cooldownSeconds", label: "Retomar bot após (segundos; 0 = somente manual)", value: handoff.cooldownSeconds ?? 0, type: "number" },
       { name: "assigneeRef", path: "humanHandoff.assigneeRef", label: "Responsável padrão", value: handoff.assigneeRef || "", type: "select", optional: true, options: [["", "Definir mais tarde"], ...state.users.map((user) => [`user:${user.id}`, `${user.name} · ${user.email}`])] },
     ];
     card.append(stepForm(schema, (values) => {
       Object.assign(identity, { welcomeMessage: values.welcomeMessage, fallbackMessage: values.fallbackMessage, address: values.address, schedules: values.schedules, publicRules: values.publicRules, establishmentRules: values.establishmentRules, privacyPolicy: values.privacyPolicy, consentText: values.consentText });
-      state.configuration.humanHandoff = { message: values.handoffMessage, channel: values.handoffChannel, cooldownSeconds: Number(values.cooldownSeconds), ...(values.assigneeRef ? { assigneeRef: values.assigneeRef } : {}) };
+      state.configuration.humanHandoff = { message: values.handoffMessage, ...(values.salesInterestMessage ? { salesInterestMessage: values.salesInterestMessage } : {}), channel: values.handoffChannel, cooldownSeconds: Number(values.cooldownSeconds), ...(values.assigneeRef ? { assigneeRef: values.assigneeRef } : {}) };
     }));
     const script = createAttendanceScriptEditor({ value: state.configuration.ai.prompt || "", onInput: (value) => {
       state.configuration.ai.prompt = value;

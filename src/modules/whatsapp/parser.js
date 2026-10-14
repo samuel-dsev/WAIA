@@ -1,3 +1,5 @@
+import { normalizeAdReferral } from "./ad-referral.js";
+
 const DEFAULT_LIMITS = Object.freeze({
   entries: 100,
   changesPerEntry: 100,
@@ -159,6 +161,7 @@ function parseMessage(messageValue, context, path, limits) {
     occurredAt: timestamp(message.timestamp, `${path}.timestamp`),
     messageType,
     ...content,
+    ...(normalizeAdReferral(message.referral) ? { adReferral: normalizeAdReferral(message.referral) } : {}),
   };
 }
 
