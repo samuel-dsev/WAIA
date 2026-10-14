@@ -1,4 +1,17 @@
-# Atendimento comercial do catálogo — v1.18.0 e correção v1.18.1
+# Atendimento comercial do catálogo — v1.18.0–v1.18.2
+
+## Nova consulta explícita — candidata v1.18.2, 14/10/2026
+
+v1.18.1 / `c94edde` publicada com autorização; registro em `.tmp/DEPLOY_V1.18.1_20261013.md`. O bloqueio global de fotos também reduziu um novo pedido geral a uma ficha, porque as outras duas já haviam sido confirmadas na mesma conversa. O pedido do usuário distingue reapresentação solicitada de repetição automática após demonstrar interesse.
+
+- Novo pedido geral de catálogo, categoria ou faixa de preço: três primeiros elegíveis na ordem da planilha, mesmo após uma consulta anterior; abertura e pergunta final separadas. Menos de três somente se houver menos elegíveis para o filtro atual.
+- "Mais opções": manter filtro e IDs confirmados da consulta corrente, até três por vez, sem reiniciar. Não usar o histórico global de outra consulta como cursor.
+- "Gostei da Harley": reconhecer a escolha em texto, sem foto/ficha automática. Histórico global `presentedProductIds` protege a escolha; `seenProductIds` controla apenas a página corrente. Dúvida técnica segue em texto com dados aprovados.
+- Os dois conjuntos são derivados no escopo empresa/conversa; somente partes confirmadas contam, sem falhas/cancelamentos/redações. Metadados persistidos anteriores continuam válidos. Sem migração/dependência ou mudança no schema estruturado da resposta.
+
+Roteiro da ALFATECH salvo pelo painel no rascunho 31, 15.993 caracteres, sem publicação; saudação, condições comerciais e espera desativada preservadas. Fonte da comparação em `.tmp/alfatech-v1182-prompt-original.txt` e `.tmp/alfatech-v1182-prompt-rascunho.txt`.
+
+Escopo (10 arquivos): `src/modules/business/catalog-sales.js`, `src/modules/jobs/reply-batch.js`, `test/catalog-sales.test.js`, `test/ai-multitenant.test.js`, `test/ai-reply-delay-postgres.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Candidata isolada Node 22: 519 casos/501 aprovados/18 skips/zero falhas. PostgreSQL real `waia-test` confirmou cursor da consulta separado do histórico global, confirmações, falhas, cancelamento e isolamento; registros sintéticos próprios removidos, volumes preservados e PostgreSQL devolvido parado. Whitespace aprovado. Sem envio real WhatsApp/OpenAI ou reset de contato nesta preparação. Mensagem aprovada: `fix: v1.18.2 reinicia catálogo solicitado sem repetir escolhas`. Commit/push/deploy e publicação do roteiro explicitamente autorizados; execução em andamento, com evidência final em `.tmp/DEPLOY_V1.18.2_20261014.md`. Equipe/MFA fica fora.
 
 ## Correção preparada em 13/10/2026
 

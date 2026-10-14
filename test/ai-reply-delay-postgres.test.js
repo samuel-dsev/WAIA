@@ -48,7 +48,7 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.equal(batch.messages.length, 3);
     assert.deepEqual(batch.messages.map((part) => part.text), ["A", "B", "C"]);
     assert.deepEqual((await handlers.prepareReply(batchInput)).messages.map((part) => part.id), batch.messages.map((part) => part.id));
-    assert.deepEqual(await handlers.catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: 1000, maxPrice: 5000 }, seenProductIds: [] });
+    assert.deepEqual(await handlers.catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: 1000, maxPrice: 5000 }, seenProductIds: [], presentedProductIds: [] });
     assert.equal(await handlers.catalogBrowseState({ empresaId: randomUUID(), conversationId }), null);
     assert.equal(await handlers.catalogBrowseState({ empresaId, conversationId: randomUUID() }), null);
     assert.equal((await handlers.preparedReply({ empresaId: randomUUID(), messageId: batchMessageId })), undefined);
@@ -56,7 +56,7 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     const hydrated = await new PostgresJobHandlerRepository(pool).preparedReply({ empresaId, messageId: batchMessageId });
     assert.ok(hydrated.messages[0].externalMessageId); assert.equal(hydrated.messages[1].externalMessageId, null);
     assert.equal(hydrated.messages[0].catalogProductId, "A");
-    assert.deepEqual(await new PostgresJobHandlerRepository(pool).catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: 1000, maxPrice: 5000 }, seenProductIds: ["A"] });
+    assert.deepEqual(await new PostgresJobHandlerRepository(pool).catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: 1000, maxPrice: 5000 }, seenProductIds: ["A"], presentedProductIds: ["A"] });
     assert.equal(hydrated.sendNotBefore, sendNotBefore);
     await handlers.cancelPreparedReply({ empresaId, messageId: batchMessageId });
     const cancelled = await handlers.preparedReply({ empresaId, messageId: batchMessageId });
@@ -79,11 +79,13 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.equal(page.messages.length, 5);
     assert.deepEqual((await handlers.prepareReply(pageInput)).messages.map((part) => part.id), page.messages.map((part) => part.id));
     await handlers.markReplySent({ empresaId, replyId: page.messages[0].id, externalMessageId: "wamid." + randomUUID() });
-    assert.deepEqual(await handlers.catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: null, maxPrice: 8000 }, seenProductIds: ["A"] });
+    assert.deepEqual(await handlers.catalogBrowseState({ empresaId, conversationId }), { filters: { category: null, minPrice: null, maxPrice: 8000 }, seenProductIds: [], presentedProductIds: ["A"] });
     await handlers.markReplySent({ empresaId, replyId: page.messages[1].id, externalMessageId: "wamid." + randomUUID() });
-    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["A", "D"]);
+    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["D"]);
+    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).presentedProductIds, ["A", "D"]);
     await handlers.cancelPreparedReply({ empresaId, messageId: pageMessageId });
-    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["A", "D"]);
+    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["D"]);
+    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).presentedProductIds, ["A", "D"]);
     // A later provider rejection must permit a future attempt; cancellation remains excluded.
     await owner.query("UPDATE mensagens SET status='falhou' WHERE empresa_id=$1 AND id=$2", [empresaId, batch.messages[0].id]);
     assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["D"]);

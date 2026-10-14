@@ -373,3 +373,16 @@ test("interesse por modelo já apresentado permanece em texto mesmo com classifi
   assert.match(reply.text, /Sobre Harley/u);
   assert.match(ai.clientFactory.requests[0].request.instructions, /manifestação de interesse[\s\S]*não é um pedido para reenviar/u);
 });
+
+test("novo pedido geral recebe três fichas mesmo com duas já apresentadas em outra consulta", async () => {
+  const catalog = { salesMode: true, source: { type: "google_sheets", status: "healthy" },
+    browseState: { filters: { category: null, minPrice: null, maxPrice: null }, seenProductIds: ["p1", "p3"], presentedProductIds: ["p1", "p3"] },
+    items: [1, 2, 3].map(i => ({ id: `p${i}`, name: `Modelo ${i}`, imageUrl: `https://example.com/${i}.jpg` })) };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })],
+    responder: async () => ({ output_text: JSON.stringify({ text: "", productIds: ["p2"], catalogAction: "browse", filters: { category: null, minPrice: null, maxPrice: null } }), usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { message: "Quais modelos vocês têm?", context: { catalog } }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.messages.length, 5);
+  assert.deepEqual(reply.messages.filter(part=>part.catalogProductId).map(part=>part.catalogProductId), ["p1", "p2", "p3"]);
+  assert.deepEqual(reply.catalogBrowse.priorSeenProductIds, []);
+});

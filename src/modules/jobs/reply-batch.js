@@ -28,8 +28,8 @@ export async function loadCatalogBrowseState(client, empresaId, conversationId) 
   const reply = await hydrateReply(client, empresaId, row);
   if (!reply.messages) throw invalid();
   const confirmed = reply.messages.filter((part) => part.catalogProductId && part.externalMessageId && ["enviada", "entregue", "lida"].includes(part.status)).map((part) => part.catalogProductId);
-  // Keep presentation history across query/filter changes and older checkpoints.
-  // Failed, cancelled, redacted and unacknowledged parts never suppress a future attempt.
+  // Conversation history protects model choices from spontaneous resends;
+  // only the current query's cursor advances pagination.
   const history = (await client.query(
     `SELECT outbound_payload->>'catalogProductId' AS catalog_product_id FROM mensagens
        WHERE empresa_id = $1 AND conversa_id = $2 AND direcao = 'saida' AND origem_resposta = 'ia'
@@ -37,7 +37,9 @@ export async function loadCatalogBrowseState(client, empresaId, conversationId) 
          AND status IN ('enviada','entregue','lida') AND outbound_payload ? 'catalogProductId'
        GROUP BY outbound_payload->>'catalogProductId' ORDER BY min(sequence) LIMIT 100`, [empresaId, conversationId],
   )).rows.map((part) => part.catalog_product_id);
-  return normalizeCatalogBrowseState({ filters: previous.filters, seenProductIds: [...new Set([...history, ...confirmed])].slice(0, 100) });
+  return normalizeCatalogBrowseState({ filters: previous.filters,
+    seenProductIds: [...new Set([...previous.seenProductIds.filter((id) => history.includes(id)), ...confirmed])].slice(0, 100),
+    presentedProductIds: [...new Set([...history, ...confirmed])].slice(0, 100) });
 }
 
 export async function hydrateReply(client, empresaId, row) {

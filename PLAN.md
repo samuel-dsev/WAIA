@@ -1,7 +1,9 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 13/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 14/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
+
+Correção de 14/10/2026: preparada v1.18.2 sobre v1.18.1 / `c94edde` publicada. Novo pedido explícito de catálogo/faixa de preço começa pelos três primeiros elegíveis; "mais opções" usa somente o cursor da consulta atual; manifestação de interesse preserva o bloqueio de reenvio. Histórico global de apresentações separado do avanço da página. Sem reset de contato ou alteração de produtos. Roteiro salvo no rascunho 31 da ALFATECH; candidata isolada Node 22 com 501 testes aprovados/18 skips e PostgreSQL real aprovado. Commit/push/deploy e publicação do roteiro explicitamente autorizados após apresentação dos 10 arquivos e validações; execução em andamento. Detalhes em [CATALOGO_COMERCIAL.md](docs/CATALOGO_COMERCIAL.md).
 
 Correção de 13/10/2026: candidata v1.18.1 evita reapresentar fichas já confirmadas na mesma conversa, inclusive quando a IA interpreta "gostei da Harley" como pedido de produto ou muda os filtros. Consulta persistida recupera os IDs de todas as apresentações confirmadas, com isolamento por empresa/conversa; falhas e cancelamentos continuam elegíveis para nova tentativa. Saudação, menu e roteiro da ALFATECH corrigidos e publicados pelo painel na configuração 17, preservando botão humano e espera desativada. Candidata isolada: 499 testes aprovados, 18 skips e PostgreSQL real aprovado. Commit/push/deploy do bloqueio explicitamente autorizados após apresentação dos 10 arquivos; execução em andamento. Detalhes em [CATALOGO_COMERCIAL.md](docs/CATALOGO_COMERCIAL.md).
 

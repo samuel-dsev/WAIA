@@ -1,7 +1,14 @@
 # Continuidade — WAIA
 
-Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 14/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Reinício explícito da consulta de catálogo — 14/10/2026
+
+- Base publicada: v1.18.1 / `c94edde`; ALFATECH na configuração 17. O último teste de catálogo encontrado em leitura (03:37 UTC) preparou/entregou só YALA: STARMEGA e HARLEY já constavam como lidas, e a v1.18.1 passou a excluí-las também de um novo pedido geral. A primeira tentativa anterior havia falhado apenas na imagem da YALA (131053). Catálogo atual saudável com os três produtos ativos, disponíveis e com foto; não há exclusão de linhas na planilha.
+- Candidata patch v1.18.2: `browse` inicia nova consulta pelos três primeiros elegíveis e zera o cursor da página; `more` mantém filtro e avança três em três na mesma consulta; `products`/escolha preserva a proteção contra reenvio espontâneo. `presentedProductIds` deriva das confirmações da conversa inteira, enquanto `seenProductIds` contém somente o avanço da consulta corrente. Campo opcional no contexto, sem migração, dependência ou mudança do schema de resposta da IA.
+- Roteiro alinhado pelo painel no rascunho 31, 15.993 caracteres: novo pedido explícito reinicia três primeiros; "mais opções" continua a consulta; escolha/detalhe não repete foto. Saudação e condições comerciais preservadas. Sem publicação nessa preparação.
+- Candidata isolada Node 22: 519 casos, 501 aprovados, 18 skips, zero falhas. PostgreSQL real `waia-test` confirmou separação de histórico global e cursor de consulta, confirmações, falha posterior do provedor, cancelamento e isolamento. Registros sintéticos próprios removidos e PostgreSQL devolvido parado; volumes existentes preservados. Testes incluem dois produtos apresentados + novo pedido geral com três fichas, paginação 3/3/2, detalhe técnico e escolha sem foto repetida. Whitespace aprovado. Sem reset, exclusão de histórico, novo envio WhatsApp ou chamada OpenAI nesta preparação. Commit/push/deploy e publicação do roteiro explicitamente autorizados após apresentação dos 10 arquivos e validações; execução em andamento. Equipe/MFA fora do escopo; evidência final em `.tmp/DEPLOY_V1.18.2_20261014.md`.
 
 ## Fichas repetidas e saudação consistente — 13/10/2026
 
