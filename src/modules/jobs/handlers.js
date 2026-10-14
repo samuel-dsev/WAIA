@@ -5,6 +5,7 @@ import { randomInt } from "node:crypto";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
+import { directCatalogInterest } from "../business/catalog-interest.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -60,6 +61,7 @@ export class PostgresJobHandlerRepository {
         type: fromDatabase(row.tipo),
         text: row.corpo || "",
         adReferral: normalizeAdReferral(row.outbound_payload?.adReferral),
+        replyToExternalMessageId: row.outbound_payload?.replyToExternalMessageId || null,
         mediaId: row.media_external_id || null,
         mediaStorageKey: row.media_storage_key || null,
         mediaMimeType: row.media_mime_type || null,
@@ -168,6 +170,18 @@ export class PostgresJobHandlerRepository {
       )).rows[0];
       return normalizeAdReferral(row?.outbound_payload?.adReferral);
     });
+  }
+
+  quotedCatalogProduct({ empresaId, conversationId, messageId, externalMessageId }) {
+    if (typeof externalMessageId !== "string" || !externalMessageId || externalMessageId.length > 512) return null;
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (await client.query(
+      `SELECT m.outbound_payload->>'catalogProductId' AS product_id FROM mensagens m
+         JOIN mensagens anchor ON anchor.empresa_id=m.empresa_id AND anchor.conversa_id=m.conversa_id AND anchor.id=$4
+        WHERE m.empresa_id=$1 AND m.conversa_id=$2 AND m.external_message_id=$3 AND m.direcao='saida'
+          AND m.sequence<anchor.sequence AND m.redacted_at IS NULL AND anchor.redacted_at IS NULL
+          AND m.status IN ('enviada','entregue','lida') AND m.outbound_payload ? 'catalogProductId'
+        LIMIT 1`, [empresaId, conversationId, externalMessageId, messageId],
+    )).rows[0]?.product_id || null);
   }
 
   prepareReply({ empresaId, message, reply, origin }) {
@@ -420,6 +434,13 @@ export function createWorkerHandlers({
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
                 browseState = await repository.catalogBrowseState({ empresaId: config.empresaId, conversationId: input.conversationId });
               }
+              const catalogContext = { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
+                quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
+                adContext: catalogAdContext(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }), config.catalog, { current: Boolean(message.adReferral) }),
+                interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
+              } : {}) };
+              const direct = salesMode && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
+              if (direct) return { reply: direct };
               const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
                 conversationId: input.conversationId,
@@ -433,10 +454,7 @@ export function createWorkerHandlers({
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
                   events: config.events,
-                  catalog: { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
-                    adContext: catalogAdContext(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }), config.catalog, { current: Boolean(message.adReferral) }),
-                    interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
-                  } : {}) },
+                  catalog: catalogContext,
                   services: config.appointments?.services || [],
                   knowledgeBase: (definition.publicReplies || [])
                     .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
@@ -472,6 +490,12 @@ export function createWorkerHandlers({
         const delayMs = responseDelayEnabled ? aiReplyDelayMs() : 0;
         if (responseDelayEnabled && (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000)) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
+      }
+      if (reply.salesInterest) {
+        if (typeof repository.prepareReply !== "function" || typeof repository.markReplySent !== "function" || typeof repository.canSendBotReply !== "function") {
+          throw permanent("Persistência e permissão do encerramento comercial obrigatórias.", "BOT_REPLY_CHECKPOINT_REQUIRED");
+        }
+        reply = { ...reply, sendNotBefore: reply.sendNotBefore || clock().toISOString() };
       }
       if (repository.prepareReply) {
         prepared = await repository.prepareReply({

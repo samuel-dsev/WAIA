@@ -161,6 +161,8 @@ function parseMessage(messageValue, context, path, limits) {
     occurredAt: timestamp(message.timestamp, `${path}.timestamp`),
     messageType,
     ...content,
+    ...(typeof message.context?.id === "string" && message.context.id.trim() && message.context.id.length <= limits.externalMessageId
+      ? { replyToExternalMessageId: message.context.id.trim() } : {}),
     ...(normalizeAdReferral(message.referral) ? { adReferral: normalizeAdReferral(message.referral) } : {}),
   };
 }

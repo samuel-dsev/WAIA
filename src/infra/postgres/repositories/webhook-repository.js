@@ -147,7 +147,9 @@ export class PostgresWebhookRepository {
         sequenceResult.rows[0].sequence,
         event.occurredAt,
         uuidOrNew(correlationId),
-        JSON.stringify(event.adReferral ? { adReferral: normalizeAdReferral(event.adReferral) } : {}),
+        JSON.stringify({ ...(event.adReferral ? { adReferral: normalizeAdReferral(event.adReferral) } : {}),
+          ...(typeof event.replyToExternalMessageId === "string" && event.replyToExternalMessageId.length <= 512 && event.replyToExternalMessageId.trim()
+            ? { replyToExternalMessageId: event.replyToExternalMessageId.trim() } : {}) }),
       ],
     );
     if (!inserted.rows[0]) {

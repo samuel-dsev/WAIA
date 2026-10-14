@@ -1,5 +1,18 @@
 # Anúncios para WhatsApp e encerramento comercial — v1.19.0
 
+## Correção preparada — v1.19.1
+
+Diagnóstico real de 14/10/2026: três escolhas de produto às 17:39/17:41 retornaram `AI_INVALID_CATALOG_SELECTION` (OpenAI respondeu, sem falha YCloud ou indisponibilidade do catálogo). Não há armazenamento do JSON recusado; não afirmar conteúdo exato. Reproduzida a rejeição quando a IA preenche `text` com o encerramento, apesar de ação/ID válidos.
+
+- `interest` continua exigindo IDs existentes, ação válida e fechamento habilitado. Prosa e filtros de navegação do modelo são irrelevantes e não são enviados/aplicados; o sistema usa somente a mensagem configurada, sem depender de `text` vazio. Formato, limites, tipos, duplicatas, IDs desconhecidos e dados inválidos permanecem bloqueados.
+- Escolha simples inequívoca por nome (“gostei da Harley”, “gostei harley”) ou pela ficha citada (“gostei dessa”) fecha deterministicamente. Dúvida, negação, escolha ambígua ou outro assunto continuam para IA. Não substituir contexto ausente por adivinhação. Nome explícito prevalece sobre citação antiga.
+- Guardar apenas o ID limitado de `context.id` de respostas pelo WhatsApp, conforme [contrato oficial YCloud](https://github.com/YCloud-Developers/ycloud-sdk-go/blob/main/model_whatsapp_inbound_message_context.go). Relacionar à ficha confirmada anterior, mesma empresa/conversa, não anonimizada. Não copiar remetente, payload ou imagem da citação. Histórico recebido antes desta correção não ganha contexto retroativamente.
+- Encerramento direto passa pelo mesmo checkpoint/retentativa, proteção de envio e registro/pausa pós-confirmação da v1.19.0. Não consome OpenAI nem repete imagem. Falha/ID ausente não pausa; retomada manual e posse humana preservadas. Campos e roteiro atuais da empresa são usados; não alterar estado ativo/suspenso nesta correção.
+
+Candidata baseada em HEAD/c68f774, versão 1.19.1 nos manifests da candidata. Checkout já possui piloto de grupos 1.20 e equipe/MFA; manifests e índices dessa candidata são derivados de HEAD, preservando os trabalhos paralelos e excluindo-os do futuro commit/artefato. Sem nova migração/dependência/credencial. Node 22: 536 casos, 517 aprovados, 19 skips, zero falhas; dois testes PostgreSQL reais aprovados, fixtures próprias removidas e waia-test devolvido parado. Sem envio WhatsApp/OpenAI real ou reset. Whitespace e escopo isolado conferidos. Commit/push/deploy ainda não autorizados.
+
+Arquivos: `src/modules/business/catalog-sales.js`, `src/modules/business/catalog-interest.js`, `src/modules/whatsapp/parser.js`, `src/infra/postgres/repositories/webhook-repository.js`, `src/modules/jobs/handlers.js`, `test/ad-catalog-sales.test.js`, `test/catalog-interest.test.js`, `test/ad-catalog-postgres.test.js`, `test/ai-multitenant.test.js`, `test/ycloud.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md`, `docs/ANUNCIOS_CATALOGO.md`.
+
 Pedido específico da ALFATECH, 14/10/2026. Facebook e Instagram levam para o WhatsApp; não abrange Direct. O usuário colocará o nome do modelo nos próximos anúncios, igual ao da planilha.
 
 ## Comportamento

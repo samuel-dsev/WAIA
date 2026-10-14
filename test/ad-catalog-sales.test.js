@@ -51,7 +51,10 @@ test("escolha gera encerramento configurado e metadados; dúvida e entrada gené
   for (const data of [{ ...catalog, interestHandoff: undefined }, { ...catalog, interestHandoff: { enabled: false, message: closing } }, { ...catalog, interestHandoff: { enabled: true, message: "" } }]) {
     assert.throws(() => parseCatalogSalesReply(output(), data));
   }
-  for (const extra of [{ productIds: [] }, { productIds: ["foreign"] }, { text: "texto arbitrário" }, { filters: { ...filters, minPrice: 10 } }]) assert.throws(() => parseCatalogSalesReply(output(extra), catalog));
+  for (const extra of [{ productIds: [] }, { productIds: ["foreign"] }]) assert.throws(() => parseCatalogSalesReply(output(extra), catalog));
+  for (const extra of [{ text: closing }, { text: "texto que não deve ser enviado" }, { filters: { ...filters, minPrice: 10 } }]) {
+    assert.equal(parseCatalogSalesReply(output(extra), catalog).text, closing);
+  }
   assert.ok(catalogSalesFormat(catalog).schema.properties.catalogAction.enum.includes("interest"));
   assert.ok(!catalogSalesFormat({ ...catalog, interestHandoff: undefined }).schema.properties.catalogAction.enum.includes("interest"));
 });
@@ -66,7 +69,7 @@ test("mais opções mantém fichas próprias e pergunta final separada", () => {
 function workerFixture({ inboundReferral = null, storedReferral = null, action = "interest", humanEnabled = true } = {}) {
   let prepared, aiCalls = 0, providerCalls = 0, acknowledged = 0, fail = false, allowed = true;
   const conversation = { mode: "bot" }, contexts = [];
-  const message = { id: "input", conversationId: "conversation", contactId: "contact", numeroWhatsappId: "number", senderPhone: "5511999999999", type: "text", text: "Gostei da Harley", adReferral: inboundReferral };
+  const message = { id: "input", conversationId: "conversation", contactId: "contact", numeroWhatsappId: "number", senderPhone: "5511999999999", type: "text", text: "Esse modelo me agradou e quero negociar", adReferral: inboundReferral };
   const dependencies = {
     repository: {
       async inboundMessage() { return message; }, async statusEvent() {}, async catalogBrowseState() { return null; },
@@ -115,4 +118,26 @@ test("pausa humana, suspensão e resposta sem ID impedem concluir interesse", as
   };
   await assert.rejects(missing.run(), { code: "BOT_REPLY_SEND_ID_MISSING" }); assert.equal(missing.conversation.mode, "bot");
   const human = workerFixture(); human.conversation.mode = "human"; assert.equal((await human.run()).skipped, true); assert.equal(human.state().providerCalls, 0);
+});
+
+test("escolha explícita ou resposta à foto fecha sem chamar IA, com checkpoint e revalidação", async () => {
+  for (const text of ["gostei da harley", "gostei harley", "gostei dessa"]) {
+    const f = workerFixture(); f.message.text = text; f.message.replyToExternalMessageId = "wamid.photo";
+    f.dependencies.repository.quotedCatalogProduct = async scope => {
+      assert.equal(scope.externalMessageId, "wamid.photo"); assert.equal(scope.empresaId, "tenant"); return "harley";
+    };
+    await f.run(); assert.equal(f.state().prepared.text, closing); assert.ok(f.state().prepared.sendNotBefore);
+    assert.equal(f.state().aiCalls, 0); assert.equal(f.conversation.mode, "paused");
+    await f.run(); assert.equal(f.state().providerCalls, 1);
+  }
+  const blocked = workerFixture(); blocked.message.text = "gostei harley"; blocked.block();
+  assert.equal((await blocked.run()).skipped, true); assert.equal(blocked.state().providerCalls, 0); assert.equal(blocked.state().aiCalls, 0);
+});
+
+test("encerramento direto exige checkpoint e não pausa em falha de envio", async () => {
+  const f = workerFixture(); f.message.text = "gostei da Harley"; f.fail(true);
+  await assert.rejects(f.run(), /Provider offline/u); assert.equal(f.conversation.mode, "bot"); assert.equal(f.state().aiCalls, 0);
+  f.fail(false); await f.run(); assert.equal(f.conversation.mode, "paused"); assert.equal(f.state().aiCalls, 0);
+  const missing = workerFixture(); missing.message.text = "gostei da Harley"; delete missing.dependencies.repository.prepareReply;
+  await assert.rejects(missing.run(), { code: "BOT_REPLY_CHECKPOINT_REQUIRED" }); assert.equal(missing.state().providerCalls, 0);
 });

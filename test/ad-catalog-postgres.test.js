@@ -16,8 +16,8 @@ test("PostgreSQL real: anúncio persiste isolado; confirmação registra interes
     empresaId = (await owner.query("INSERT INTO empresas(slug,nome,nome_exibicao,status) VALUES($1,'Ad sintético','Ad sintético','ativa') RETURNING id", [`ad-catalog-${randomUUID()}`])).rows[0].id;
     const numeroWhatsappId = (await owner.query("INSERT INTO numeros_whatsapp(empresa_id,phone_number_id,status) VALUES($1,$2,'ativo') RETURNING id", [empresaId, randomUUID()])).rows[0].id;
     const webhooks = new PostgresWebhookRepository(pool), handlers = new PostgresJobHandlerRepository(pool);
-    const inbound = (text, adReferral) => webhooks.withTenantTransaction({ empresaId }, (tx) => webhooks.insertInboundMessage(tx, { empresaId, numeroWhatsappId, correlationId: randomUUID(), event: {
-      externalMessageId: `wamid.${randomUUID()}`, messageType: "text", text, senderPhone: "5511999999999", occurredAt: new Date(), ...(adReferral ? { adReferral } : {}),
+    const inbound = (text, adReferral, replyToExternalMessageId) => webhooks.withTenantTransaction({ empresaId }, (tx) => webhooks.insertInboundMessage(tx, { empresaId, numeroWhatsappId, correlationId: randomUUID(), event: {
+      externalMessageId: `wamid.${randomUUID()}`, messageType: "text", text, senderPhone: "5511999999999", occurredAt: new Date(), ...(adReferral ? { adReferral } : {}), ...(replyToExternalMessageId ? { replyToExternalMessageId } : {}),
     } }));
     const first = await inbound("Olá! Posso ter mais informações sobre isso?", { body: "HARLEY — 1000W", headline: "Anúncio", source_type: "ad", image_url: "https://example.com/not-stored" });
     const scope = { empresaId, conversationId: first.conversationId, messageId: first.messageId };
@@ -27,6 +27,21 @@ test("PostgreSQL real: anúncio persiste isolado; confirmação registra interes
     assert.equal(await handlers.adReferral({ ...scope, empresaId: randomUUID() }), null);
     assert.equal(await handlers.adReferral({ ...scope, conversationId: randomUUID() }), null);
     assert.deepEqual((await handlers.inboundMessage({ empresaId, messageId: first.messageId })).adReferral, await handlers.adReferral(scope));
+    const photoRequest = await inbound("Quero ver a Harley");
+    const photoMessage = await handlers.inboundMessage({ empresaId, messageId: photoRequest.messageId });
+    const photoReply = await handlers.prepareReply({ empresaId, message: photoMessage, origin: "ai", reply: { text: "HARLEY", messages: [{ text: "HARLEY", catalogProductId: "harley", imageUrl: "https://example.com/harley.jpg" }] } });
+    const photoWamid = `wamid.${randomUUID()}`;
+    await handlers.markReplySent({ empresaId, replyId: photoReply.messages[0].id, externalMessageId: photoWamid });
+    const quoted = await inbound("gostei dessa", null, photoWamid);
+    const quotedScope = { empresaId, conversationId: quoted.conversationId, messageId: quoted.messageId, externalMessageId: photoWamid };
+    assert.equal((await handlers.inboundMessage({ empresaId, messageId: quoted.messageId })).replyToExternalMessageId, photoWamid);
+    assert.equal(await new PostgresJobHandlerRepository(pool).quotedCatalogProduct(quotedScope), "harley");
+    for (const override of [{ empresaId: randomUUID() }, { conversationId: randomUUID() }, { externalMessageId: "foreign" }, { messageId: first.messageId }]) {
+      assert.equal(await handlers.quotedCatalogProduct({ ...quotedScope, ...override }), null);
+    }
+    await owner.query("UPDATE mensagens SET status='falhou' WHERE id=$1", [photoReply.messages[0].id]);
+    assert.equal(await handlers.quotedCatalogProduct(quotedScope), null);
+    await owner.query("UPDATE mensagens SET status='enviada' WHERE id=$1", [photoReply.messages[0].id]);
     // A later ad cannot leak back into an older job. It replaces the context going forward, even if unknown.
     const later = await inbound("Quero informações", { body: "Modelo sem correspondência" });
     assert.equal((await handlers.adReferral({ ...scope, messageId: later.messageId })).body, "Modelo sem correspondência");
@@ -61,6 +76,7 @@ test("PostgreSQL real: anúncio persiste isolado; confirmação registra interes
     const retention = new PostgresConversationRepository(pool);
     await retention.anonymizeMessagesBefore({ empresaId, before: new Date(Date.now() + 60_000), limit: 100, redactedAt: new Date() });
     assert.equal(await handlers.adReferral({ ...scope, messageId: later.messageId }), null);
+    assert.equal(await handlers.quotedCatalogProduct(quotedScope), null);
     assert.deepEqual((await owner.query("SELECT outbound_payload FROM mensagens WHERE id=$1", [first.messageId])).rows[0].outbound_payload, {});
     assert.deepEqual((await owner.query("SELECT outbound_payload FROM mensagens WHERE id=$1", [prepared.id])).rows[0].outbound_payload, {});
   } finally {

@@ -49,8 +49,10 @@ test("YCloud autentica bytes brutos e normaliza entrada para a fila existente", 
 test("YCloud autenticado preserva título/descrição do anúncio até a ingestão", async () => {
   const f = fixture(), payload = envelope();
   payload.whatsappInboundMessage.referral = { source_type: "ad", source_id: "123", headline: "Alfatech", body: "HARLEY, motor 1000W", image_url: "https://example.com/ad.jpg", ctwa_clid: "not-retained" };
+  payload.whatsappInboundMessage.context = { id: "wamid.product-photo", from: "not-retained" };
   await f.service.ingest(signed(payload));
   assert.deepEqual(f.events[0].adReferral, { source_id: "123", headline: "Alfatech", body: "HARLEY, motor 1000W", source_type: "ad" });
+  assert.equal(f.events[0].replyToExternalMessageId, "wamid.product-photo");
   const invalid = fixture();
   await assert.rejects(invalid.service.ingest(signed(payload, NOW / 1000, "other-account")), { statusCode: 401 });
   assert.equal(invalid.events.length, 0);

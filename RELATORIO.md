@@ -3,6 +3,14 @@
 Atualizado em 14/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Correção do encerramento comercial — 14/10/2026
+
+- Base publicada v1.19.0/c68f774, configuração 21 pelo painel; evidência operacional em `.tmp/DEPLOY_V1.19.0_20261014.md`. Diagnóstico posterior, somente em leitura, encontrou ALFATECH ativa e configuração atual 24, catálogo saudável e encerramento preenchido. A empresa foi reativada/alterada fora desta intervenção; não mudar seu estado ou roteiro neste diagnóstico/correção.
+- Três escolhas reais às 17:39:09, 17:39:56 e 17:41:36 locais tiveram resposta OpenAI e erro AI_INVALID_CATALOG_SELECTION no processamento (revisões 22/23). O JSON recusado não é armazenado: código exato comprovado, hipótese do campo text preenchido reproduzida localmente, sem afirmar captura da resposta real.
+- Preparada candidata patch v1.19.1: ação interest aceita/ignora prosa e filtros de navegação sem repassá-los ao cliente; exige produto existente e fechamento habilitado e usa a mensagem configurada. Escolhas simples inequívocas, como “gostei da Harley”, fecham diretamente, sem depender da classificação do modelo. “Gostei dessa” funciona com ID da ficha citada via Responder. Dúvida/negação/ambiguidade continuam para IA. Checkpoint e permissão de envio obrigatórios; a pausa e nota continuam atômicas com confirmação do provedor, sem repetir foto.
+- `context.id` do WhatsApp/YCloud limitado e persistido no envelope existente, sem payload bruto. Busca da ficha citada exige empresa/conversa corretas, confirmação, não anonimizada e anterior à entrada; texto de terceiros não define produto. Sem nova migração/dependência ou envio externo.
+- Node 22: 536 casos, 517 aprovados, 19 skips, zero falhas; dois testes PostgreSQL reais aprovados, fixtures próprias removidas e waia-test devolvido parado. Sem envio WhatsApp/OpenAI real ou reset.. Candidata contém somente 15 arquivos, manifests/índices derivados de HEAD para não incorporar piloto 1.20, Baileys/QR ou equipe/MFA já preparados em paralelo no checkout. Esses trabalhos, inclusive suas versões/dependências/documentos, são preservados. Commit/push/deploy aguardam autorização após apresentação de versão, mensagem, arquivos e resultados. Não resetar contatos ou reenviar as contingências antigas.
+
 ## Anúncios no WhatsApp e interesse comercial — 14/10/2026
 
 - Continuidade anterior concluída: v1.18.2 / `d255ec8` publicada com autorização; configuração 18 da ALFATECH, roteiro da revisão 31. Empresa mantida suspensa por decisão expressa. Evidência em `.tmp/DEPLOY_V1.18.2_20261014.md`; os registros anteriores de preparação abaixo são históricos.
