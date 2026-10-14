@@ -57,6 +57,18 @@ test("espera da IA é opcional, booleana e preserva checksum das revisões exist
   for (const value of [null, 0, "false"]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ ai: { responseDelayEnabled: value } })).valid, false);
 });
 
+test("modo comercial do catálogo é opt-in por empresa e não altera revisões antigas", () => {
+  const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
+  assert.equal(Object.hasOwn(old.configuration.ai, "catalogSalesEnabled"), false);
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(old), true);
+  for (const enabled of [true, false]) {
+    const compiled = compileTenantRuntimeConfigV2(minimalConfig({ ai: { catalogSalesEnabled: enabled } }), { empresaId: "tenant-a", configVersion: 2 });
+    assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled), true);
+    assert.equal(materializeLegacyTenantDefinition(compiled).ai.catalogSalesEnabled, enabled);
+  }
+  for (const value of [0, "true", null]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ ai: { catalogSalesEnabled: value } })).valid, false);
+});
+
 test("catálogo V2 congela capacidades, ações, contextos e parâmetros sem alterar o V1", () => {
   assert.deepEqual(CAPABILITY_KEYS_V2, [
     "catalog", "orders", "events", "appointments", "payments",

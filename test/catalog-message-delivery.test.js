@@ -13,6 +13,7 @@ function fixture() {
     async preparedReply() { return prepared && structuredClone(prepared); },
     async prepareReply({ reply }) {
       prepared = { id: "0", status: "processando", text: reply.text, sendNotBefore: reply.sendNotBefore,
+        catalogBrowse: reply.catalogBrowse,
         messages: reply.messages.map((part, index) => ({ ...part, id: String(index), status: "processando" })) };
       return structuredClone(prepared);
     },
@@ -55,6 +56,22 @@ test("três imagens sem espera mantêm checkpoint, ordem e retomada após falha 
   f.fail(null);
   assert.equal((await f.handler()(f.reference)).replied, true);
   assert.deepEqual(f.sent.map((part) => part.text), ["A", "B", "C"]);
+  assert.equal(f.state().aiCalls, 1);
+});
+
+test("abertura, três fotos e pergunta retomam sem repetir abertura ou produto já confirmado", async () => {
+  const f = fixture();
+  const generate = f.dependencies.aiService.reply;
+  f.dependencies.aiService.reply = async () => { const reply = await generate(); return { ...reply,
+    catalogBrowse: { filters: { category: null, minPrice: null, maxPrice: null }, priorSeenProductIds: [] },
+    messages: [{ text: "Abertura" }, ...reply.messages.map((part) => ({ ...part, catalogProductId: part.text })), { text: "Qual modelo interessou?" }] }; };
+  await f.handler()(f.reference); f.advance();
+  await assert.rejects(f.handler()(f.reference), /Provider temporariamente/u);
+  assert.deepEqual(f.sent.map((part) => part.text), ["Abertura", "A"]);
+  assert.ok(f.state().prepared.catalogBrowse);
+  f.fail(null);
+  assert.equal((await f.handler()(f.reference)).replied, true);
+  assert.deepEqual(f.sent.map((part) => part.text), ["Abertura", "A", "B", "C", "Qual modelo interessou?"]);
   assert.equal(f.state().aiCalls, 1);
 });
 

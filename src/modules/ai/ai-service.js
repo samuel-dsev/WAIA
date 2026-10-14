@@ -8,6 +8,7 @@ import {
 } from "./guardrails.js";
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
+import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 
 function historyInput(messages, messageId) {
   return messages
@@ -129,8 +130,9 @@ export class MultiTenantAiService {
         : [];
       const safeContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(safeContext)}\nTENANT_DATA_END`;
-      const selectionFormat = catalogSelectionFormat(safeContext.catalog);
-      const instructions = [buildInstructions(config), selectionFormat ? CATALOG_SELECTION_INSTRUCTIONS : ""].filter(Boolean).join("\n\n");
+      const salesMode = safeContext.catalog?.salesMode === true;
+      const selectionFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
+      const instructions = [buildInstructions(config), selectionFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : ""].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...historyInput(history, request.messageId),
@@ -193,7 +195,8 @@ export class MultiTenantAiService {
         throw error;
       }
       if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
-      const reply = selectionFormat ? parseCatalogSelection(text, safeContext.catalog, { message: request.message }) : { text };
+      const reply = selectionFormat ? salesMode ? parseCatalogSalesReply(text, safeContext.catalog)
+        : parseCatalogSelection(text, safeContext.catalog, { message: request.message }) : { text };
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

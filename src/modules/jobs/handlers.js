@@ -2,7 +2,7 @@ import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
 import { randomInt } from "node:crypto";
-import { hydrateReply, prepareReplyBatch } from "./reply-batch.js";
+import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -147,6 +147,10 @@ export class PostgresJobHandlerRepository {
       )).rows[0];
       return hydrateReply(client, empresaId, row);
     });
+  }
+
+  catalogBrowseState({ empresaId, conversationId }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => loadCatalogBrowseState(client, empresaId, conversationId));
   }
 
   prepareReply({ empresaId, message, reply, origin }) {
@@ -397,6 +401,12 @@ export function createWorkerHandlers({
           flowRepository,
           aiHandler: aiService
             ? async ({ config, input }) => {
+              const salesMode = definition.ai?.catalogSalesEnabled === true && config.catalog?.source?.type === "google_sheets" && config.catalog.source.status === "healthy";
+              let browseState;
+              if (salesMode) {
+                if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
+                browseState = await repository.catalogBrowseState({ empresaId: config.empresaId, conversationId: input.conversationId });
+              }
               const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
                 conversationId: input.conversationId,
@@ -410,7 +420,7 @@ export function createWorkerHandlers({
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
                   events: config.events,
-                  catalog: config.catalog,
+                  catalog: { ...config.catalog, ...(salesMode ? { salesMode: true, browseState } : {}) },
                   services: config.appointments?.services || [],
                   knowledgeBase: (definition.publicReplies || [])
                     .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))

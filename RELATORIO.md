@@ -3,6 +3,15 @@
 Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Atendimento comercial do catálogo — 13/10/2026
+
+- Pedido: perguntar modelo inicialmente; validar cidade ao encaminhar; enviar fichas sem pedir permissão; abertura e pergunta final separadas; três produtos por página na ordem da planilha; modelo/faixa de preço com dados da planilha; detalhes técnicos em resposta personalizada.
+- ALFATECH: saudação, menu raiz, orientações públicas e roteiro de 14.116 caracteres salvos no rascunho (revisão 24), sem publicação. Condições comerciais, horários, três unidades, assistência, resumo e pendência do grupo preservados. Saudação/menu também alterados porque passam antes da IA.
+- Preparada v1.18.0 compatível, opt-in `ai.catalogSalesEnabled`. Classificação estruturada da IA escolhe navegação, continuação, modelo específico, detalhe técnico ou atendimento normal; backend aplica categoria/faixa de preço aos dados atuais, decide os três produtos da página e monta abertura/fichas/pergunta. Detalhes técnicos seguem o texto da IA com os dados validados e o roteiro; a plataforma não inventa a característica ausente.
+- Progresso isolado por empresa/conversa em metadados do checkpoint existente, sem migração: só IDs de fichas com confirmação de envio contam. Filtros preservados; falta de opções é explícita. Reentrada não repete prefixo/fichas já confirmados; pausa/suspensão/lease seguem as proteções anteriores. Retenção/reset do histórico elimina o progresso da consulta. Catálogo de menu determinístico e tenants sem a opção mantêm o contrato anterior.
+- Candidata isolada Node 22: 514 casos, 496 aprovados, 18 skips, zero falhas; auditoria de produção zero vulnerabilidades. PostgreSQL real em `waia-test` confirmou cinco partes atômicas, idempotência, cursor pós-confirmação, cancelamento parcial, reinício e isolamento. Registros sintéticos removidos e serviço devolvido parado, sem alterar dados/volumes existentes. UI sintética salvou a opção e manteve-a após recarregar.
+- Sem nova chamada OpenAI ou envio WhatsApp nesta implementação. Commit/push/deploy/publicação aguardam aprovação após apresentação de 18 arquivos, versão e mensagem; equipe/MFA continua fora. Procedimento e limites em [CATALOGO_COMERCIAL.md](docs/CATALOGO_COMERCIAL.md).
+
 ## Seleção completa do catálogo e espera por empresa — 13/10/2026
 
 - v1.16.0 (`ffcc557`) efetivamente publicada; roteiro da revisão 21 publicado como configuração 10 e reativação autorizada pelo painel gerou configuração 11. Catálogo saudável com três produtos. Evidência em `.tmp/DEPLOY_V1.16.0_20261013.md`.
@@ -10,7 +19,7 @@ Este relatório separa inspeção local, histórico de operação e trabalho ain
 - Candidata v1.17.0 completa seleção parcial quando a mensagem pede explicitamente dois/três/todos os modelos sem filtros. Mantém IDs permitidos, disponibilidade, unidades, limite de três e perguntas prévias quando a IA ainda não oferece produtos; modelos específicos, exclusões e filtros permanecem sob seleção contextual. O formato também orienta a IA a selecionar a quantidade prometida.
 - Novo `ai.responseDelayEnabled` no onboarding: ausência mantém a espera atual; falso envia após geração sem aguardar 30–45 segundos, com checkpoint e revalidação mantidos. Prazo de lote já persistido não é alterado. Campo omitido em revisões antigas preserva a compatibilidade de checksum; nenhuma migração/dependência nova.
 - Validação Node 22 da candidata isolada: 503 casos, 485 aprovados, 18 skips opt-in, zero falhas. Novos casos exercitam o pedido real, unidade/filtros, seleção inválida, espera desativada, isolamento, bloqueio durante geração e retomada de envio parcial. Interface sintética salvou a opção falsa e manteve-a após recarregar. Não houve chamada OpenAI/WhatsApp nesta correção nem nova execução PostgreSQL/Redis; as operações de persistência não foram alteradas.
-- 16 arquivos em [CATALOGO_MENSAGENS.md](docs/CATALOGO_MENSAGENS.md). Versão minor pelo controle compatível novo. Commit, push e deploy ainda não executados; suspensão humana, outras empresas e alterações preexistentes de equipe/MFA preservadas. Após aprovação/deploy, desativar a espera da ALFATECH e publicar pelo painel, então repetir o teste real.
+- Fechamento: commit `e50747c`/v1.17.0 enviado a dev e publicado na VPS com autorização; backup verificado e cópia externa cifrada preservados. ALFATECH publicada pelo painel na configuração 12, ativa e sem espera. Teste real da conversa confirmada: STARMEGA X900, YALA YBH-10 e HARLEY enviados como imagens com legendas individuais, todos entregues/lidos; primeira foto após 5,525 s. Evidência em `.tmp/DEPLOY_V1.17.0_20261013.md`. Outras empresas, proteção humana e trabalho de equipe/MFA preservados.
 
 ## Catálogo em mensagens com imagem — 13/10/2026
 

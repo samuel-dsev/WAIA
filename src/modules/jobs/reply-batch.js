@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWhatsAppReplyPayload } from "../whatsapp/outbound.js";
+import { normalizeCatalogBrowseState } from "../business/catalog-sales.js";
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
@@ -8,9 +9,26 @@ export function replyFromRow(row) {
   return row && {
     id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [],
     ...(row.outbound_payload?.imageUrl ? { imageUrl: row.outbound_payload.imageUrl } : {}),
+    ...(row.outbound_payload?.catalogProductId ? { catalogProductId: row.outbound_payload.catalogProductId } : {}),
     sendNotBefore: row.outbound_payload?.sendNotBefore || null,
     externalMessageId: row.external_message_id, status: row.status,
   };
+}
+
+/** Cursor advances only for product parts confirmed by the provider, never at generation time. */
+export async function loadCatalogBrowseState(client, empresaId, conversationId) {
+  const row = (await client.query(
+    `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND conversa_id = $2
+       AND direcao = 'saida' AND origem_resposta = 'ia' AND outbound_payload ? 'catalogBrowse'
+       AND redacted_at IS NULL ORDER BY sequence DESC LIMIT 1`, [empresaId, conversationId],
+  )).rows[0];
+  if (!row) return null;
+  const metadata = row.outbound_payload.catalogBrowse;
+  const previous = normalizeCatalogBrowseState({ filters: metadata.filters, seenProductIds: metadata.priorSeenProductIds });
+  const reply = await hydrateReply(client, empresaId, row);
+  if (!reply.messages) throw invalid();
+  const confirmed = reply.messages.filter((part) => part.catalogProductId && part.externalMessageId && ["enviada", "entregue", "lida"].includes(part.status)).map((part) => part.catalogProductId);
+  return normalizeCatalogBrowseState({ filters: previous.filters, seenProductIds: [...new Set([...previous.seenProductIds, ...confirmed])].slice(0, 100) });
 }
 
 export async function hydrateReply(client, empresaId, row) {
@@ -32,10 +50,14 @@ export async function hydrateReply(client, empresaId, row) {
 export async function prepareReplyBatch(client, { empresaId, message, reply, origin }) {
   if (!Array.isArray(reply.messages) || !reply.messages.length || reply.messages.length > 100) throw invalid();
   const messages = reply.messages.map((part) => {
+    if (part.catalogProductId != null && (typeof part.catalogProductId !== "string" || !part.catalogProductId || part.catalogProductId.length > 200)) throw invalid();
     const payload = createWhatsAppReplyPayload({ to: "validation", ...part });
     return { text: payload.type === "image" ? payload.image.caption : part.text.trim(),
-      buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}) };
+      buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}),
+      ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}) };
   });
+  const browseState = reply.catalogBrowse == null ? null : normalizeCatalogBrowseState({ filters: reply.catalogBrowse.filters, seenProductIds: reply.catalogBrowse.priorSeenProductIds });
+  if (browseState && !messages.some((part) => part.catalogProductId)) throw invalid();
   const existing = async () => (await client.query(
     `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
     [empresaId, message.id],
@@ -51,7 +73,9 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
   let parent;
   for (const [index, part] of messages.entries()) {
     const payload = { buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
-      ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}) } : { parentReplyId: ids[0] }) };
+      ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
+      ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
+        ...(browseState ? { catalogBrowse: { filters: browseState.filters, priorSeenProductIds: browseState.seenProductIds } } : {}) } : { parentReplyId: ids[0] }) };
     const row = (await client.query(
       `INSERT INTO mensagens (id, empresa_id, conversa_id, contato_id, numero_whatsapp_id,
          direcao, tipo, corpo, status, origem_resposta, sequence, correlation_id, source_message_id, outbound_payload, processing_at)

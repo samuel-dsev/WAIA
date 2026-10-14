@@ -344,3 +344,18 @@ test("serviço completa os três modelos pedidos quando a IA seleciona apenas um
   assert.equal(reply.source, "ai");
   assert.deepEqual(reply.messages.map((item) => item.imageUrl), ["https://example.com/a.jpg", "https://example.com/b.jpg", "https://example.com/c.jpg"]);
 });
+
+test("modo comercial usa schema próprio, fichas na ordem e detalhes sem imagem, preservando o contrato anterior", async () => {
+  const catalog = { salesMode: true, source: { type: "google_sheets", status: "healthy" }, items: [1, 2, 3, 4].map((i) => ({ id: `p${i}`, name: i === 1 ? "Harley" : `Modelo ${i}`, autonomyKm: 50, price: i * 1000, imageUrl: `https://example.com/${i}.jpg` })) };
+  for (const action of ["browse", "details"]) {
+    const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })],
+      responder: async () => ({ output_text: JSON.stringify({ text: action === "details" ? "A Harley tem autonomia informada de 50 km por recarga." : "", productIds: action === "details" ? ["p1"] : [], catalogAction: action, filters: { category: null, minPrice: null, maxPrice: null } }), usage: {} }) });
+    const reply = await ai.service.reply(request("tenant-a", { message: action === "browse" ? "Quais modelos vocês têm?" : "Essa Harley faz quantos km por carga?", context: { catalog } }));
+    assert.equal(reply.source, "ai");
+    const call = ai.clientFactory.requests[0].request;
+    assert.equal(call.text.format.name, "catalog_sales_reply");
+    assert.match(call.instructions, /details[\s\S]*autonomyKm/u);
+    if (action === "browse") { assert.equal(reply.messages.length, 5); assert.deepEqual(reply.messages.filter((part) => part.imageUrl).map((part) => part.imageUrl), ["https://example.com/1.jpg", "https://example.com/2.jpg", "https://example.com/3.jpg"]); }
+    else { assert.equal(reply.messages, undefined); assert.match(reply.text, /50 km/u); }
+  }
+});

@@ -137,7 +137,7 @@ const DRAFT_OBJECT_SCHEMAS = Object.freeze([
   [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef", "cooldownSeconds"] ],
   [ /^\/ai$/u, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled",
   ] ],
   [ /^\/flows$/u, ["definitions"] ],
   [ /^\/flows\/definitions\/\d+$/u, ["key", "name", "version", "startStepId", "steps"] ],
@@ -560,7 +560,7 @@ function parseAi(value, path) {
   const object = plainObject(value, path, { optional: true });
   allowedKeys(object, path, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled",
   ]);
   const enabled = boolean(object.enabled, pointer(path, "enabled"), false);
   const keyMode = object.keyMode == null ? "shared" : text(object.keyMode, pointer(path, "keyMode"), { max: 20 });
@@ -570,6 +570,7 @@ function parseAi(value, path) {
   return {
     enabled,
     ...(object.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: boolean(object.responseDelayEnabled, pointer(path, "responseDelayEnabled")) }),
+    ...(object.catalogSalesEnabled === undefined ? {} : { catalogSalesEnabled: boolean(object.catalogSalesEnabled, pointer(path, "catalogSalesEnabled")) }),
     provider: text(object.provider, pointer(path, "provider"), { max: 80, optional: true }),
     model: text(object.model, pointer(path, "model"), { max: 120, optional: true }),
     personality: text(object.personality, pointer(path, "personality"), { max: 2_000, optional: true }),
