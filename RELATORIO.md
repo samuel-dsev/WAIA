@@ -3,6 +3,13 @@
 Atualizado em 13/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## Fichas repetidas e saudação consistente — 13/10/2026
+
+- Base efetivamente publicada: v1.18.0 / `edcf037`, configuração 13 da ALFATECH. Evidência operacional em `.tmp/DEPLOY_V1.18.0_20261013.md`; os registros abaixo de preparação são históricos. O primeiro teste real gerou as cinco partes, mas fotos falharam por URLs temporárias do Airtable indisponíveis (HTTP 410). O usuário resolveu os links depois e reportou repetição da Harley após "gostei da harley".
+- Candidata patch v1.18.1: instruções distinguem interesse de solicitação de ficha; backend filtra IDs já apresentados em `products`, `browse` e `more`, retornando continuidade em texto quando só há modelos já vistos. Dúvidas técnicas continuam personalizadas em texto. Consulta recupera confirmações de todas as partes de produto da mesma empresa/conversa, atravessando filtros e checkpoints antigos. IDs apenas copiados no cursor não contam sem registro confirmado; falhas/cancelamentos/retentativas do lote mantêm as proteções anteriores. Sem migração ou dependência nova.
+- Pelo painel, revisão atual 28 carregada para preservar o texto alterado pelo usuário. Saudação e menu passam a "Olá! Bem-vindo à Alfatech Taubaté. Como posso te ajudar hoje?", mantendo botão humano; roteiro recebe regra de continuidade após a escolha. Revisão 30 publicada como configuração 17, confirmada no runtime em leitura. Cidade permanece no encaminhamento; espera continua desativada e catálogo saudável. Alterações anteriores de equipe/MFA fora do escopo.
+- Candidata isolada Node 22: 517 casos, 499 aprovados, 18 skips, zero falhas. PostgreSQL real em `waia-test` confirmou histórico entre filtros/checkpoints, isolamento, idempotência, exclusão de falha posterior do provedor e cancelamento. Registros sintéticos próprios removidos, volumes/dados existentes preservados e serviço devolvido parado. Whitespace aprovado. Não houve envio WhatsApp/OpenAI real da correção; commit/push/deploy v1.18.1 explicitamente autorizados após apresentação dos 10 arquivos e validações. Execução em andamento; evidência final em `.tmp/DEPLOY_V1.18.1_20261013.md`.
+
 ## Atendimento comercial do catálogo — 13/10/2026
 
 - Pedido: perguntar modelo inicialmente; validar cidade ao encaminhar; enviar fichas sem pedir permissão; abertura e pergunta final separadas; três produtos por página na ordem da planilha; modelo/faixa de preço com dados da planilha; detalhes técnicos em resposta personalizada.

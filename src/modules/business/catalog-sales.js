@@ -52,6 +52,7 @@ export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
 - Para browse, use os filtros explicitamente pedidos: category é uma categoria exata fornecida no catálogo ou null; minPrice e maxPrice são os limites de preço informados ou null. Não crie filtros por suposição. Preço é o total da ficha, não o valor da parcela. productIds pode ficar vazio: o sistema escolhe as três primeiras fichas correspondentes na ordem da planilha.
 - Para more, o sistema mantém a consulta anterior e escolhe as próximas três fichas ainda não enviadas. Não reinicie a lista. Se uma resposta "sim" se referir a outro assunto, use none; considere a pergunta anterior no histórico.
 - Para products, selecione os IDs exatos dos modelos pedidos e envie diretamente, sem perguntar se pode mandar a foto ou as informações. Não espere cidade ou nome para apresentar um produto. Não associe um ID parecido a um modelo que não existe.
+- Uma manifestação de interesse como "gostei da Harley", "prefiro esse" ou "quero essa" não é um pedido para reenviar a ficha: use none, reconheça a escolha e continue em texto com uma pergunta útil. Os IDs em catalog.browseState.seenProductIds já foram apresentados nesta conversa; não selecione suas fotos novamente, mesmo ao trocar filtros. Dúvidas sobre eles usam details.
 - Para details, selecione o ID do modelo identificado no pedido ou no histórico. Responda em text ao detalhe solicitado usando exclusivamente sua ficha, acrescente um detalhe útil confirmado se ajudar, sem enviar a foto novamente. Use autonomyKm para autonomia informada, powerWatts para potência e description para outros detalhes; se o dado faltar ou o modelo for ambíguo, peça esclarecimento ou confirmação da equipe. Não invente dados. Por exemplo, 50 km é autonomia informada por carga, não garantia para todo uso.
 - Para none, productIds deve ficar vazio e text contém a resposta normal do atendimento. Para details/none, todos os filtros ficam null.
 - O sistema envia a abertura de browse/more antes das fichas e a pergunta final sobre interesse/mais opções em texto separado. Cada ficha tem foto e legenda próprias. Em products/browse/more, deixe text vazio: o sistema monta a pergunta final, sem repetir nomes/preços/especificações, pedir cadastro ou prometer que enviará depois.
@@ -86,10 +87,15 @@ export function parseCatalogSalesReply(output, catalog) {
   if (action === "products") {
     selected = value.productIds.map((id) => byId.get(id));
     activeFilters = { ...EMPTY_FILTERS };
-    seen = previous && JSON.stringify(previous.filters) === JSON.stringify(activeFilters) ? previous.seenProductIds : [];
+    seen = previous?.seenProductIds || [];
+    selected = selected.filter((item) => !seen.includes(item.id));
+    if (!selected.length) {
+      const names = value.productIds.map((id) => byId.get(id).name).join(", ");
+      return { text: `Sobre ${names}, o que você gostaria de saber para decidir?` };
+    }
   } else {
     activeFilters = action === "more" && previous ? previous.filters : query;
-    seen = action === "more" && previous ? previous.seenProductIds : [];
+    seen = previous?.seenProductIds || [];
     const candidates = filteredProducts(products, activeFilters);
     selected = candidates.filter((item) => !seen.includes(item.id)).slice(0, 3);
     if (!selected.length) return {

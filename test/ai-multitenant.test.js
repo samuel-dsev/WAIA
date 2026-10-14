@@ -359,3 +359,17 @@ test("modo comercial usa schema próprio, fichas na ordem e detalhes sem imagem,
     else { assert.equal(reply.messages, undefined); assert.match(reply.text, /50 km/u); }
   }
 });
+
+test("interesse por modelo já apresentado permanece em texto mesmo com classificação incorreta do provedor", async () => {
+  const catalog = { salesMode: true, source: { type: "google_sheets", status: "healthy" },
+    browseState: { filters: { category: null, minPrice: null, maxPrice: null }, seenProductIds: ["harley"] },
+    items: [{ id: "harley", name: "Harley", imageUrl: "https://example.com/harley.jpg", autonomyKm: 50 }] };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"] })],
+    responder: async () => ({ output_text: JSON.stringify({ text: "", productIds: ["harley"], catalogAction: "products", filters: { category: null, minPrice: null, maxPrice: null } }), usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { message: "gostei da harley", context: { catalog } }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.messages, undefined);
+  assert.equal(reply.imageUrl, undefined);
+  assert.match(reply.text, /Sobre Harley/u);
+  assert.match(ai.clientFactory.requests[0].request.instructions, /manifestação de interesse[\s\S]*não é um pedido para reenviar/u);
+});

@@ -1,4 +1,18 @@
-# Atendimento comercial do catálogo — candidata v1.18.0
+# Atendimento comercial do catálogo — v1.18.0 e correção v1.18.1
+
+## Correção preparada em 13/10/2026
+
+v1.18.0 / `edcf037` foi commitada, enviada a dev, publicada na VPS e vinculada à ALFATECH com autorização. Configuração 13 ativa e sem espera. Registro operacional em `.tmp/DEPLOY_V1.18.0_20261013.md`; a preparação original abaixo permanece como histórico.
+
+Novo relato: ficha da Harley reenviada após "gostei da harley". A classificação `products` não filtrava IDs confirmados e uma troca de filtro podia perder o progresso. v1.18.1 distingue manifestações de interesse nas instruções e bloqueia reapresentação automática de fichas já confirmadas, inclusive com classificação errada da IA. Quando todos os modelos pedidos já foram apresentados, continua em texto; opções novas seguem em páginas de três, com pergunta final separada. Não muda ficha/caption nem dados da planilha.
+
+Consulta somente em leitura das partes confirmadas recupera todo o progresso por empresa/conversa, sem depender da janela de histórico ou do cursor de um filtro anterior. Falhas, cancelamentos, registros redigidos e mensagens sem confirmação não bloqueiam uma apresentação futura. Reset/retencão elimina o histórico correspondente. Lote persistido continua usando a retomada anterior, sem segunda chamada à IA.
+
+ALFATECH corrigida pelo painel: revisão 30 publicada como configuração 17, confirmada por leitura do runtime. Saudação e menu "Olá! Bem-vindo à Alfatech Taubaté. Como posso te ajudar hoje?", botão "Falar com atendente" preservado. Roteiro de 15.096 caracteres considera a escolha e não repete foto/ficha/pergunta de interesse; coleta de cidade somente ao encaminhar. Modo comercial ativo, catálogo saudável e espera desativada. Não houve novo envio WhatsApp/OpenAI real nesta correção.
+
+Escopo da candidata (10 arquivos): `src/modules/business/catalog-sales.js`, `src/modules/jobs/reply-batch.js`, `test/catalog-sales.test.js`, `test/ai-multitenant.test.js`, `test/ai-reply-delay-postgres.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Node 22 em candidata isolada: 517 casos, 499 aprovados, 18 skips, zero falhas. PostgreSQL real em `waia-test`: apresentação anterior permanece após trocar filtros sem copiar o cursor; status posterior `falhou` libera a tentativa; idempotência, isolamento e cancelamento aprovados. Limpeza só dos registros sintéticos próprios e serviço devolvido parado. Whitespace aprovado. Mensagem aprovada: `fix: v1.18.1 evita repetir fichas e alinha saudação da ALFATECH`. Commit, push de dev e deploy do bloqueio explicitamente autorizados; equipe/MFA fica fora. Execução em andamento e evidência final em `.tmp/DEPLOY_V1.18.1_20261013.md`.
+
+## Histórico da preparação v1.18.0
 
 Base publicada: v1.17.0 / `e50747c`. Pedido de 13/10/2026 preparado localmente, com rascunho da ALFATECH salvo pelo painel. Nenhum commit/push/deploy desta candidata realizado.
 

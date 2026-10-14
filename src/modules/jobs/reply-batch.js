@@ -28,7 +28,16 @@ export async function loadCatalogBrowseState(client, empresaId, conversationId) 
   const reply = await hydrateReply(client, empresaId, row);
   if (!reply.messages) throw invalid();
   const confirmed = reply.messages.filter((part) => part.catalogProductId && part.externalMessageId && ["enviada", "entregue", "lida"].includes(part.status)).map((part) => part.catalogProductId);
-  return normalizeCatalogBrowseState({ filters: previous.filters, seenProductIds: [...new Set([...previous.seenProductIds, ...confirmed])].slice(0, 100) });
+  // Keep presentation history across query/filter changes and older checkpoints.
+  // Failed, cancelled, redacted and unacknowledged parts never suppress a future attempt.
+  const history = (await client.query(
+    `SELECT outbound_payload->>'catalogProductId' AS catalog_product_id FROM mensagens
+       WHERE empresa_id = $1 AND conversa_id = $2 AND direcao = 'saida' AND origem_resposta = 'ia'
+         AND redacted_at IS NULL AND external_message_id IS NOT NULL
+         AND status IN ('enviada','entregue','lida') AND outbound_payload ? 'catalogProductId'
+       GROUP BY outbound_payload->>'catalogProductId' ORDER BY min(sequence) LIMIT 100`, [empresaId, conversationId],
+  )).rows.map((part) => part.catalog_product_id);
+  return normalizeCatalogBrowseState({ filters: previous.filters, seenProductIds: [...new Set([...history, ...confirmed])].slice(0, 100) });
 }
 
 export async function hydrateReply(client, empresaId, row) {

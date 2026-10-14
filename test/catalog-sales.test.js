@@ -68,6 +68,23 @@ test("reconhecer interesse não exige cidade; saudação e encerramento sem fich
   assert.deepEqual(parseCatalogSalesReply(output({ catalogAction: "none", text: "A equipe pode continuar seu atendimento por aqui." }), catalog()), { text: "A equipe pode continuar seu atendimento por aqui." });
 });
 
+test("gostei da Harley não repete a ficha mesmo quando a IA classifica como products", () => {
+  const data = catalog({ browseState: { filters: filters({ maxPrice: 5000 }), seenProductIds: ["p1", "p2", "p3"] } });
+  const reply = parseCatalogSalesReply(output({ catalogAction: "products", productIds: ["p1"] }), data);
+  assert.equal(reply.messages, undefined);
+  assert.match(reply.text, /Sobre Harley[\s\S]*saber para decidir\?$/u);
+  assert.deepEqual(cards(parseCatalogSalesReply(output({ catalogAction: "products", productIds: ["p1", "p4"] }), data)).map((part) => part.catalogProductId), ["p4"]);
+});
+
+test("nova consulta e mudança de filtros não reapresentam produtos confirmados", () => {
+  const data = catalog({ browseState: { filters: filters({ maxPrice: 3000 }), seenProductIds: ["p1", "p2", "p3"] } });
+  const reply = parseCatalogSalesReply(output({ filters: filters({ maxPrice: 6000 }) }), data);
+  assert.deepEqual(cards(reply).map((part) => part.catalogProductId), ["p4", "p5", "p6"]);
+  assert.deepEqual(reply.catalogBrowse.priorSeenProductIds, ["p1", "p2", "p3"]);
+  data.browseState.seenProductIds = products.map((part) => part.id);
+  assert.equal(parseCatalogSalesReply(output(), data).messages, undefined);
+});
+
 test("contrato estrito recusa IDs estrangeiros, duplicados, categorias e faixas inválidas", () => {
   for (const extra of [{ productIds: ["foreign"] }, { productIds: ["p1", "p1"] }, { catalogAction: "unknown" },
     { filters: filters({ category: "foreign" }) }, { filters: filters({ minPrice: -1 }) }, { filters: filters({ minPrice: 6000, maxPrice: 2000 }) },
@@ -87,8 +104,17 @@ test("cursor inclui só partes de produto confirmadas, mantém escopo e não dep
     catalogBrowse: { filters: filters({ maxPrice: 5000 }), priorSeenProductIds: ["older"] }, partIds: [parentId, partId, unsentId] } };
   const rows = [parent, { id: partId, status: "entregue", external_message_id: "sent-photo", outbound_payload: { parentReplyId: parentId, catalogProductId: "p1" } },
     { id: unsentId, status: "ignorada_duplicidade", external_message_id: null, outbound_payload: { parentReplyId: parentId, catalogProductId: "p2" } }];
-  const client = { async query(sql, params) { assert.equal(params[0], "tenant-a"); return { rows: sql.includes("ORDER BY sequence DESC") ? (assert.equal(params[1], "conv-a"), [parent]) : rows }; } };
-  assert.deepEqual(await loadCatalogBrowseState(client, "tenant-a", "conv-a"), { filters: filters({ maxPrice: 5000 }), seenProductIds: ["older", "p1"] });
+  const client = { async query(sql, params) {
+    assert.equal(params[0], "tenant-a");
+    if (sql.includes("GROUP BY")) {
+      assert.equal(params[1], "conv-a");
+      assert.match(sql, /redacted_at IS NULL AND external_message_id IS NOT NULL/u);
+      assert.match(sql, /status IN \('enviada','entregue','lida'\)/u);
+      return { rows: [{ catalog_product_id: "earlier-filter" }, { catalog_product_id: "p1" }] };
+    }
+    return { rows: sql.includes("ORDER BY sequence DESC") ? (assert.equal(params[1], "conv-a"), [parent]) : rows };
+  } };
+  assert.deepEqual(await loadCatalogBrowseState(client, "tenant-a", "conv-a"), { filters: filters({ maxPrice: 5000 }), seenProductIds: ["earlier-filter", "p1"] });
   assert.equal(await loadCatalogBrowseState({ async query() { return { rows: [] }; } }, "tenant-b", "conv-a"), null);
 });
 
