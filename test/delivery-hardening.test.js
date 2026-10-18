@@ -149,7 +149,8 @@ test("infra publica painel e separa migrador do papel restrito da aplicação", 
   assert.match(nginx, /location \/api\/[^]*proxy_pass http:\/\/api:3001/u);
   assert.match(compose, /DATABASE_APP_USER/u);
   assert.match(compose, /x-waia-image: &waia-image[^]*image: \$\{WAIA_IMAGE:-waia:local\}/u);
-  assert.equal((compose.match(/<<: \*waia-image/gu) || []).length, 4);
+  assert.equal((compose.match(/<<: \*waia-image/gu) || []).length, 5);
+  assert.match(compose, /group-notifier:[^]*profiles: \["group-notifier"\][^]*command: npm run start:group-notifier/u);
   assert.match(compose, /METRICS_BEARER_TOKEN/u);
   assert.match(compose, /DATABASE_MIGRATOR_URL: postgres:\/\/\$\{POSTGRES_USER/u);
   assert.match(compose, /media-init:[^]*chown -R 1000:1000 \/media/u);

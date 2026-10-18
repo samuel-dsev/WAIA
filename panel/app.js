@@ -1,4 +1,5 @@
 import { createOnboardingWizard } from "./onboarding.js";
+import { renderGroupNotifier } from "./group-notifier.js";
 import { createAttendanceScriptEditor, scriptSaveRequest } from "./attendance-script.js";
 
 const API_BASE = "/api/admin";
@@ -20,6 +21,7 @@ const TENANT_STATUS_ACTIONS = Object.freeze({
 });
 
 const VIEW_DEFINITIONS = {
+  groupNotifier: { title: "Notificações e leads", eyebrow: "Atendimento", description: "Remetente central, destino por empresa e resumo dos leads qualificados.", permission: "operations", filters: false },
   dashboard: {
     title: "Visão geral",
     eyebrow: "Operações",
@@ -515,6 +517,11 @@ async function loadCurrentView({ silent = false } = {}) {
   try {
     if (state.currentView === "onboarding") return await loadOnboarding(state.requestController.signal);
     if (state.currentView === "settings") return await loadSettings(state.requestController.signal);
+    if (state.currentView === "groupNotifier") {
+      elements.pagination.hidden = true; setContentState(null);
+      return await renderGroupNotifier({ root: elements.viewContent, apiFetch, empresaId: state.selectedEmpresaId,
+        isPlatform: state.session.platformRole === "platform_admin", signal: state.requestController.signal, refresh: () => loadCurrentView(), toast });
+    }
     const endpoint = endpointFor(definition);
     if (!endpoint) {
       elements.viewContent.replaceChildren();
@@ -1531,6 +1538,7 @@ function canAutoRefreshCurrentView() {
     && !document.querySelector("dialog.attendance-script-dialog[open]")
     && !elements.appShell.hidden
     && state.currentView !== "onboarding"
+    && state.currentView !== "groupNotifier"
     && !elements.detailDialog.open
     && !document.querySelector("dialog.wizard-dialog[open]");
 }

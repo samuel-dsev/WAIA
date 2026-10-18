@@ -5,7 +5,7 @@ const asyncRoute = (handler) => async (request, response, next) => {
   try { await handler(request, response); } catch (error) { next(error); }
 };
 
-export function createAdminRouter({ adminService, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
+export function createAdminRouter({ adminService, groupNotifierService = null, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
   const router = express.Router();
   router.use(authenticate);
   router.use((request, _response, next) => {
@@ -13,6 +13,16 @@ export function createAdminRouter({ adminService, authenticate, csrf, sensitiveR
     return csrf(request, _response, next);
   });
   router.get("/session", (request, response) => response.json(adminService.session(request.auth)));
+  if (groupNotifierService) {
+    const action = (method) => asyncRoute(async (req, res) => { res.set("Cache-Control", "private, no-store"); res.json(await method(req)); });
+    router.get("/group-notifier", action((req) => groupNotifierService.status(req.auth)));
+    router.post("/group-notifier/connect", sensitiveRateLimit, action((req) => groupNotifierService.connect(req.auth, req.body)));
+    router.post("/group-notifier/disconnect", sensitiveRateLimit, action((req) => groupNotifierService.disconnect(req.auth)));
+    router.get("/group-notifier/groups", action((req) => groupNotifierService.groups(req.auth)));
+    router.get("/tenants/:empresaId/group-notifier/route", action((req) => groupNotifierService.route(req.auth, req.params.empresaId)));
+    router.put("/tenants/:empresaId/group-notifier/route", action((req) => groupNotifierService.saveRoute(req.auth, req.params.empresaId, req.body)));
+    router.get("/tenants/:empresaId/group-notifier/leads", action((req) => groupNotifierService.leads(req.auth, req.params.empresaId)));
+  }
   router.get("/users/lookup", asyncRoute(async (request, response) => response.json(await adminService.lookupGlobalUser({ auth: request.auth, email: request.query.email }))));
   router.get("/tenants", asyncRoute(async (request, response) => response.json(await adminService.listTenants({ auth: request.auth, query: { ...request.query, limit: request.query.pageSize } }))));
   router.post("/tenants", asyncRoute(async (request, response) => response.status(201).json(await adminService.createTenant({ auth: request.auth, body: request.body }))));

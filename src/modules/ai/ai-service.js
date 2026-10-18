@@ -9,6 +9,7 @@ import {
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
+import { qualificationFormat, qualificationInstructions, parseQualification, QUALIFICATION_CLOSING } from "../group-notifier/qualification.js";
 
 function historyInput(messages, messageId) {
   return messages
@@ -131,8 +132,11 @@ export class MultiTenantAiService {
       const safeContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(safeContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
-      const selectionFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
-      const instructions = [buildInstructions(config), selectionFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : ""].filter(Boolean).join("\n\n");
+      const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
+      const qualifies = config.leadQualificationEnabled && Boolean(config.leadQualificationCriteria);
+      const selectionFormat = qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
+      const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
+        qualifies ? qualificationInstructions(config.leadQualificationCriteria) : ""].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...historyInput(history, request.messageId),
@@ -195,8 +199,18 @@ export class MultiTenantAiService {
         throw error;
       }
       if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
-      const reply = selectionFormat ? salesMode ? parseCatalogSalesReply(text, safeContext.catalog)
-        : parseCatalogSelection(text, safeContext.catalog, { message: request.message }) : { text };
+      let parsedText = text, leadQualification;
+      if (qualifies) {
+        const structured = JSON.parse(text);
+        leadQualification = parseQualification(structured.leadQualification, { configVersion: config.version,
+          evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)] });
+        delete structured.leadQualification;
+        if (typeof structured.text !== "string" || structured.text.length > 4096 || (!structured.text.trim() && !catalogFormat)) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+        parsedText = catalogFormat ? JSON.stringify(structured) : structured.text.trim();
+      }
+      const baseReply = catalogFormat ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog)
+        : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
+      const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification } : baseReply;
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="pilot-csrf" content="__PILOT_CSRF__">
+  <title>WAIA · Piloto de notificações</title>
+  <link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script>
+</head>
+<body>
+<main>
+  <header><p class="eyebrow">WAIA · ADMINISTRAÇÃO LOCAL</p><h1>Notificações por grupo</h1>
+  <p>Valide o número dedicado da WAIA e o destino de cada empresa antes de ativar o envio de leads.</p></header>
+  <aside>Este é um piloto local. As associações e a sessão não são salvas após reiniciar. Nenhum lead real será enviado.</aside>
+  <p id="feedback" role="status" aria-live="polite"></p>
+  <section>
+    <h2>1. Conectar o número dedicado</h2>
+    <p>Primeiro ative esse número no WhatsApp ou WhatsApp Business do celular. Depois, abra <strong>Aparelhos conectados → Conectar aparelho</strong> e leia o QR exibido aqui.</p>
+    <form id="connect-form">
+      <label>Número dedicado, com código do país<input id="phone" type="tel" placeholder="+5511999999999" autocomplete="off" required></label>
+      <label class="check"><input id="dedicated" type="checkbox" required> Estou usando o número dedicado da WAIA para notificações.</label>
+      <div class="actions"><button id="connect" type="submit">Gerar QR para conexão</button><button id="disconnect" type="button" class="secondary" disabled>Desconectar</button></div>
+    </form>
+    <p id="connection" class="state">Desconectado</p>
+    <img id="qr" alt="QR para vincular o número dedicado da WAIA" width="320" height="320" hidden>
+    <p id="session-note" hidden></p>
+  </section>
+  <section>
+    <h2>2. Associar um grupo à empresa de teste</h2>
+    <p>Adicione o número da WAIA ao grupo desejado pelo aplicativo. Um grupo pode pertencer a apenas uma empresa neste piloto.</p>
+    <button id="groups-refresh" type="button" class="secondary" disabled>Consultar grupos</button>
+    <form id="route-form">
+      <label>Referência da empresa<input id="company-ref" placeholder="filaretti" pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64" required></label>
+      <label>Nome da empresa<input id="company-name" placeholder="Filaretti" maxlength="100" required></label>
+      <label>Grupo de destino<select id="group" required><option value="">Conecte o número e consulte os grupos</option></select></label>
+      <button id="route-save" type="submit" disabled>Associar grupo</button>
+    </form>
+    <p class="muted">Referências de teste locais: não cadastram nem alteram empresas da WAIA.</p>
+  </section>
+  <section>
+    <h2>3. Enviar uma mensagem fictícia</h2>
+    <p>O teste contém nome, resumo, qualificação e número fictícios. Antes de enviar, confira o nome da empresa e do grupo abaixo.</p>
+    <div id="routes"><p class="muted">Nenhum destino associado.</p></div>
+    <h3>Resultados desta sessão</h3><div id="attempts"><p class="muted">Nenhum teste enviado.</p></div>
+    <p class="muted">“Aceito pelo conector” não comprova entrega. Confira a mensagem no grupo. Um resultado sem confirmação não será reenviado automaticamente.</p>
+  </section>
+</main>
+</body>
+</html>

@@ -208,7 +208,8 @@ export class PostgresJobHandlerRepository {
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
-            ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}) }),
+            ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
+            ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}) }),
         ],
       )).rows[0];
       if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
@@ -439,7 +440,7 @@ export function createWorkerHandlers({
                 adContext: catalogAdContext(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }), config.catalog, { current: Boolean(message.adReferral) }),
                 interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
               } : {}) };
-              const direct = salesMode && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
+              const direct = salesMode && definition.ai?.leadQualificationEnabled !== true && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
               if (direct) return { reply: direct };
               const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
@@ -491,7 +492,7 @@ export function createWorkerHandlers({
         if (responseDelayEnabled && (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000)) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
       }
-      if (reply.salesInterest) {
+      if (reply.salesInterest || reply.leadQualification) {
         if (typeof repository.prepareReply !== "function" || typeof repository.markReplySent !== "function" || typeof repository.canSendBotReply !== "function") {
           throw permanent("Persistência e permissão do encerramento comercial obrigatórias.", "BOT_REPLY_CHECKPOINT_REQUIRED");
         }
@@ -557,7 +558,7 @@ export function createWorkerHandlers({
       buttons: reply.buttons,
     });
     const externalMessageId = firstMetaMessageId(sent);
-    if (reply.salesInterest && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
+    if ((reply.salesInterest || reply.leadQualification) && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {
       await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
     } else {

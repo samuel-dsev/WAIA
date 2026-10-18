@@ -197,6 +197,7 @@ export function createTenantRuntimeRouter({
       ...(outcome.reply?.messages ? { messages: outcome.reply.messages } : {}),
       ...(outcome.reply?.catalogBrowse ? { catalogBrowse: outcome.reply.catalogBrowse } : {}),
       ...(outcome.reply?.salesInterest ? { salesInterest: outcome.reply.salesInterest } : {}),
+      ...(outcome.reply?.leadQualification ? { leadQualification: outcome.reply.leadQualification } : {}),
     };
   }
 

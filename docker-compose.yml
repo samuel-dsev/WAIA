@@ -152,6 +152,23 @@ services:
       start_period: 30s
     logging: *default-logging
 
+  group-notifier:
+    <<: *waia-image
+    profiles: ["group-notifier"]
+    restart: unless-stopped
+    command: npm run start:group-notifier
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
+      DATABASE_POOL_MAX: 5
+      MASTER_KEYRING: "${MASTER_KEYRING:-}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal, egress]
+    stop_grace_period: 45s
+    logging: *default-logging
+
   db-init:
     image: postgres:16-alpine
     restart: "no"

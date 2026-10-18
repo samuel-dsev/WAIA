@@ -141,6 +141,7 @@ function mapReadiness(row, { environment, platformAiCredentialConfigured }) {
     draftVersion: row.draft_version == null ? 0 : Number(row.draft_version),
     nextConfigurationVersion: Number(row.versao_configuracao) + 1,
     administratorCount: Number(row.administrator_count || 0),
+    ...(row.group_notifier_ready === undefined ? {} : { leadNotifications: Object.freeze({ destinationConfigured: row.group_notifier_ready === true }) }),
     whatsapp: Object.freeze({
       primaryNumber,
       accessTokenConfigured: row.access_token_configured === true,
@@ -263,6 +264,7 @@ export class PostgresOnboardingRepository {
     const read = async ({ client }) => mapReadiness((await client.query(
       `SELECT
          e.id AS empresa_id,
+         EXISTS(SELECT 1 FROM group_notifier_routes gr WHERE gr.empresa_id=e.id AND gr.enabled) AS group_notifier_ready,
          e.status AS tenant_status,
          e.versao_configuracao,
          e.configuracao_runtime_modo,

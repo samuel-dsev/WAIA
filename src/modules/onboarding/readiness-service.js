@@ -182,6 +182,12 @@ export class ReadinessService {
         correctiveAction: "Corrija os campos inválidos indicados na revisão da configuração.",
       }),
     ];
+    if (draft.ai?.leadQualificationEnabled === true) checks.push(readinessCheck({
+      code: "LEAD_NOTIFICATION_DESTINATION_READY", step: 7,
+      passed: modules.has("ai_freeform") && draft.ai.enabled === true && snapshot.leadNotifications?.destinationConfigured === true,
+      message: "A triagem e o destino de notificação estão configurados.",
+      correctiveAction: "Habilite a IA e peça ao administrador da plataforma para associar e habilitar o grupo em Notificações e leads antes de publicar.",
+    }));
     return applyOnboardingPolicy(checks, snapshot, { mode });
   }
 }

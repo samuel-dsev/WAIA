@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-chatbot",
-  "version": "1.19.1",
+  "version": "1.21.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,14 +11,17 @@
     "start:api": "node src/api.js",
     "start:worker": "node src/worker.js",
     "start:monitor": "node src/monitor.js",
+    "start:group-notifier": "node src/group-notifier.js",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "admin:create": "node scripts/create-admin.js",
     "load:test": "node scripts/load-scenarios.js",
     "check:whatsapp": "node scripts/check-whatsapp.js",
+    "pilot:group-notifier": "node scripts/group-notifier-pilot.mjs",
     "test": "node --test"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "bullmq": "^6.3.1",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
@@ -27,6 +30,7 @@
     "ioredis": "^6.0.0",
     "openai": "^7.5.0",
     "pg": "^8.23.0",
+    "qrcode": "1.5.4",
     "zod": "^4.4.3"
   }
 }

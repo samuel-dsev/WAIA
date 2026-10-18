@@ -67,9 +67,13 @@ export function normalizeAiConfig(input, empresaId) {
   const allowedContextKeys = Array.isArray(input.allowedContextKeys)
     ? [...new Set(input.allowedContextKeys.map((key) => requiredText(key, "allowedContextKeys", 100)))]
     : [];
+  if (input.leadQualificationEnabled === true && !optionalText(input.leadQualificationCriteria, "leadQualificationCriteria", 2000)) throw new TypeError("Critérios de triagem obrigatórios.");
   return Object.freeze({
     empresaId,
     enabled: input.enabled === true,
+    leadQualificationEnabled: input.leadQualificationEnabled === true,
+    leadQualificationCriteria: optionalText(input.leadQualificationCriteria, "leadQualificationCriteria", 2000),
+    leadQualificationClosing: optionalText(input.leadQualificationClosing, "leadQualificationClosing", 1000),
     provider,
     model: requiredText(input.model || "gpt-4.1-mini-2025-04-14", "model", 200),
     prompt: optionalText(input.prompt, "prompt", 20_000),

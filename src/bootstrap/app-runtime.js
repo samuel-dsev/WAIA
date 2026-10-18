@@ -106,6 +106,9 @@ import {
 } from "../integrations/index.js";
 import { GoogleSheetsClient } from "../google-sheets.js";
 import { createYCloudClient } from "../integrations/ycloud/client.js";
+import QRCode from "qrcode";
+import { PostgresGroupNotifierRepository } from "../modules/group-notifier/postgres-repository.js";
+import { GroupNotifierAdminService } from "../modules/group-notifier/admin-service.js";
 import { createYCloudWebhookService, createYCloudWebhookHandler } from "../modules/meta/ycloud-webhook-service.js";
 import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
@@ -232,6 +235,8 @@ export function createPostgresRuntime({
     ? keyringFromSerialized(config.security.masterKeyring)
     : null;
   const credentialRepository = new PostgresCredentialRepository(pool);
+  const groupNotifierRepository = new PostgresGroupNotifierRepository(pool, keyring);
+  const groupNotifierService = new GroupNotifierAdminService(groupNotifierRepository, (qr) => QRCode.toDataURL(qr, { width: 320, margin: 2 }));
   const adminRepository = new PostgresAdminRepository(pool);
   const configurationRepository = new PostgresVersionedConfigurationRepository(pool);
   const configurationService = new VersionedConfigurationService(configurationRepository);
@@ -434,6 +439,7 @@ export function createPostgresRuntime({
     flowRepository,
     mediaStore,
     adminService,
+    groupNotifierService,
     onboardingService,
     authService,
     accounts: createAccountsRuntime({ pool, redis, config }),
@@ -634,6 +640,7 @@ export function createApiApp({
   app.use("/api/admin/auth", adminNetwork, authRouter);
   app.use("/api/admin", adminNetwork, createAdminRouter({
     adminService: runtime.adminService,
+    groupNotifierService: runtime.groupNotifierService,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),
     sensitiveRateLimit: rateLimit({
