@@ -1,5 +1,26 @@
 # Notificações de leads em grupos — remetente central WAIA
 
+## Correção de contingência e roteiro — candidata v1.21.1, 18/10/2026
+
+Diagnóstico real da Filaretti, configuração 11: às 23h02 de 18/10/2026 (America/Sao_Paulo), a entrada identificada pelo texto “residencial” teve resposta OpenAI e falhou na validação `AI_INVALID_LEAD_QUALIFICATION`. Foram 3480 tokens de entrada e 111 de saída, abaixo do limite 400. Outro erro igual ocorreu às 22h54. Não houve evidência de timeout, esgotamento de tokens ou queda da API nesses dois registros. O JSON bruto não é armazenado: o código da falha é comprovado, mas o campo exato que causou a rejeição não pode ser recuperado dessa evidência.
+
+A implementação anterior validava comprimentos da ficha mesmo durante coleta, exigia texto conversacional não vazio antes de aproveitar uma ficha completa e convertia qualquer rejeição dos metadados em contingência geral. O roteiro também pedia reconhecer um fato antes de perguntar e dizia que o nome era opcional, embora o encaminhamento automático exija nome. Esses caminhos foram reproduzidos com dados sintéticos; não são apresentados como captura do JSON real.
+
+Na candidata patch v1.21.1:
+
+- Coleta e casos fora do escopo descartam os metadados parciais, sem exigir ficha concluída. Ficha completa continua exigindo todos os campos válidos e evidência do nome em mensagem do cliente.
+- Ficha válida usa o encerramento configurado mesmo se o modelo retornar `text` vazio. Não depende de produtos/ações comerciais que serão descartados nesse encerramento.
+- Ficha marcada como concluída, mas inválida, não cria lead, não pausa nem agenda envio ao grupo. Usa uma única pergunta de continuação adequada, retirando recapitulação em parágrafo anterior e recusando promessas de encaminhamento/fechamento. Sem nova chamada OpenAI ou retry automático; tokens da resposta são contabilizados uma vez.
+- Evento sanitizado `ai_qualification_deferred` registra somente motivo categorizado (`NAME`, `NAME_EVIDENCE`, `SUMMARY`, `QUALIFICATION`) e referências operacionais. Não registra texto, nome, resumo, JSON ou segredo do provedor. Envelope ilegível, resposta truncada e configuração inválida continuam bloqueados.
+
+Roteiro ajustado **pelo painel e publicado na configuração 12**, rascunho 57: voz feminina da Laís, uso contextual de “obrigada”, “pronta” e “grata”, sem inferir gênero do cliente. Resposta a uma informação deve avançar diretamente para a próxima pergunta útil, sem agradecer ou recontar data/situação a cada turno. Removida a regra que exigia reconhecer um fato antes de perguntar e alinhado nome necessário para notificação, respeitando recusa. Somente `/ai/prompt` foi alterado; modelo, limite 400, credencial, critérios e destino permaneceram. Prompt ativo SHA-256 `b0f7dfe04863e429b8fb5d741dfa7625255bfdc033f70d2934ff57db7fa4e97b`. Remetente conectado e grupo “teste” habilitado; versão do vínculo observada 2, sem alteração nesta correção.
+
+Validações: candidata isolada sem equipe/MFA em Node 22 com 563 casos, 543 aprovados, 20 skips opt-in e zero falhas. Inclui 16 casos específicos de notificações: coleta parcial, ficha válida sem texto redundante, nome não comprovado, resumo/classificação incompletos, ausência de promessa falsa, bloqueio de truncamento/envelope inválido, consumo único, logs sem conteúdo pessoal e composição com catálogo. Checkout completo Node 24 passou antes da última adição do caso de catálogo, que passou separadamente e na candidata final. Whitespace e manifests 1.21.1 conferidos. Sem migração, dependência ou alteração SQL; integrações PostgreSQL/Redis não repetidas. Nenhuma chamada OpenAI/WhatsApp, reenvio ou reset da conversa do print foi feito; os testes sintéticos não comprovam o comportamento real das próximas respostas.
+
+Arquivos da correção: `src/modules/ai/ai-service.js`, `src/modules/group-notifier/qualification.js`, `test/group-notifier.test.js`, `package.json`, `package-lock.json`, este documento, `PLAN.md` e `RELATORIO.md`. Equipe/MFA preservados fora da candidata. Versão 1.21.1 somente local; commit/push/deploy dependem de confirmação após revisão. Mensagem proposta: `fix: v1.21.1 evita contingência por ficha parcial de lead`.
+
+O registro abaixo descreve a entrega original v1.21.0, já commitada e publicada como `ef9bd06`; evidência operacional em `.tmp/DEPLOY_V1.21.0_20261018.md`.
+
 Atualizado em 18/10/2026. Candidata local **v1.21.0**, sobre HEAD `6f62fb1` / v1.19.1. Sem commit, push ou deploy desta candidata.
 
 Após a revisão abaixo, usuário autorizou commit `feat: v1.21.0 notificações de leads por empresa` e push de dev em 18/10/2026. Execução em andamento, com evidência final em `.tmp/COMMIT_V1.21.0_20261018.md`. Deploy e promoção de main não fazem parte dessa autorização.

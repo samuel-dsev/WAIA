@@ -9,7 +9,7 @@ import {
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
-import { qualificationFormat, qualificationInstructions, parseQualification, QUALIFICATION_CLOSING } from "../group-notifier/qualification.js";
+import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, QUALIFICATION_CLOSING } from "../group-notifier/qualification.js";
 
 function historyInput(messages, messageId) {
   return messages
@@ -199,16 +199,26 @@ export class MultiTenantAiService {
         throw error;
       }
       if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
-      let parsedText = text, leadQualification;
+      let parsedText = text, leadQualification, qualificationIssue;
       if (qualifies) {
         const structured = JSON.parse(text);
-        leadQualification = parseQualification(structured.leadQualification, { configVersion: config.version,
-          evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)] });
+        if (!structured || typeof structured !== "object" || Array.isArray(structured)
+          || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+        try {
+          leadQualification = parseQualification(structured.leadQualification, { configVersion: config.version,
+            evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)] });
+        } catch (error) {
+          if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
+          qualificationIssue = error.validationReason;
+          structured.text = qualificationContinuation(structured.text, qualificationIssue);
+          this.logger.warn?.("ai_qualification_deferred", { empresaId: request.empresaId, conversationId: request.conversationId,
+            correlationId: request.correlationId, code: "AI_QUALIFICATION_DEFERRED", validationReason: qualificationIssue });
+        }
+        if (!leadQualification && !qualificationIssue && !structured.text.trim() && !catalogFormat) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
         delete structured.leadQualification;
-        if (typeof structured.text !== "string" || structured.text.length > 4096 || (!structured.text.trim() && !catalogFormat)) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
-        parsedText = catalogFormat ? JSON.stringify(structured) : structured.text.trim();
+        parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
       }
-      const baseReply = catalogFormat ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog)
+      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog)
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
       const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification } : baseReply;
       const usage = providerUsage;
@@ -241,7 +251,7 @@ export class MultiTenantAiService {
       return Object.freeze({
         ...reply,
         source: "ai",
-        reason: "completed",
+        reason: qualificationIssue ? "qualification_needs_information" : "completed",
         usage: Object.freeze({ ...usage, cost, pricingVersion: pricing.version }),
         quota: finalized.usage,
       });

@@ -37,13 +37,14 @@ function aiFixture(output, overrides = {}) {
   const config = { empresaId: "tenant-a", enabled: true, provider: "openai", model: "test-model", keyType: "shared", version: 2, prompt: "Triagem imobiliária, sem avaliação jurídica.",
     leadQualificationEnabled: true, leadQualificationCriteria: QUALIFICATION_CRITERIA, maxHistoryMessages: 30, maxOutputTokens: 800, allowedContextKeys: [], ...overrides };
   const clientFactory = new MemoryResponsesClientFactory(async () => ({ output_text: output, usage: { input_tokens: 100, output_tokens: 40 } }));
+  const ledger = new MemoryAiLedger(), logs = [];
   const service = new MultiTenantAiService({ configResolver: new MemoryAiConfigResolver([config]),
     conversationService: { getHistory: async () => [{ id: "prior", direction: "inbound", type: "text", body: "Meu nome é Ana Silva." }] },
-    clientFactory, secretResolver: new MemoryAiSecretResolver({ sharedSecret: "synthetic" }), ledger: new MemoryAiLedger(),
-    pricingCatalog: new MemoryPricingCatalog({ "test-model": { inputPerMillion: 1, outputPerMillion: 1, version: "test" } }), logger: { warn() {}, info() {} },
+    clientFactory, secretResolver: new MemoryAiSecretResolver({ sharedSecret: "synthetic" }), ledger,
+    pricingCatalog: new MemoryPricingCatalog({ "test-model": { inputPerMillion: 1, outputPerMillion: 1, version: "test" } }), logger: { warn(event, data) { logs.push({ event, ...data }); }, info() {} },
   });
   const request = { empresaId: "tenant-a", conversationId: "conversation-a", messageId: "message-a", correlationId: "correlation-a", message: "O imóvel atrasou e quero falar com o advogado." };
-  return { service, clientFactory, request };
+  return { service, clientFactory, request, ledger, logs };
 }
 
 test("resposta da IA produz ficha sem telefone/destino e fechamento controlado pelo sistema", async () => {
@@ -56,14 +57,71 @@ test("resposta da IA produz ficha sem telefone/destino e fechamento controlado p
   assert.match(f.clientFactory.requests[0].request.instructions, /Não invente nome/u);
 });
 
-test("nome sem evidência e saída incompleta não disparam qualificação; coleta mantém a pergunta", async () => {
-  for (const output of [JSON.stringify({ text: "Tudo certo", leadQualification: { ...LEAD, name: "Pessoa inventada" } }), "{invalid"]) {
+test("envelope ilegível/incompleto mantém contingência sem registrar qualificação", async () => {
+  for (const output of ["{invalid", JSON.stringify({ text: "Tudo certo" }), JSON.stringify({ text: "", leadQualification: { status: "collecting", name: null, summary: null, qualification: null } })]) {
     const f = aiFixture(output), result = await f.service.reply(f.request);
     assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined);
   }
   const f = aiFixture(JSON.stringify({ text: "Pode resumir o problema do imóvel?", leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }));
   const result = await f.service.reply(f.request);
   assert.equal(result.text, "Pode resumir o problema do imóvel?"); assert.equal(result.leadQualification, undefined);
+});
+
+test("ficha válida não exige texto redundante da IA quando o encerramento vem da configuração", async () => {
+  const f = aiFixture(JSON.stringify({ text: "", leadQualification: LEAD }));
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "ai"); assert.equal(result.text, QUALIFICATION_CLOSING);
+  assert.equal(result.leadQualification.name, LEAD.name); assert.equal(f.clientFactory.requests.length, 1);
+});
+
+test("resposta truncada continua bloqueada mesmo se o fragmento parecer uma ficha válida", async () => {
+  const f = aiFixture("");
+  f.clientFactory.responder = async () => ({ status: "incomplete", output_text: JSON.stringify({ text: "", leadQualification: LEAD }), usage: { input_tokens: 100, output_tokens: 40 } });
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined);
+  assert.equal(f.ledger.events[0].errorCode, "AI_INCOMPLETE_RESPONSE");
+});
+
+test("coleta parcial não exige ficha completa nem substitui a pergunta por contingência", async () => {
+  for (const status of ["collecting", "not_qualified"]) {
+    const f = aiFixture(JSON.stringify({ text: "Qual é o seu nome?", leadQualification: { status, name: "", summary: "Imóvel", qualification: "" } }));
+    const result = await f.service.reply(f.request);
+    assert.equal(result.source, "ai"); assert.equal(result.text, "Qual é o seu nome?");
+    assert.equal(result.leadQualification, undefined); assert.equal(f.clientFactory.requests.length, 1);
+  }
+});
+
+test("ficha concluída inválida continua com uma pergunta, sem encaminhamento falso ou retry", async () => {
+  for (const [patch, reason] of [[{ name: "Pessoa inventada" }, "NAME_EVIDENCE"], [{ name: null }, "NAME"], [{ summary: "" }, "SUMMARY"], [{ qualification: null }, "QUALIFICATION"]]) {
+    const f = aiFixture(JSON.stringify({ text: "Entendi que aguarda o imóvel previsto para 09/08.\n\nQual é o seu nome?", leadQualification: { ...LEAD, ...patch } }));
+    const result = await f.service.reply(f.request);
+    assert.equal(result.source, "ai"); assert.equal(result.reason, "qualification_needs_information");
+    assert.equal(result.text, "Qual é o seu nome?"); assert.equal(result.leadQualification, undefined);
+    assert.equal(f.clientFactory.requests.length, 1); assert.equal(f.ledger.events.length, 1);
+    assert.equal(f.ledger.events[0].outputTokens, 40); assert.equal(f.ledger.events[0].success, true);
+    assert.deepEqual(f.logs.map(log => [log.code, log.validationReason]), [["AI_QUALIFICATION_DEFERRED", reason]]);
+    assert.doesNotMatch(JSON.stringify(f.logs), /Pessoa inventada|09\/08|Ana Silva|imóvel/u);
+  }
+});
+
+test("ficha inválida não usa texto de encerramento ou promessa de envio, mesmo com pergunta", async () => {
+  for (const text of ["Já enviei ao grupo. O advogado retornará.", "Seu caso já foi encaminhado ao grupo, qual é o seu nome?"]) {
+    const f = aiFixture(JSON.stringify({ text, leadQualification: { ...LEAD, name: null } }));
+    const result = await f.service.reply(f.request);
+    assert.equal(result.text, "Qual nome você prefere usar neste atendimento?");
+    assert.equal(result.leadQualification, undefined);
+  }
+});
+
+test("triagem em empresa com catálogo não envia produtos durante recuperação ou encerramento", async () => {
+  const catalog = { source: { type: "google_sheets", status: "healthy" }, items: [{ id: "p1", name: "Produto sintético", active: true }] };
+  for (const qualification of [LEAD, { ...LEAD, name: null }]) {
+    const f = aiFixture(JSON.stringify({ text: "", productIds: ["p1"], leadQualification: qualification }), { allowedContextKeys: ["catalog"] });
+    const result = await f.service.reply({ ...f.request, context: { catalog } });
+    assert.equal(result.source, "ai"); assert.equal(result.messages, undefined); assert.equal(result.salesInterest, undefined);
+    assert.equal(Boolean(result.leadQualification), qualification.name !== null);
+    assert.doesNotMatch(result.text, /Produto sintético|productIds|leadQualification/u);
+  }
 });
 
 function workerFixture() {
