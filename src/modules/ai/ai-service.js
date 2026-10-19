@@ -129,11 +129,16 @@ export class MultiTenantAiService {
           limit: config.maxHistoryMessages,
         })
         : [];
-      const safeContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
+      const qualifies = config.leadQualificationEnabled && Boolean(config.leadQualificationCriteria);
+      const suppliedContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
+      // Structured qualification owns closing/pause when enabled, including tenants
+      // whose older product-only closing is still configured.
+      const safeContext = qualifies && suppliedContext.catalog?.salesMode === true
+        ? { ...suppliedContext, catalog: { ...suppliedContext.catalog, interestHandoff: { enabled: false, message: "" } } }
+        : suppliedContext;
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(safeContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
-      const qualifies = config.leadQualificationEnabled && Boolean(config.leadQualificationCriteria);
       const selectionFormat = qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         qualifies ? qualificationInstructions(config.leadQualificationCriteria) : ""].filter(Boolean).join("\n\n");
@@ -218,7 +223,7 @@ export class MultiTenantAiService {
         delete structured.leadQualification;
         parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
       }
-      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog)
+      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies })
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
       const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification } : baseReply;
       const usage = providerUsage;

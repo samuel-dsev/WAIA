@@ -1,5 +1,17 @@
 # Notificações de leads em grupos — remetente central WAIA
 
+## Coleta comercial com catálogo — candidata v1.21.2, 19/10/2026
+
+ALFATECH configurada pelo painel para qualificação com nome, cidade, produto identificado e interesse inequívoco após esclarecer dúvidas. Revisão 56 publicada como configuração 27, grupo `teste` habilitado/revisão 1 e remetente conectado. O catálogo continua acessível antes da coleta. Configuração atual 28 preservada: alteração posterior somente em `/identity/fallbackMessage`.
+
+O teste real não chegou a criar ficha nem pendência: OpenAI retornou `AI_INVALID_CATALOG_SELECTION` às 15h42min46s locais, com 91 tokens de saída/limite 800. A contingência foi entregue/lida; o bot não pausou. JSON bruto não é retido, portanto o campo recusado é desconhecido. Não houve falha de transporte do grupo demonstrada nesse teste.
+
+Reprodução sintética: a coleta (`catalogAction=none`) com referência válida ao produto no array de IDs era rejeitada. Agora, exclusivamente quando a triagem está habilitada, esses IDs/filtros válidos são tratados como contexto sem efeito operacional: responde em texto, sem foto, pausa ou ficha. IDs inexistentes, duplicados, envelope/limites, categorias/faixas inválidas e texto vazio continuam rejeitados. Empresas sem triagem preservam o contrato antigo. Na triagem, a ação antiga `interest` é removida do schema/contexto e bloqueada no parser mesmo que o campo anterior permaneça preenchido. Conclusão usa somente a ficha validada e o encerramento configurado; persistência/outbox seguem a transação já existente.
+
+Quatro testes novos (dois falhavam antes da correção); 41 casos direcionados aprovados, incluindo coleta com contexto, validações, ausência de repetição/pausa, catálogo em três fichas, detalhe técnico e conclusão válida. Candidata isolada de HEAD/265f098, sem equipe/MFA, em Node 22: 567 casos, 547 aprovados, 20 skips opt-in, zero falhas; whitespace aprovado. Sem migração, dependência ou escrita SQL nova; sem repetição de testes PostgreSQL porque a persistência não mudou. Entrega externa de novo lead ALFATECH depende de teste após deploy autorizado. Nenhuma chamada OpenAI/WhatsApp adicional pela operação, reset de contato ou reenvio antigo.
+
+Nove arquivos: `src/modules/ai/ai-service.js`, `src/modules/business/catalog-sales.js`, `src/modules/group-notifier/qualification.js`, `test/group-notifier.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Equipe/MFA excluídos. Commit proposto: `fix: v1.21.2 preserva coleta comercial antes de notificar lead`. Commit/push de dev e deploy autorizados em 19/10/2026 após revisão dos nove arquivos e validações; execução em andamento. Evidência final local em `.tmp/DEPLOY_V1.21.2_20261019.md`.
+
 ## Correção de contingência e roteiro — candidata v1.21.1, 18/10/2026
 
 Diagnóstico real da Filaretti, configuração 11: às 23h02 de 18/10/2026 (America/Sao_Paulo), a entrada identificada pelo texto “residencial” teve resposta OpenAI e falhou na validação `AI_INVALID_LEAD_QUALIFICATION`. Foram 3480 tokens de entrada e 111 de saída, abaixo do limite 400. Outro erro igual ocorreu às 22h54. Não houve evidência de timeout, esgotamento de tokens ou queda da API nesses dois registros. O JSON bruto não é armazenado: o código da falha é comprovado, mas o campo exato que causou a rejeição não pode ser recuperado dessa evidência.

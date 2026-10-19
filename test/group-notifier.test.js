@@ -124,6 +124,60 @@ test("triagem em empresa com catálogo não envia produtos durante recuperação
   }
 });
 
+const SALES_CATALOG = { source: { type: "google_sheets", status: "healthy" }, salesMode: true,
+  items: [{ id: "p1", name: "Modelo A", active: true, category: "Moto" }, { id: "p2", name: "Modelo B", active: true }, { id: "p3", name: "Modelo C", active: true }],
+  interestHandoff: { enabled: true, message: "Encerramento antigo sem ficha." } };
+const COLLECTING = { status: "collecting", name: null, summary: null, qualification: null };
+const salesOutput = (patch = {}) => JSON.stringify({ text: "De qual cidade você fala?", catalogAction: "none", productIds: ["p1"],
+  filters: { category: null, minPrice: null, maxPrice: null }, leadQualification: COLLECTING, ...patch });
+
+test("coleta comercial aceita modelo como contexto sem perder pergunta nem enviar foto ou encerrar", async () => {
+  for (const filters of [{ category: null, minPrice: null, maxPrice: null }, { category: "Moto", minPrice: 1000, maxPrice: 8000 }]) {
+    const f = aiFixture(salesOutput({ filters }), { allowedContextKeys: ["catalog"] });
+    const result = await f.service.reply({ ...f.request, message: "Ana Silva", context: { catalog: SALES_CATALOG } });
+    assert.equal(result.source, "ai"); assert.equal(result.text, "De qual cidade você fala?");
+    assert.equal(result.messages, undefined); assert.equal(result.salesInterest, undefined); assert.equal(result.leadQualification, undefined);
+    assert.equal(f.clientFactory.requests.length, 1); assert.equal(f.ledger.events[0].success, true);
+    assert.equal(f.ledger.events[0].outputTokens, 40);
+    assert.ok(!f.clientFactory.requests[0].request.text.format.schema.properties.catalogAction.enum.includes("interest"));
+  }
+});
+
+test("triagem comercial ainda recusa ID inexistente, duplicado, filtro inválido e encerramento antigo", async () => {
+  for (const patch of [{ productIds: ["foreign"] }, { productIds: ["p1", "p1"] },
+    { filters: { category: "Inventada", minPrice: null, maxPrice: null } },
+    { filters: { category: null, minPrice: -1, maxPrice: null } },
+    { catalogAction: "interest" }, { text: "" }]) {
+    const f = aiFixture(salesOutput(patch), { allowedContextKeys: ["catalog"] });
+    const result = await f.service.reply({ ...f.request, context: { catalog: SALES_CATALOG } });
+    assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined); assert.equal(result.salesInterest, undefined);
+    assert.equal(f.clientFactory.requests.length, 1); assert.equal(f.ledger.events[0].errorCode, "AI_INVALID_CATALOG_SELECTION");
+  }
+});
+
+test("empresa sem triagem preserva validação antiga de resposta normal com seleção", async () => {
+  const output = JSON.parse(salesOutput()); delete output.leadQualification;
+  const f = aiFixture(JSON.stringify(output), { allowedContextKeys: ["catalog"], leadQualificationEnabled: false });
+  const result = await f.service.reply({ ...f.request, context: { catalog: SALES_CATALOG } });
+  assert.equal(result.source, "fallback"); assert.equal(f.ledger.events[0].errorCode, "AI_INVALID_CATALOG_SELECTION");
+});
+
+test("catálogo com triagem mantém três produtos e detalhe técnico, e ficha completa conclui sem fotos", async () => {
+  const context = { catalog: SALES_CATALOG };
+  const browse = aiFixture(salesOutput({ catalogAction: "browse", productIds: [] }), { allowedContextKeys: ["catalog"] });
+  const cards = await browse.service.reply({ ...browse.request, context });
+  assert.equal(cards.source, "ai"); assert.equal(cards.messages.filter(p => p.catalogProductId).length, 3);
+  assert.equal(cards.leadQualification, undefined); assert.equal(cards.salesInterest, undefined);
+  const detail = aiFixture(salesOutput({ catalogAction: "details", text: "A potência informada é de 1000 W." }), { allowedContextKeys: ["catalog"] });
+  const answer = await detail.service.reply({ ...detail.request, context });
+  assert.equal(answer.source, "ai"); assert.equal(answer.messages, undefined); assert.equal(answer.text, "A potência informada é de 1000 W.");
+  const lead = { ...LEAD, summary: "Ana Silva fala de Taubaté, escolheu Modelo A e esclareceu as dúvidas.", qualification: "Interesse comercial para continuidade com vendedor." };
+  const done = aiFixture(salesOutput({ text: "", leadQualification: lead }), { allowedContextKeys: ["catalog"], leadQualificationClosing: "Interesse anotado; o vendedor continuará." });
+  const reply = await done.service.reply({ ...done.request, context });
+  assert.equal(reply.source, "ai"); assert.equal(reply.text, "Interesse anotado; o vendedor continuará.");
+  assert.equal(reply.leadQualification.name, LEAD.name); assert.equal(reply.messages, undefined); assert.equal(reply.salesInterest, undefined);
+});
+
 function workerFixture() {
   let status = "pending", lease = true, sends = 0, complete = 0;
   const calls = [], connection = { phase: "connected", qr: null };

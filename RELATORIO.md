@@ -1,7 +1,15 @@
 # Continuidade — WAIA
 
-Atualizado em 18/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 19/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Coleta comercial e notificação da ALFATECH — 19/10/2026
+
+- Qualificação configurada/publicada pelo painel: revisão 56/configuração 27, nome e cidade antes de encaminhar interesse inequívoco em modelo identificado, dúvidas imediatas esclarecidas; catálogo permanece disponível antes da coleta. Encerramento solicitado preservado na triagem e antigo encerramento isolado por produto desativado. Remetente conectado, grupo `teste` habilitado, vínculo revisão 1. Não houve envio externo de teste pela automação.
+- Após relato de ausência da notificação, leitura real confirmou zero fichas/pendências ALFATECH. A última chamada OpenAI do teste às 15h42min46s, configuração 27, terminou com `AI_INVALID_CATALOG_SELECTION` (9846 tokens de entrada/91 de saída). Mensagem de contingência entregue/lida; conversa ainda em bot. Não é comprovação de falha de envio ao grupo, pois a ficha não chegou a ser criada. JSON bruto não é armazenado; campo exato recusado não é conhecido. Configuração atual 28 preservada: somente `/identity/fallbackMessage` difere da 27.
+- Reprodução sintética revelou que resposta normal de coleta (`none`) com ID válido do produto como contexto era recusada. Candidata v1.21.2 permite ignorar IDs/filtros válidos exclusivamente nesse texto de coleta, sem gerar fichas de produto ou encaminhamento. Envelope, limites, IDs estrangeiros/duplicados, categoria/faixa inválida e texto vazio seguem bloqueados. Sem triagem, validação anterior preservada.
+- Em triagem comercial, contexto e schema desativam a ação antiga `interest`, e o parser também impede seu uso; a ficha estruturada é o único caminho de encerramento e pausa, mesmo com campo antigo ainda preenchido. Instruções de composição explicitam coleta versus apresentação versus conclusão. Catálogo paginado, detalhes técnicos e ficha completa mantidos.
+- Quatro testes novos, incluindo dois que falharam antes da correção, cobrem pergunta sem foto, IDs/filtros inválidos, conclusão antiga bloqueada, compatibilidade sem triagem, três fichas/detalhe e encerramento canônico. Suíte direcionada: 41 aprovados. Candidata isolada de HEAD/265f098 sem equipe/MFA, Node 22: 567 casos, 547 aprovados, 20 skips opt-in, zero falhas. Whitespace aprovado. Sem migração, dependência, alteração SQL de persistência, credencial, reset ou reenvio. PostgreSQL não repetido porque a transação de persistência/outbox não mudou. Após apresentação dos nove arquivos e validações, usuário autorizou explicitamente commit, push de dev e deploy da v1.21.2. Execução em andamento; evidência final local em `.tmp/DEPLOY_V1.21.2_20261019.md`. Equipe/MFA preservados.
 
 ## Correção da triagem, repetição e voz da Laís — 18/10/2026
 

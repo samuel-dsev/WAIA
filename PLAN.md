@@ -1,7 +1,9 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 18/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 19/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
+
+Correção de 19/10/2026: configuração de leads da ALFATECH publicada pelo painel na versão 27; grupo `teste` habilitado e remetente conectado. Novo teste não gerou ficha/outbox: resposta OpenAI às 15h42 retornou `AI_INVALID_CATALOG_SELECTION` durante coleta, sem erro de transporte do grupo. Candidata local v1.21.2 preserva a resposta conversacional com referência válida ao produto durante coleta e impede encerramento isolado por produto em empresas com triagem. IDs/filtros inválidos continuam bloqueados; catálogo e conclusão pela ficha preservados. Versão 28 atualmente ativa preservada (alteração posterior de contingência pelo painel). Testes e escopo em [NOTIFICACOES_GRUPOS.md](docs/NOTIFICACOES_GRUPOS.md). Commit, push de dev e deploy da v1.21.2 explicitamente autorizados após revisão dos nove arquivos e testes; execução em andamento. Evidência final local em `.tmp/DEPLOY_V1.21.2_20261019.md`; equipe/MFA fora do escopo. Sem reset ou reenvio antigo.
 
 Correção de 18/10/2026: diagnóstico real da Filaretti às 23h02 confirmou `AI_INVALID_LEAD_QUALIFICATION` após resposta OpenAI (111/400 tokens), não timeout. Candidata local v1.21.1 trata ficha parcial como coleta, preserva conclusão válida sem texto redundante e continua com pergunta quando a ficha inválida não pode ser enviada. Roteiro feminino/sem recapitulações publicado pelo painel como configuração 12, rascunho 57, preservando modelo, limites e grupo. Escopo, evidência e validações em [NOTIFICACOES_GRUPOS.md](docs/NOTIFICACOES_GRUPOS.md). Commit, push de dev e deploy da v1.21.1 explicitamente autorizados após revisão dos oito arquivos e testes; execução em andamento. Evidência final local em `.tmp/DEPLOY_V1.21.1_20261018.md`. Equipe/MFA preservados. Não reenvia nem reinicia o atendimento do print.
 

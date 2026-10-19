@@ -72,7 +72,7 @@ function filteredProducts(products, query) {
     && (query.maxPrice === null || typeof item.price === "number" && item.price <= query.maxPrice));
 }
 
-export function parseCatalogSalesReply(output, catalog) {
+export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabled = false } = {}) {
   let value;
   try { value = JSON.parse(output); } catch { throw invalid(); }
   const products = availableCatalogProducts(catalog), byId = new Map(products.map((item) => [item.id, item]));
@@ -83,14 +83,18 @@ export function parseCatalogSalesReply(output, catalog) {
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
   if (action === "interest") {
     const handoff = catalog.interestHandoff;
-    if (handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
+    if (leadQualificationEnabled || handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
       || handoff.message.length > 4096 || !value.productIds.length) throw invalid();
     // Model prose and browse filters have no operational effect here. Always use the approved closing.
     return { text: handoff.message.trim(), salesInterest: { products: value.productIds.map((id) => ({ id, name: byId.get(id).name })) } };
   }
   if (query.category !== null && !products.some((item) => item.category === query.category)) throw invalid();
   if (action === "none" || action === "details") {
-    if (!text || action === "none" && value.productIds.length || query.category !== null || query.minPrice !== null || query.maxPrice !== null) throw invalid();
+    // During lead collection, known product IDs/valid filters may describe the prior
+    // choice. A conversational reply never sends those cards or concludes interest.
+    const collectingContext = action === "none" && leadQualificationEnabled;
+    if (!text || !collectingContext && (action === "none" && value.productIds.length
+      || query.category !== null || query.minPrice !== null || query.maxPrice !== null)) throw invalid();
     return { text };
   }
   if (action === "products" && !value.productIds.length) {
