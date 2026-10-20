@@ -315,8 +315,8 @@ test("recuperação de ficha inválida também remove promessa seguida de pergun
 });
 
 function workerFixture() {
-  let status = "pending", lease = true, sends = 0, complete = 0;
-  const calls = [], connection = { phase: "connected", qr: null };
+  let status = "pending", lease = true, sends = 0, complete = 0, now = 0;
+  const calls = [], logs = [], connection = { phase: "connected", qr: null };
   const session = { connect: async () => {}, close() { calls.push("close"); }, disconnect: async () => {}, snapshot: () => connection,
     listGroups: async () => [{ id: "123@g.us", name: "Grupo A" }], groupMetadata: async () => ({ id: "123@g.us" }),
     async sendText(group, text) { sends += 1; calls.push([group, text]); return { messageId: "synthetic-group-id" }; } };
@@ -328,9 +328,39 @@ function workerFixture() {
     complete: async (_owner, _id, result) => { complete += 1; status = result.messageId ? "accepted" : "unconfirmed"; },
     deferCandidate: async () => { calls.push("deferred"); },
   };
-  const worker = createGroupNotifierWorker({ repository, sessionFactory: () => session });
-  return { worker, session, repository, calls, get sends() { return sends; }, get status() { return status; }, get complete() { return complete; }, loseLease() { lease = false; } };
+  const worker = createGroupNotifierWorker({ repository, sessionFactory: () => session, clock: () => now,
+    logger: { warn(eventCode, metadata) { logs.push({ eventCode, ...metadata }); } } });
+  return { worker, session, repository, calls, logs, advance(ms) { now += ms; }, get sends() { return sends; }, get status() { return status; }, get complete() { return complete; }, loseLease() { lease = false; } };
 }
+
+test("falha de descoberta não bloqueia destino já configurado e respeita intervalo de atualização", async () => {
+  const f = workerFixture(); let refreshes = 0;
+  f.session.listGroups = async () => { refreshes += 1; throw Object.assign(new Error("synthetic private provider payload"), { code: "GROUPS_UNAVAILABLE" }); };
+  await f.worker.tick(); await f.worker.tick();
+  assert.equal(f.sends, 1); assert.equal(f.status, "accepted"); assert.equal(refreshes, 1);
+  f.advance(30_000); await f.worker.tick(); assert.equal(refreshes, 2); assert.equal(f.sends, 1);
+  assert.ok(f.logs.some(l => l.eventCode === "group_notifier_discovery_failed" && l.code === "GROUPS_UNAVAILABLE"));
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic|payload|5511|@g.us/u);
+});
+
+test("falha do cache de descoberta não dispensa validação e política do destino", async () => {
+  const valid = workerFixture(); valid.repository.cacheGroups = async () => { throw new Error("private cache error"); };
+  await valid.worker.tick(); assert.equal(valid.sends, 1);
+  const forbidden = workerFixture(); forbidden.session.listGroups = async () => { throw new Error("discovery failed"); };
+  forbidden.session.groupMetadata = async () => { throw Object.assign(new Error("private membership"), { code: "GROUP_SEND_FORBIDDEN" }); };
+  await forbidden.worker.tick(); assert.equal(forbidden.sends, 0); assert.ok(forbidden.calls.includes("deferred"));
+  const revoked = workerFixture(); revoked.session.listGroups = async () => { throw new Error("discovery failed"); };
+  revoked.repository.beginSend = async () => null;
+  await revoked.worker.tick(); assert.equal(revoked.sends, 0);
+});
+
+test("erros do remetente informam etapa e código sem dados de sessão/lead", async () => {
+  const f = workerFixture();
+  f.repository.candidate = async () => { throw Object.assign(new Error("private lead or QR"), { code: "arbitrary secret" }); };
+  await assert.rejects(f.worker.tick());
+  assert.ok(f.logs.some(l => l.eventCode === "group_notifier_tick_failed" && l.stage === "candidate" && l.code === "OPERATION_FAILED"));
+  assert.doesNotMatch(JSON.stringify(f.logs), /private|secret|QR|lead or/u);
+});
 
 test("worker serializa, usa destino do servidor e não reenvia aceitação conhecida", async () => {
   const f = workerFixture();

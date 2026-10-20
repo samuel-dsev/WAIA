@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { createWhatsAppWebGroupSession } from "../../integrations/whatsapp-web/group-session.js";
 import { notificationText } from "./qualification.js";
 
-export function createGroupNotifierWorker({ repository, sessionFactory = createWhatsAppWebGroupSession, owner = randomUUID(), clock = () => Date.now() }) {
+export function createGroupNotifierWorker({ repository, sessionFactory = createWhatsAppWebGroupSession, owner = randomUUID(), clock = () => Date.now(), logger = {} }) {
   let session = null, epoch = null, busy = false, closed = false, owned = false, nextGroupsAt = 0;
   let activeTick = null, closing = null;
   const pulses = new Set();
+  const codes = new Set(["GROUPS_UNAVAILABLE", "GROUP_UNAVAILABLE", "GROUP_SEND_FORBIDDEN", "NOT_CONNECTED", "NOTIFIER_LEASE_LOST", "SEND_UNCONFIRMED"]);
+  const notice = (event, stage, error) => logger.warn?.(event, { stage, code: codes.has(error?.code) ? error.code : "OPERATION_FAILED" });
   async function pulse() {
     if (closed) return;
     const pending = repository.lease(owner);
@@ -19,6 +21,7 @@ export function createGroupNotifierWorker({ repository, sessionFactory = createW
     } finally { pulses.delete(pending); }
   }
   async function execute() {
+      let stage = "lease";
       try {
         const control = await pulse(); if (!control) return;
         if (epoch !== Number(control.epoch)) {
@@ -26,36 +29,56 @@ export function createGroupNotifierWorker({ repository, sessionFactory = createW
             try { await session.disconnect(); } catch { session.close(); }
           }
           session = null; epoch = Number(control.epoch); nextGroupsAt = 0;
-          await repository.recover(owner, epoch);
+          stage = "recover"; await repository.recover(owner, epoch);
         }
         if (!control.desired) {
           await repository.publish(owner, epoch, { phase: "disconnected" }); return;
         }
         if (closed) return;
         if (!session) {
+          stage = "connect";
           session = sessionFactory({ authStore: repository.authStore(owner, epoch) });
           await session.connect(control.phone);
         }
         const state = session.snapshot();
+        stage = "publish";
         await repository.publish(owner, epoch, state);
         if (closed || state.phase !== "connected" || !owned) return;
         if (clock() >= nextGroupsAt) {
-          const groups = await session.listGroups();
-          await repository.cacheGroups(owner, epoch, groups);
+          // Discovery serves the picker. Delivery revalidates its own destination
+          // below and must not depend on a successful refresh of every group.
           nextGroupsAt = clock() + 30_000;
+          stage = "refresh_groups";
+          try {
+            const groups = await session.listGroups();
+            await repository.cacheGroups(owner, epoch, groups);
+          } catch (error) { notice("group_notifier_discovery_failed", stage, error); }
         }
+        if (closed || !owned || session?.snapshot().phase !== "connected") return;
+        stage = "candidate";
         const candidate = await repository.candidate(owner, epoch); if (!candidate) return;
+        stage = "group_metadata";
         try { await session.groupMetadata(candidate.group_id); }
-        catch { await repository.deferCandidate(owner, epoch, candidate.id); return; }
+        catch (error) {
+          notice("group_notifier_group_check_failed", stage, error);
+          stage = "defer_candidate";
+          await repository.deferCandidate(owner, epoch, candidate.id); return;
+        }
         if (closed || !owned || session.snapshot().phase !== "connected") return;
+        stage = "begin_send";
         const delivery = await repository.beginSend(owner, epoch, candidate.id); if (!delivery) return;
         let result = {};
+        stage = "send";
         try {
           if (!closed && owned && session.snapshot().phase === "connected") result = await session.sendText(delivery.group_id, notificationText({
             companyName: delivery.company_name, name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
           }));
-        } catch { /* accepted by WhatsApp with lost response is possible: do not retry */ }
+        } catch { notice("group_notifier_send_unconfirmed", stage, { code: "SEND_UNCONFIRMED" }); }
+        stage = "complete";
         await repository.complete(owner, candidate.id, result);
+      } catch (error) {
+        notice("group_notifier_tick_failed", stage, error);
+        throw error;
       } finally { busy = false; }
   }
   return {

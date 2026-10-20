@@ -1,5 +1,17 @@
 # Notificações de leads em grupos — remetente central WAIA
 
+## Descoberta de grupos bloqueando entrega — candidata v1.21.4, 20/10/2026
+
+O novo teste real da v1.21.3 criou a ficha ALFATECH às 16h45min33s, com encerramento entregue/lido, conversa pausada e notificação pending/sem tentativa. Configuração 29, grupo teste habilitado/revisão 1 e remetente conectado/lease fresco. O cache parou em 16h42min33s e o processo registrou 145 falhas genéricas em dez minutos. Não havia código de exceção específico nesses logs; erros PostgreSQL sanitizados não mostraram ERROR e EXPLAIN da retenção passou sem executar escrita. Não se apresenta a hipótese de erro específico do provedor como fato confirmado.
+
+Reprodução sintética: falha de descoberta/cache sai do tick antes da fila. A candidata agenda a próxima consulta em 30s mesmo na falha, registra etapa/código sanitizado e continua para o destino configurado. A lista serve ao seletor; envio exige consulta individual atual do grupo e validação de participação/permissões, rota/versão, empresa/contato/número/configuração e lease, sem recorrer ao cache antigo como autorização. Falha nessa validação individual mantém adiamento de 60s. Falha após início de envio continua incerta e sem retry. Não altera políticas, SQL, sessão ou associação.
+
+O adaptador descarta entradas nulas/malformadas/individuais e deduplica IDs de grupos; lista inválida continua sendo erro controlado. Logs do daemon agora contêm somente evento/etapa e códigos permitidos, sem mensagem bruta, identificação do grupo, QR, credenciais, telefone ou ficha. Etapas inesperadas mantêm erro/reentrada existentes, com diagnóstico redigido.
+
+Quatro testes novos, todos falhavam antes da implementação; 46 casos de remetente/piloto aprovados, incluindo continuidade após falha, cadência, cache, grupo sem permissão, política revogada, não repetição e privacidade. Candidata isolada de HEAD/882aad6, sem equipe/MFA, em Node 22: 583 casos, 563 aprovados, 20 skips opt-in, zero falhas; whitespace aprovado. PostgreSQL não repetido porque persistência não mudou. Sem nova chamada OpenAI, reset ou envio manual pela operação. O item já pending da ALFATECH poderá ser processado após eventual deploy autorizado; não é necessário criar outro atendimento para essa comprovação.
+
+Dez arquivos: `src/modules/group-notifier/worker.js`, `src/integrations/whatsapp-web/group-session.js`, `src/group-notifier.js`, `test/group-notifier.test.js`, `test/group-notifier-pilot.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Equipe/MFA preservados. Mensagem proposta: `fix: v1.21.4 destrava notificações após falha na lista de grupos`. Commit/push de dev e deploy da v1.21.4 autorizados em 20/10/2026 após revisão dos dez arquivos e validações; execução em andamento. Evidência final local em `.tmp/DEPLOY_V1.21.4_20261020.md`.
+
 ## Encerramento comum sem ficha — candidata v1.21.3, 20/10/2026
 
 Diagnóstico real: na v1.21.2, ALFATECH ativa/configuração 29, às 16h27min26s o modelo enviou conclusão em texto comum. Mensagem entregue/lida, sem ficha no checkpoint, conversa em bot, zero leads/pendências/tentativas de envio ao grupo. OpenAI marcou sucesso com 115 tokens de saída; grupo teste/remetente estavam saudáveis. Configurações 28/29 têm conteúdo igual. JSON bruto não é retido: estado exato retornado pelo modelo não é comprovável. Reprodução sintética com `collecting` e texto de encerramento reproduziu o defeito.

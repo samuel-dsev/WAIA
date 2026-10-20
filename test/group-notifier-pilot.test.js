@@ -92,6 +92,17 @@ test("adapter exige participação e permissão no grupo, recusando destinatári
   f.session.close();
 });
 
+test("descoberta ignora entradas malformadas e IDs duplicados sem ampliar destinos", async () => {
+  const f = connectionFixture(); await f.open();
+  f.sockets[0].groupFetchAllParticipating = async () => ({ a: null, b: undefined,
+    c: { id: GROUP_A, subject: "Grupo válido" }, d: { id: GROUP_A, subject: "Grupo válido" },
+    e: { id: "5511999990002@s.whatsapp.net", subject: "Contato individual" } });
+  assert.deepEqual(await f.session.listGroups(), [{ id: GROUP_A, name: "Grupo válido" }]);
+  f.sockets[0].groupFetchAllParticipating = async () => undefined;
+  await assert.rejects(f.session.listGroups(), { code: "GROUPS_UNAVAILABLE" });
+  f.session.close();
+});
+
 function routingFixture() {
   const calls = [], session = {
     snapshot: () => ({ phase: "connected", qr: "synthetic-qr", qrAt: 0, expectedPhone: PHONE, connectedPhone: PHONE }),

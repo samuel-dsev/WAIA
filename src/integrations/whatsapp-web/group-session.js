@@ -186,7 +186,9 @@ export function createWhatsAppWebGroupSession({
       const active = connected(); let groups;
       try { groups = await active.groupFetchAllParticipating(); } catch { throw failure("GROUPS_UNAVAILABLE"); }
       if (socket !== active || state.phase !== "connected") throw failure("NOT_CONNECTED");
-      return Object.values(groups).filter((group) => GROUP_ID.test(group.id)).map((group) => ({
+      if (!groups || typeof groups !== "object" || Array.isArray(groups)) throw failure("GROUPS_UNAVAILABLE");
+      const valid = Object.values(groups).filter((group) => group && typeof group.id === "string" && GROUP_ID.test(group.id));
+      return [...new Map(valid.map(group => [group.id, group])).values()].map((group) => ({
         id: group.id, name: String(group.subject || "Grupo sem nome").slice(0, 128),
       })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     },
