@@ -9,7 +9,7 @@ import {
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
-import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, QUALIFICATION_CLOSING } from "../group-notifier/qualification.js";
+import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 
 function historyInput(messages, messageId) {
   return messages
@@ -152,10 +152,13 @@ export class MultiTenantAiService {
         model: config.model,
       }), config.model);
       const estimatedInputTokens = estimateTokens(`${instructions}\n${JSON.stringify(inputMessages)}${selectionFormat ? `\n${JSON.stringify(selectionFormat)}` : ""}`);
-      const estimatedTokens = estimatedInputTokens + config.maxOutputTokens;
+      // Reserve the bounded repair budget before any provider call. Unused budget
+      // is released by the same finalization; actual usage is summed below.
+      const repairInputTokens = qualifies ? estimatedInputTokens + estimateTokens(QUALIFICATION_RECHECK_INSTRUCTIONS) : 0;
+      const estimatedTokens = estimatedInputTokens + repairInputTokens + config.maxOutputTokens * (qualifies ? 2 : 1);
       const estimatedCost = calculateCost(pricing, {
-        inputTokens: estimatedInputTokens,
-        outputTokens: config.maxOutputTokens,
+        inputTokens: estimatedInputTokens + repairInputTokens,
+        outputTokens: config.maxOutputTokens * (qualifies ? 2 : 1),
       });
       reservation = await this.ledger.reserve({
         empresaId: request.empresaId,
@@ -186,42 +189,65 @@ export class MultiTenantAiService {
         apiKey: credential?.apiKey || null,
       });
       if (typeof client?.responses?.create !== "function") throw new TypeError("Cliente Responses API inválido.");
-      const response = await responseWithTimeout(client, {
+      const providerRequest = {
         model: config.model,
         store: false,
         max_output_tokens: config.maxOutputTokens,
         instructions,
         input: inputMessages,
         ...(selectionFormat ? { text: { format: selectionFormat } } : {}),
-      }, this.timeoutMs, {
-        headers: { "X-Client-Request-Id": String(request.correlationId).slice(0, 512) },
-      });
-      providerUsage = normalizeUsage(response);
-      const text = String(response?.output_text || "").trim();
-      if (!text) {
-        const error = new Error("A IA não retornou texto.");
-        error.code = "AI_EMPTY_RESPONSE";
-        throw error;
-      }
-      if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
+      };
+      const startedAt = performance.now();
+      const requestResponse = async (repair = false) => {
+        const remainingMs = this.timeoutMs - (performance.now() - startedAt);
+        if (remainingMs < 1) throw timeoutError();
+        const response = await responseWithTimeout(client, repair
+          ? { ...providerRequest, instructions: `${instructions}\n\n${QUALIFICATION_RECHECK_INSTRUCTIONS}` } : providerRequest,
+        remainingMs, { headers: { "X-Client-Request-Id": repair
+          ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
+        const usage = normalizeUsage(response);
+        providerUsage = { inputTokens: (providerUsage?.inputTokens || 0) + usage.inputTokens,
+          outputTokens: (providerUsage?.outputTokens || 0) + usage.outputTokens,
+          totalTokens: (providerUsage?.totalTokens || 0) + usage.totalTokens };
+        const text = String(response?.output_text || "").trim();
+        if (!text) throw Object.assign(new Error("A IA não retornou texto."), { code: "AI_EMPTY_RESPONSE" });
+        if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
+        return { response, text };
+      };
+      let { response, text } = await requestResponse();
       let parsedText = text, leadQualification, qualificationIssue;
       if (qualifies) {
-        const structured = JSON.parse(text);
-        if (!structured || typeof structured !== "object" || Array.isArray(structured)
-          || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
-        try {
-          leadQualification = parseQualification(structured.leadQualification, { configVersion: config.version,
-            evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)] });
-        } catch (error) {
-          if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
-          qualificationIssue = error.validationReason;
-          structured.text = qualificationContinuation(structured.text, qualificationIssue);
-          this.logger.warn?.("ai_qualification_deferred", { empresaId: request.empresaId, conversationId: request.conversationId,
-            correlationId: request.correlationId, code: "AI_QUALIFICATION_DEFERRED", validationReason: qualificationIssue });
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const structured = JSON.parse(text);
+          if (!structured || typeof structured !== "object" || Array.isArray(structured)
+            || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+          try {
+            leadQualification = parseQualification(structured.leadQualification, { configVersion: config.version,
+              evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)] });
+          } catch (error) {
+            if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
+            qualificationIssue = error.validationReason;
+            structured.text = qualificationContinuation(structured.text, qualificationIssue);
+          }
+          if (!leadQualification && !qualificationIssue && announcesQualificationClosing(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING)) {
+            if (attempt === 0) {
+              this.logger.warn?.("ai_qualification_recheck", { empresaId: request.empresaId, conversationId: request.conversationId,
+                correlationId: request.correlationId, code: "AI_QUALIFICATION_RECHECK", validationReason: "UNCONFIRMED_CLOSING" });
+              ({ response, text } = await requestResponse(true));
+              continue;
+            }
+            qualificationIssue = "UNCONFIRMED_CLOSING";
+            structured.text = qualificationContinuation(structured.text, qualificationIssue);
+          }
+          if (qualificationIssue) {
+            this.logger.warn?.("ai_qualification_deferred", { empresaId: request.empresaId, conversationId: request.conversationId,
+              correlationId: request.correlationId, code: "AI_QUALIFICATION_DEFERRED", validationReason: qualificationIssue });
+          }
+          if (!leadQualification && !qualificationIssue && !structured.text.trim() && !catalogFormat) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+          delete structured.leadQualification;
+          parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
+          break;
         }
-        if (!leadQualification && !qualificationIssue && !structured.text.trim() && !catalogFormat) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
-        delete structured.leadQualification;
-        parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
       }
       const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies })
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };

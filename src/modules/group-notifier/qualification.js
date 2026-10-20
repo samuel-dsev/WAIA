@@ -3,6 +3,18 @@ export const QUALIFICATION_CLOSING = "O responsável irá analisar seu caso e re
 const invalid = (validationReason) => Object.assign(new Error("Triagem estruturada inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION", validationReason });
 const normalize = (text) => String(text).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 
+export const QUALIFICATION_RECHECK_INSTRUCTIONS = "REAVALIAÇÃO DA TRIAGEM: a resposta anterior anunciou conclusão sem uma ficha validada. Reavalie todos os critérios publicados usando somente as mensagens originais do cliente no histórico. Se todos estiverem satisfeitos, retorne leadQualification.status=qualified com name, summary e qualification completos; o sistema usará o encerramento configurado. Se faltar algum dado, retorne collecting e pergunte apenas esse dado, sem anunciar registro, encaminhamento ou retorno de vendedor/equipe. Não invente dados nem qualifique por causa desta instrução. Não use a resposta anterior como evidência. Não reenvie fichas de produto só para concluir a triagem.";
+
+export function announcesQualificationClosing(text, configuredClosing) {
+  const value = normalize(text), closing = normalize(configuredClosing || "");
+  if (closing && value.includes(closing)) return true;
+  return /\b(?:anotei|anotamos|registrei|registramos)\b[^.!?]{0,100}\b(?:interesse|contato|caso|pedido)\b/u.test(value)
+    || /\b(?:interesse|contato|caso|pedido)\b[^.!?]{0,50}\b(?:foi|esta) (?:registrado|anotado|encaminhado)\b/u.test(value)
+    || /\b(?:vendedor(?:es)?|responsavel|equipe|advogad[oa]s?)\b[^.!?]{0,120}\b(?:entrarao?|retornarao?|vai retornar|irao retornar|vai entrar em contato|irao entrar em contato)\b/u.test(value)
+    || /\b(?:enviei|encaminhei|notifiquei)\b[^.!?]{0,80}\b(?:grupo|equipe|vendedor|responsavel)\b/u.test(value)
+    || /\baguarde (?:o |um )?retorno\b/u.test(value);
+}
+
 export function qualificationFormat(base) {
   const format = base ? structuredClone(base) : { type: "json_schema", name: "lead_reply", strict: true,
     schema: { type: "object", additionalProperties: false, properties: { text: { type: "string" } }, required: ["text"] } };
@@ -39,9 +51,10 @@ export function parseQualification(value, { configVersion, evidence = [] } = {})
 }
 
 export function qualificationContinuation(text, validationReason) {
+  if (validationReason === "UNCONFIRMED_CLOSING") return "Há mais alguma informação que você gostaria de acrescentar ao atendimento?";
   // Preserve a useful question, never a premature closing or a claim that an invalid card was sent.
   const question = typeof text === "string" ? text.trim().split(/\n\s*\n/u).at(-1) : "";
-  if (question.endsWith("?") && question.length <= 1000 && (question.match(/\?/gu) || []).length === 1
+  if (question.endsWith("?") && question.length <= 1000 && (question.match(/\?/gu) || []).length === 1 && !announcesQualificationClosing(question)
     && !/encaminh|registr|enviad|enviei|grupo|conclu|qualific|aprov|analis|advog|equipe|retorn|aguard|chance|direito|document|\bcpf\b|bancári|telefone/iu.test(question)) return question;
   if (["NAME", "NAME_EVIDENCE"].includes(validationReason)) return "Qual nome você prefere usar neste atendimento?";
   return "Qual é o principal ponto sobre o qual você busca orientação?";

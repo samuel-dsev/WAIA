@@ -1,5 +1,17 @@
 # Notificações de leads em grupos — remetente central WAIA
 
+## Encerramento comum sem ficha — candidata v1.21.3, 20/10/2026
+
+Diagnóstico real: na v1.21.2, ALFATECH ativa/configuração 29, às 16h27min26s o modelo enviou conclusão em texto comum. Mensagem entregue/lida, sem ficha no checkpoint, conversa em bot, zero leads/pendências/tentativas de envio ao grupo. OpenAI marcou sucesso com 115 tokens de saída; grupo teste/remetente estavam saudáveis. Configurações 28/29 têm conteúdo igual. JSON bruto não é retido: estado exato retornado pelo modelo não é comprovável. Reprodução sintética com `collecting` e texto de encerramento reproduziu o defeito.
+
+A candidata verifica promessas de registro/encaminhamento/retorno sem ficha válida, incluindo o encerramento configurado. Faz no máximo uma reavaliação com o mesmo histórico original e critérios publicados; não manda a resposta defeituosa como evidência nem cria lead pela promessa. Só ficha completa, com nome evidenciado e validações existentes, permite concluir. Se faltar dado, continua a pergunta útil. Se o segundo retorno ainda prometer conclusão sem ficha, responde com continuação neutra e não pausa/notifica. Recuperação de ficha inválida também remove promessa seguida de pergunta. Os eventos `AI_QUALIFICATION_RECHECK`/`AI_QUALIFICATION_DEFERRED` guardam somente categorias/referências operacionais.
+
+As duas chamadas compartilham o prazo total monotônico atual. Para empresas com triagem, a reserva mensal prevê ambas antes de chamar o provedor (conservadora perto do limite); finalização única contabiliza apenas consumo informado, somando ambas quando ocorrer a reavaliação e liberando a reserva restante. Modelo, credencial, limite por resposta e limites mensais permanecem. Resposta normal/ficha válida fazem uma chamada; empresas sem triagem mantêm contrato anterior. Não altera persistência/outbox, schema, destino ou sessão. Nenhum replay/reset ou disparo real de teste pela operação.
+
+Doze testes novos (cinco falhavam antes da correção), 53 casos direcionados aprovados: conclusão reparada, coleta, repetição limitada, consumo/cota, prazo/abort, falha/truncamento, identidade falsa, catálogo/isolamento e compatibilidade. Candidata isolada de HEAD/12aae3b, sem equipe/MFA, em Node 22: 579 casos, 559 aprovados, 20 skips opt-in, zero falhas; whitespace aprovado. PostgreSQL não repetido porque persistência não mudou. A entrega externa ALFATECH segue pendente de novo teste após eventual deploy autorizado.
+
+Oito arquivos: `src/modules/ai/ai-service.js`, `src/modules/group-notifier/qualification.js`, `test/group-notifier.test.js`, `package.json`, `package-lock.json`, `PLAN.md`, `RELATORIO.md` e este documento. Equipe/MFA preservados. Commit proposto: `fix: v1.21.3 exige ficha antes do encerramento de lead`. Commit/push de dev e deploy da v1.21.3 autorizados em 20/10/2026 após revisão dos oito arquivos e validações; execução em andamento. Evidência final local em `.tmp/DEPLOY_V1.21.3_20261020.md`.
+
 ## Coleta comercial com catálogo — candidata v1.21.2, 19/10/2026
 
 ALFATECH configurada pelo painel para qualificação com nome, cidade, produto identificado e interesse inequívoco após esclarecer dúvidas. Revisão 56 publicada como configuração 27, grupo `teste` habilitado/revisão 1 e remetente conectado. O catálogo continua acessível antes da coleta. Configuração atual 28 preservada: alteração posterior somente em `/identity/fallbackMessage`.

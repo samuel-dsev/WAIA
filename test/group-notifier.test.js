@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import { createAdminRouter } from "../src/modules/admin/router.js";
 import { publicAdminError } from "../src/modules/admin/errors.js";
-import { qualificationFormat, parseQualification, QUALIFICATION_CRITERIA, QUALIFICATION_CLOSING } from "../src/modules/group-notifier/qualification.js";
+import { qualificationFormat, parseQualification, announcesQualificationClosing, QUALIFICATION_CRITERIA, QUALIFICATION_CLOSING } from "../src/modules/group-notifier/qualification.js";
 import { createGroupNotifierWorker } from "../src/modules/group-notifier/worker.js";
 import { GroupNotifierAdminService } from "../src/modules/group-notifier/admin-service.js";
 import { compileTenantRuntimeConfigV2, verifyCompiledTenantRuntimeConfigV2 } from "../src/modules/configuration/index.js";
@@ -176,6 +176,142 @@ test("catálogo com triagem mantém três produtos e detalhe técnico, e ficha c
   const reply = await done.service.reply({ ...done.request, context });
   assert.equal(reply.source, "ai"); assert.equal(reply.text, "Interesse anotado; o vendedor continuará.");
   assert.equal(reply.leadQualification.name, LEAD.name); assert.equal(reply.messages, undefined); assert.equal(reply.salesInterest, undefined);
+});
+
+const FALSE_CLOSING = "Ótimo, Ana Silva, anotei seu interesse no Modelo A. Um de nossos vendedores entrará em contato em breve.";
+function repairFixture(outputs) {
+  const f = aiFixture(salesOutput({ text: FALSE_CLOSING }), { allowedContextKeys: ["catalog"],
+    leadQualificationClosing: "Interesse anotado; o vendedor continuará." });
+  let calls = 0;
+  f.clientFactory.responder = async () => {
+    const output = outputs[calls++];
+    if (output instanceof Error) throw output;
+    return { output_text: typeof output === "string" ? output : salesOutput(output), usage: { input_tokens: 100, output_tokens: 40 } };
+  };
+  return { ...f, request: { ...f.request, message: "Ana Silva", context: { catalog: SALES_CATALOG } } };
+}
+
+test("encerramento sem ficha é reavaliado uma vez e só conclui com lead validado", async () => {
+  const f = repairFixture([{ text: FALSE_CLOSING }, { text: "", leadQualification: LEAD }]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "ai"); assert.equal(result.text, "Interesse anotado; o vendedor continuará.");
+  assert.equal(result.leadQualification.name, LEAD.name); assert.equal(result.messages, undefined); assert.equal(result.salesInterest, undefined);
+  assert.equal(f.clientFactory.requests.length, 2); assert.equal(f.ledger.events.length, 1);
+  assert.equal(f.ledger.events[0].inputTokens, 200); assert.equal(f.ledger.events[0].outputTokens, 80);
+  const [first, second] = f.clientFactory.requests.map(r => r.request);
+  assert.deepEqual(second.input, first.input); assert.equal(second.store, false);
+  assert.match(second.instructions, /REAVALIAÇÃO/u); assert.doesNotMatch(JSON.stringify(second.input), /anotei seu interesse/u);
+  assert.doesNotMatch(JSON.stringify(f.logs), /Ana Silva|Modelo A|anotei/u);
+});
+
+test("reavaliação respeita dados faltantes e mantém pergunta sem encaminhar", async () => {
+  const f = repairFixture([{ text: FALSE_CLOSING }, { text: "De qual cidade você fala?" }]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.text, "De qual cidade você fala?"); assert.equal(result.leadQualification, undefined);
+  assert.equal(result.messages, undefined); assert.equal(result.salesInterest, undefined); assert.equal(f.clientFactory.requests.length, 2);
+});
+
+test("segunda promessa sem ficha é bloqueada sem terceiro pedido ou encerramento falso", async () => {
+  const f = repairFixture([{ text: FALSE_CLOSING }, { text: FALSE_CLOSING }]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "ai"); assert.equal(result.reason, "qualification_needs_information");
+  assert.equal(result.text.endsWith("?"), true); assert.doesNotMatch(result.text, /anotei|vendedor|contato|encaminhad/u);
+  assert.equal(result.leadQualification, undefined); assert.equal(result.messages, undefined); assert.equal(f.clientFactory.requests.length, 2);
+  assert.equal(f.ledger.events[0].totalTokens, 280);
+  assert.ok(f.logs.some(l => l.validationReason === "UNCONFIRMED_CLOSING"));
+});
+
+test("falha na reavaliação contabiliza a primeira resposta sem criar ficha", async () => {
+  const error = Object.assign(new Error("synthetic private failure"), { code: "AI_TIMEOUT" });
+  const f = repairFixture([{ text: FALSE_CLOSING }, error]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined);
+  assert.equal(f.clientFactory.requests.length, 2); assert.equal(f.ledger.events.length, 1);
+  assert.equal(f.ledger.events[0].inputTokens, 100); assert.equal(f.ledger.events[0].outputTokens, 40);
+  assert.equal(f.ledger.events[0].errorCode, "AI_TIMEOUT");
+});
+
+test("ficha inventada na reavaliação não encaminha e uso das duas respostas é contabilizado", async () => {
+  const f = repairFixture([{ text: FALSE_CLOSING }, { text: FALSE_CLOSING, leadQualification: { ...LEAD, name: "Nome inventado" } }]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification, undefined);
+  assert.equal(result.text, "Qual nome você prefere usar neste atendimento?");
+  assert.equal(f.clientFactory.requests.length, 2); assert.equal(f.ledger.events[0].totalTokens, 280);
+});
+
+test("coleta normal e ficha completa não pedem reavaliação nem duplicam consumo", async () => {
+  for (const output of [{ text: "Qual é o seu nome?" }, { text: "", leadQualification: LEAD }]) {
+    const f = repairFixture([output]); const result = await f.service.reply(f.request);
+    assert.equal(result.source, "ai"); assert.equal(f.clientFactory.requests.length, 1); assert.equal(f.ledger.events[0].totalTokens, 140);
+  }
+});
+
+test("detector distingue anúncio de conclusão de perguntas e informações normais", () => {
+  for (const text of [FALSE_CLOSING, "Seu interesse foi registrado.", "A equipe retornará por aqui.", "Já enviei ao grupo.",
+    "O responsável irá analisar seu caso e retornar por aqui. Por favor, aguarde o retorno."]) {
+    assert.equal(announcesQualificationClosing(text, QUALIFICATION_CLOSING), true);
+  }
+  for (const text of ["Qual é o seu nome?", "De qual cidade você fala?", "O vendedor pode confirmar o estoque desse modelo.",
+    "A moto tem autonomia informada de 50 km. Gostaria de saber mais algum detalhe?", "Qual modelo despertou seu interesse?"]) {
+    assert.equal(announcesQualificationClosing(text, QUALIFICATION_CLOSING), false);
+  }
+});
+
+test("resposta inválida ou truncada na reavaliação bloqueia conclusão e preserva consumo agregado", async () => {
+  for (const incomplete of [false, true]) {
+    const f = repairFixture([]); let calls = 0;
+    f.clientFactory.responder = async () => {
+      calls += 1;
+      return { ...(calls === 2 && incomplete ? { status: "incomplete" } : {}),
+        output_text: calls === 1 ? salesOutput({ text: FALSE_CLOSING }) : incomplete ? salesOutput({ leadQualification: LEAD }) : "{invalid",
+        usage: { input_tokens: 100, output_tokens: 40 } };
+    };
+    const result = await f.service.reply(f.request);
+    assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined);
+    assert.equal(calls, 2); assert.equal(f.ledger.events[0].totalTokens, 280); assert.equal(f.ledger.events[0].success, false);
+    if (incomplete) assert.equal(f.ledger.events[0].errorCode, "AI_INCOMPLETE_RESPONSE");
+  }
+});
+
+test("reavaliação respeita prazo único e aborta sem consumo informado da segunda chamada", async () => {
+  const f = repairFixture([]); f.service.timeoutMs = 300;
+  let calls = 0;
+  f.clientFactory.responder = async (_request, options) => {
+    calls += 1;
+    if (calls === 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return { output_text: salesOutput({ text: FALSE_CLOSING }), usage: { input_tokens: 100, output_tokens: 40 } };
+    }
+    return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  };
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "fallback"); assert.equal(result.reason, "timeout");
+  assert.equal(calls, 2); assert.equal(f.clientFactory.requests[1].transportOptions.signal.aborted, true);
+  assert.equal(f.ledger.events[0].totalTokens, 140); assert.equal(result.leadQualification, undefined);
+});
+
+test("limite mensal reserva espaço para reavaliação antes de chamar o provedor", async () => {
+  const f = repairFixture([{ text: FALSE_CLOSING }, { text: "", leadQualification: LEAD }]);
+  let budget;
+  const reserve = f.ledger.reserve.bind(f.ledger);
+  f.ledger.reserve = input => { budget = input; return reserve({ ...input, tokenLimit: 1 }); };
+  const result = await f.service.reply(f.request);
+  assert.equal(result.reason, "monthly_limit"); assert.equal(f.clientFactory.requests.length, 0);
+  assert.ok(budget.estimatedTokens > 1600); assert.ok(budget.estimatedCost > 0);
+});
+
+test("empresa sem triagem preserva resposta única e não usa o detector de encerramento", async () => {
+  const f = aiFixture(FALSE_CLOSING, { leadQualificationEnabled: false });
+  const result = await f.service.reply(f.request);
+  assert.equal(result.source, "ai"); assert.equal(result.text, FALSE_CLOSING);
+  assert.equal(f.clientFactory.requests.length, 1); assert.equal(f.ledger.events[0].totalTokens, 140);
+});
+
+test("recuperação de ficha inválida também remove promessa seguida de pergunta", async () => {
+  const f = repairFixture([{ text: `${FALSE_CLOSING} Gostaria de acrescentar algo?`, leadQualification: { ...LEAD, name: null } }]);
+  const result = await f.service.reply(f.request);
+  assert.equal(result.text, "Qual nome você prefere usar neste atendimento?");
+  assert.equal(result.leadQualification, undefined); assert.equal(f.clientFactory.requests.length, 1);
 });
 
 function workerFixture() {
