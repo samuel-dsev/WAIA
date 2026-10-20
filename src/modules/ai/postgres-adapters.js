@@ -63,6 +63,8 @@ function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum)
     model: ai.model,
     prompt: ai.prompt,
     personality: ai.personality,
+    leadIntakeOnlyEnabled: ai.leadIntakeOnlyEnabled === true,
+    nonLeadHandoffMessage: compiled.configuration.humanHandoff.message,
     leadQualificationEnabled: ai.leadQualificationEnabled === true,
     leadQualificationCriteria: ai.leadQualificationCriteria,
     leadQualificationClosing: ai.leadQualificationClosing,
@@ -74,7 +76,7 @@ function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum)
     maxHistoryMessages: ai.leadQualificationEnabled === true ? 30 : 8,
     maxOutputTokens: ai.maxOutputTokens,
     contingencyMessage: ai.fallbackMessage,
-    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address"],
+    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address", ...(ai.leadIntakeOnlyEnabled === true ? ["adContext"] : [])],
     version: Number(configVersion),
   };
 }

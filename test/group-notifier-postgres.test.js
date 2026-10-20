@@ -11,6 +11,7 @@ import { PostgresJobHandlerRepository } from "../src/modules/jobs/handlers.js";
 import { PostgresGroupNotifierRepository } from "../src/modules/group-notifier/postgres-repository.js";
 import { PostgresOnboardingRepository } from "../src/modules/onboarding/postgres-onboarding-repository.js";
 import { QUALIFICATION_CRITERIA } from "../src/modules/group-notifier/qualification.js";
+import { parseLeadIntake } from "../src/modules/group-notifier/lead-intake.js";
 
 test("PostgreSQL real: leads, outbox, sessão cifrada e lease isolados por empresa", {
   skip: process.env.RUN_GROUP_NOTIFIER_POSTGRES !== "true",
@@ -166,6 +167,75 @@ test("PostgreSQL real: leads, outbox, sessão cifrada e lease isolados por empre
     await owner.query("UPDATE contatos SET deleted_at=now() WHERE id=$1", [b.contactId]);
     assert.equal((await repo.leads(b.empresaId)).length, 0);
     assert.ok((await owner.query("SELECT redacted_at FROM qualified_leads WHERE empresa_id=$1", [b.empresaId])).rows.every((row) => row.redacted_at));
+  });
+
+  await t.test("triagem comercial: pós-venda pausa após envio sem ficha/outbox; novo comprador gera uma entrega", async (t) => {
+    const wait = "Em breve, um vendedor dará continuidade à sua solicitação por aqui.";
+    const empresaId = (await owner.query(`INSERT INTO empresas(slug,nome,nome_exibicao,status) VALUES ($1,'Triagem','Triagem','ativa') RETURNING id`, [`intake-${randomUUID()}`])).rows[0].id;
+    const triage = structuredClone(config);
+    triage.humanHandoff = { message: wait };
+    Object.assign(triage.ai, { leadIntakeOnlyEnabled: true, leadQualificationCriteria: "Novo comprador com nome, cidade e modelo." });
+    const compiled = compileTenantRuntimeConfigV2(triage, { empresaId, configVersion: 2, draftVersion: 2 });
+    await owner.query(`INSERT INTO configuracoes_revisoes(empresa_id,config_version,schema_version,compiler_version,source_draft_version,checksum,configuracao_compilada,publicada_por)
+      VALUES ($1,2,2,1,2,$2,$3::jsonb,$4)`, [empresaId, compiled.checksum, JSON.stringify(compiled), actorId]);
+    await owner.query("UPDATE empresas SET configuracao_runtime_modo='versionado',versao_configuracao=2,configuracao_ativa_versao=2 WHERE id=$1", [empresaId]);
+    const contactId = (await owner.query(`INSERT INTO contatos(empresa_id,telefone_normalizado) VALUES ($1,'5511000000003') RETURNING id`, [empresaId])).rows[0].id;
+    const numeroWhatsappId = (await owner.query(`INSERT INTO numeros_whatsapp(empresa_id,phone_number_id,status) VALUES ($1,$2,'ativo') RETURNING id`, [empresaId, randomUUID()])).rows[0].id;
+    const groupC = "120363000000003@g.us";
+    await repo.cacheGroups(leaseOwner, epoch, [{ id: groupA, name: "Grupo A" }, { id: groupB, name: "Grupo B" }, { id: groupC, name: "Grupo C" }]);
+    await repo.saveRoute(empresaId, { groupId: groupC, enabled: true, revision: 0 }, actorId);
+
+    async function prepareIntake(reply = { text: wait, nonLeadHandoff: { configVersion: 2 } }) {
+      const conversationId = (await owner.query(`INSERT INTO conversas(empresa_id,contato_id,numero_whatsapp_id,next_sequence) VALUES ($1,$2,$3,2) RETURNING id`, [empresaId, contactId, numeroWhatsappId])).rows[0].id;
+      const messageId = (await owner.query(`INSERT INTO mensagens(empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id)
+        VALUES ($1,$2,$3,$4,'entrada','texto','Atendimento sintético.','processando',1,$5) RETURNING id`, [empresaId, conversationId, contactId, numeroWhatsappId, randomUUID()])).rows[0].id;
+      const prepared = await handlers.prepareReply({ empresaId, origin: "ai", message: { id: messageId, conversationId, contactId, numeroWhatsappId, correlationId: randomUUID() },
+        reply: { ...reply, sendNotBefore: new Date().toISOString() } });
+      return { empresaId, conversationId, messageId, replyId: prepared.id };
+    }
+    async function mode(item) { return (await owner.query("SELECT modo_atendimento AS mode FROM conversas WHERE id=$1", [item.conversationId])).rows[0].mode; }
+    async function counts() { return (await owner.query(`SELECT (SELECT count(*)::int FROM qualified_leads WHERE empresa_id=$1) AS leads,
+      (SELECT count(*)::int FROM group_notifier_deliveries WHERE empresa_id=$1) AS deliveries`, [empresaId])).rows[0]; }
+    await t.test("sem confirmação não pausa; confirmação/repetição não cria lead nem pendência", async () => {
+      const item = await prepareIntake();
+      assert.equal(await mode(item), "bot"); assert.deepEqual(await counts(), { leads: 0, deliveries: 0 });
+      const stored = await handlers.preparedReply({ empresaId, messageId: item.messageId });
+      assert.deepEqual(stored.nonLeadHandoff, { configVersion: 2 });
+      await assert.rejects(handlers.markReplySent({ empresaId, replyId: item.replyId, externalMessageId: null }), { code: "BOT_REPLY_SEND_ID_MISSING" });
+      assert.equal(await mode(item), "bot");
+      await acknowledge(item); await acknowledge(item);
+      assert.equal(await mode(item), "pausado"); assert.deepEqual(await counts(), { leads: 0, deliveries: 0 });
+      await owner.query("UPDATE conversas SET modo_atendimento='bot' WHERE id=$1", [item.conversationId]);
+      await acknowledge(item); assert.equal(await mode(item), "bot", "Ack repetido não desfaz retomada manual");
+      await archive(item);
+    });
+    await t.test("posse humana, configuração antiga, mensagem alterada e outra empresa não pausam", async () => {
+      for (const kind of ["human", "version", "text", "tenant", "suspended"]) {
+        const item = await prepareIntake(kind === "version" ? { text: wait, nonLeadHandoff: { configVersion: 1 } }
+          : kind === "text" ? { text: "Mensagem diferente da publicada.", nonLeadHandoff: { configVersion: 2 } } : undefined);
+        if (kind === "human") await owner.query("UPDATE conversas SET modo_atendimento='humano' WHERE id=$1", [item.conversationId]);
+        if (kind === "suspended") await owner.query("UPDATE empresas SET status='suspensa' WHERE id=$1", [empresaId]);
+        if (kind === "tenant") await handlers.markReplySent({ empresaId: b.empresaId, replyId: item.replyId, externalMessageId: "wamid.other" });
+        else await acknowledge(item);
+        assert.equal(await mode(item), kind === "human" ? "humano" : "bot");
+        assert.deepEqual(await counts(), { leads: 0, deliveries: 0 });
+        if (kind === "suspended") await owner.query("UPDATE empresas SET status='ativa' WHERE id=$1", [empresaId]);
+        await archive(item);
+      }
+    });
+    await t.test("novo comprador validado mantém nome, cidade e modelo, destino único e idempotência", async () => {
+      const { leadQualification } = parseLeadIntake({ status: "qualified", name: "Ana Silva", city: "Taubaté", model: "Harley X15" },
+        { configVersion: 2, evidence: ["Ana Silva, Taubaté. Quero comprar Harley X15."] });
+      const item = await prepareIntake({ text: "Recebemos seu interesse; aguarde o vendedor.", leadQualification });
+      assert.equal(await mode(item), "bot");
+      await acknowledge(item); await acknowledge(item);
+      assert.equal(await mode(item), "pausado"); assert.deepEqual(await counts(), { leads: 1, deliveries: 1 });
+      const lead = (await repo.leads(empresaId))[0];
+      assert.equal(lead.name, "Ana Silva"); assert.match(lead.summary, /Cidade: Taubaté\nModelo de interesse: Harley X15/u);
+      assert.equal(lead.phone, "5511000000003"); assert.equal(lead.notificationStatus, "pending");
+      assert.equal((await owner.query("SELECT group_id FROM group_notifier_deliveries WHERE empresa_id=$1", [empresaId])).rows[0].group_id, groupC);
+      await archive(item);
+    });
   });
 
   await t.test("revogação apaga material cifrado e invalida leituras/escritas da sessão anterior", async () => {

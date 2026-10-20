@@ -68,6 +68,24 @@ test("resolver de IA usa exclusivamente a revisão V2 ativa para tenant versiona
   assert.equal(pool.queries.some(({ sql }) => sql.includes("configuracoes_ia")), false);
 });
 
+test("resolver versionado publica triagem simples, mensagem humana e anúncio sem depender do catálogo", async () => {
+  const draft = structuredClone(compiledAi().configuration);
+  draft.modules = ["ai_freeform", "human_handoff"];
+  draft.menu.options = [{ id: "human", label: "Atendente", action: "human_handoff.request", params: {} }];
+  draft.humanHandoff.message = "Em breve um vendedor responderá por aqui.";
+  Object.assign(draft.ai, { leadQualificationEnabled: true, leadQualificationCriteria: "Nome, cidade e modelo de um novo comprador.", leadIntakeOnlyEnabled: true });
+  const compiled = compileTenantRuntimeConfigV2(draft, { empresaId: TENANT_ID, configVersion: 9 });
+  const pool = poolFor(async sql => {
+    if (sql.includes("FROM empresas")) return { rows: [{ configuracao_runtime_modo: "versionado", configuracao_ativa_versao: 9, versao_configuracao: 9 }] };
+    if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{ config_version: 9, checksum: compiled.checksum, configuracao_compilada: compiled }] };
+    assert.fail(sql);
+  });
+  const config = await new PostgresAiConfigResolver(pool).getAiConfig({ empresaId: TENANT_ID });
+  assert.equal(config.leadIntakeOnlyEnabled, true);
+  assert.equal(config.nonLeadHandoffMessage, draft.humanHandoff.message);
+  assert.ok(config.allowedContextKeys.includes("adContext"));
+});
+
 test("resolver de IA preserva a tabela atual somente para tenant legado", async () => {
   const pool = poolFor(async (sql) => {
     if (sql.includes("FROM empresas")) return { rows: [{ configuracao_runtime_modo: "legado", configuracao_ativa_versao: null, versao_configuracao: 3 }] };

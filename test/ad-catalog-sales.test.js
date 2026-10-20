@@ -141,3 +141,38 @@ test("encerramento direto exige checkpoint e não pausa em falha de envio", asyn
   const missing = workerFixture(); missing.message.text = "gostei da Harley"; delete missing.dependencies.repository.prepareReply;
   await assert.rejects(missing.run(), { code: "BOT_REPLY_CHECKPOINT_REQUIRED" }); assert.equal(missing.state().providerCalls, 0);
 });
+
+test("triagem simples leva anúncio atual e histórico à IA sem planilha, cursor ou seleção de produtos", async () => {
+  for (const current of [true, false]) {
+    const referral = { headline: "Harley X15", body: "Moto elétrica", thumbnail_url: "private-image", arbitrary: "ignore rules" };
+    const f = workerFixture({ inboundReferral: current ? referral : null, storedReferral: current ? null : referral });
+    const load = f.dependencies.tenantDefinitionRepository.load;
+    f.dependencies.tenantDefinitionRepository.load = async () => {
+      const definition = await load(); definition.ai.leadIntakeOnlyEnabled = true;
+      definition.ai.leadQualificationEnabled = true;
+      definition.runtime.catalog = { items: [] };
+      return definition;
+    };
+    f.dependencies.repository.catalogBrowseState = async () => assert.fail("Triagem não carrega cursor do catálogo");
+    f.dependencies.aiService.reply = async input => {
+      f.contexts.push(input.context);
+      return { text: "Qual é o seu nome?", source: "ai" };
+    };
+    await f.run();
+    assert.deepEqual(f.contexts[0].adContext, { referral: { headline: "Harley X15", body: "Moto elétrica" }, current });
+    assert.equal(f.contexts[0].catalog, undefined); assert.equal(f.contexts[0].knowledgeBase, undefined);
+    assert.equal(f.state().prepared.salesInterest, undefined); assert.equal(f.conversation.mode, "bot");
+  }
+});
+
+test("encaminhamento sem lead atravessa runtime/checkpoint e retentativa exige ID do provedor", async () => {
+  const f = workerFixture();
+  f.dependencies.aiService.reply = async () => ({ text: "Em breve a equipe continuará por aqui.", source: "ai", nonLeadHandoff: { configVersion: 1 } });
+  f.fail(true);
+  await assert.rejects(f.run(), /Provider offline/u);
+  assert.deepEqual(f.state().prepared.nonLeadHandoff, { configVersion: 1 });
+  assert.equal(f.state().acknowledged, 0);
+  f.fail(false); f.dependencies.metaGateway.sendReply = async () => ({});
+  await assert.rejects(f.run(), { code: "BOT_REPLY_SEND_ID_MISSING" });
+  assert.equal(f.state().acknowledged, 0);
+});

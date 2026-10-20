@@ -209,7 +209,8 @@ export class PostgresJobHandlerRepository {
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
-            ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}) }),
+            ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
+            ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
       if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
@@ -429,7 +430,9 @@ export function createWorkerHandlers({
           flowRepository,
           aiHandler: aiService
             ? async ({ config, input }) => {
-              const salesMode = definition.ai?.catalogSalesEnabled === true && config.catalog?.source?.type === "google_sheets" && config.catalog.source.status === "healthy";
+              const intakeOnly = definition.ai?.leadIntakeOnlyEnabled === true;
+              const salesMode = !intakeOnly && definition.ai?.catalogSalesEnabled === true && config.catalog?.source?.type === "google_sheets" && config.catalog.source.status === "healthy";
+              const intakeReferral = intakeOnly ? normalizeAdReferral(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id })) : null;
               let browseState;
               if (salesMode) {
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
@@ -454,12 +457,14 @@ export function createWorkerHandlers({
                     text: config.menu.text,
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
+                  ...(intakeOnly ? { adContext: intakeReferral ? { referral: intakeReferral, current: Boolean(message.adReferral) } : null } : {
                   events: config.events,
                   catalog: catalogContext,
                   services: config.appointments?.services || [],
                   knowledgeBase: (definition.publicReplies || [])
                     .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
                     .map(({ module, action, text }) => ({ module, action, text })),
+                  }),
                 },
               });
               generatedByAi = aiReply.source === "ai";
@@ -492,7 +497,7 @@ export function createWorkerHandlers({
         if (responseDelayEnabled && (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000)) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
       }
-      if (reply.salesInterest || reply.leadQualification) {
+      if (reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff) {
         if (typeof repository.prepareReply !== "function" || typeof repository.markReplySent !== "function" || typeof repository.canSendBotReply !== "function") {
           throw permanent("Persistência e permissão do encerramento comercial obrigatórias.", "BOT_REPLY_CHECKPOINT_REQUIRED");
         }
@@ -508,7 +513,8 @@ export function createWorkerHandlers({
         if (reply.messages && !prepared?.messages?.length) throw permanent("Persistência de cada mensagem obrigatória.", "BOT_REPLY_CHECKPOINT_REQUIRED");
       }
     } else {
-      reply = { text: prepared.text, buttons: prepared.buttons, ...(prepared.messages ? { messages: prepared.messages } : {}) };
+      reply = { text: prepared.text, buttons: prepared.buttons, ...(prepared.messages ? { messages: prepared.messages } : {}),
+        ...(prepared.nonLeadHandoff ? { nonLeadHandoff: prepared.nonLeadHandoff } : {}) };
     }
     const sendNotBefore = prepared?.sendNotBefore || reply.sendNotBefore;
     if (sendNotBefore && !Number.isFinite(Date.parse(sendNotBefore))) throw permanent("Horário de envio da resposta inválido.", "BOT_REPLY_SCHEDULE_INVALID");
@@ -558,7 +564,7 @@ export function createWorkerHandlers({
       buttons: reply.buttons,
     });
     const externalMessageId = firstMetaMessageId(sent);
-    if ((reply.salesInterest || reply.leadQualification) && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
+    if ((reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff) && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {
       await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
     } else {

@@ -1,4 +1,5 @@
 import { acknowledgeQualification } from "../group-notifier/acknowledge-qualification.js";
+import { acknowledgeNonLeadHandoff } from "../group-notifier/acknowledge-non-lead.js";
 /** Acknowledgement, interest note and pause commit together. Human ownership wins. */
 export async function acknowledgeReply(client, { empresaId, replyId, externalMessageId }) {
   if (typeof externalMessageId !== "string" || !externalMessageId.trim()) {
@@ -9,7 +10,7 @@ export async function acknowledgeReply(client, { empresaId, replyId, externalMes
             m.outbound_payload, c.modo_atendimento
        FROM mensagens m JOIN conversas c ON c.empresa_id=m.empresa_id AND c.id=m.conversa_id
       WHERE m.empresa_id=$1 AND m.id=$2 AND m.direcao='saida' AND m.origem_resposta='ia'
-        AND m.redacted_at IS NULL AND (m.outbound_payload ? 'salesInterest' OR m.outbound_payload ? 'leadQualification')
+        AND m.redacted_at IS NULL AND (m.outbound_payload ? 'salesInterest' OR m.outbound_payload ? 'leadQualification' OR m.outbound_payload ? 'nonLeadHandoff')
       FOR UPDATE OF c, m`, [empresaId, replyId],
   )).rows[0];
   const result = await client.query(
@@ -20,6 +21,7 @@ export async function acknowledgeReply(client, { empresaId, replyId, externalMes
        AND (external_message_id IS NULL OR external_message_id=$3)`, [empresaId, replyId, externalMessageId],
   );
   if (result.rowCount && interest?.outbound_payload?.leadQualification) await acknowledgeQualification(client, { empresaId, replyId });
+  if (result.rowCount && interest?.outbound_payload?.nonLeadHandoff) await acknowledgeNonLeadHandoff(client, { empresaId, replyId });
   if (!result.rowCount || !interest?.outbound_payload?.salesInterest || interest.outbound_payload.salesInterest.completedAt) return result;
   const products = interest.outbound_payload.salesInterest.products;
   if (!Array.isArray(products) || !products.length || products.length > 3

@@ -10,6 +10,7 @@ export function replyFromRow(row) {
     id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [],
     ...(row.outbound_payload?.imageUrl ? { imageUrl: row.outbound_payload.imageUrl } : {}),
     ...(row.outbound_payload?.catalogProductId ? { catalogProductId: row.outbound_payload.catalogProductId } : {}),
+    ...(row.outbound_payload?.nonLeadHandoff ? { nonLeadHandoff: row.outbound_payload.nonLeadHandoff } : {}),
     sendNotBefore: row.outbound_payload?.sendNotBefore || null,
     externalMessageId: row.external_message_id, status: row.status,
   };

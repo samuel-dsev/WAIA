@@ -137,7 +137,7 @@ const DRAFT_OBJECT_SCHEMAS = Object.freeze([
   [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef", "cooldownSeconds", "salesInterestMessage"] ],
   [ /^\/ai$/u, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled",
   ] ],
   [ /^\/flows$/u, ["definitions"] ],
   [ /^\/flows\/definitions\/\d+$/u, ["key", "name", "version", "startStepId", "steps"] ],
@@ -561,7 +561,7 @@ function parseAi(value, path) {
   const object = plainObject(value, path, { optional: true });
   allowedKeys(object, path, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled",
   ]);
   const enabled = boolean(object.enabled, pointer(path, "enabled"), false);
   const keyMode = object.keyMode == null ? "shared" : text(object.keyMode, pointer(path, "keyMode"), { max: 20 });
@@ -570,6 +570,7 @@ function parseAi(value, path) {
   }
   return {
     enabled,
+    ...(object.leadIntakeOnlyEnabled === undefined ? {} : { leadIntakeOnlyEnabled: boolean(object.leadIntakeOnlyEnabled, pointer(path, "leadIntakeOnlyEnabled")) }),
     ...(object.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: boolean(object.responseDelayEnabled, pointer(path, "responseDelayEnabled")) }),
     ...(object.catalogSalesEnabled === undefined ? {} : { catalogSalesEnabled: boolean(object.catalogSalesEnabled, pointer(path, "catalogSalesEnabled")) }),
     ...(object.leadQualificationEnabled === undefined ? {} : { leadQualificationEnabled: boolean(object.leadQualificationEnabled, pointer(path, "leadQualificationEnabled")) }),
@@ -778,6 +779,10 @@ export function parseTenantRuntimeConfigV2(input) {
   }
   if (enabled.has("flows") && parsed.flows.definitions.length === 0) {
     fail("FLOW_DEFINITION_REQUIRED", "/flows/definitions", "A capacidade flows exige ao menos uma definição válida.");
+  }
+  if (parsed.ai.leadIntakeOnlyEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled
+    || !parsed.ai.leadQualificationEnabled || !enabled.has("human_handoff") || !parsed.humanHandoff.message)) {
+    fail("LEAD_INTAKE_CONFIGURATION_REQUIRED", "/ai/leadIntakeOnlyEnabled", "Triagem simples exige IA, qualificação de leads e atendimento humano com mensagem configurada.");
   }
   if (!enabled.has("flows") && parsed.flows.definitions.length > 0) {
     fail("FLOW_CAPABILITY_DISABLED", "/flows/definitions", "Habilite flows antes de configurar definições.");

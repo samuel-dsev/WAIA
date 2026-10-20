@@ -10,6 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
+import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
 function historyInput(messages, messageId) {
   return messages
@@ -130,7 +131,15 @@ export class MultiTenantAiService {
         })
         : [];
       const qualifies = config.leadQualificationEnabled && Boolean(config.leadQualificationCriteria);
+      const intakeOnly = config.leadIntakeOnlyEnabled;
       const suppliedContext = allowlistedTenantContext(request.context, config.allowedContextKeys);
+      if (intakeOnly) {
+        // Stale tenant/catalog configuration must never reactivate product sales in triage mode.
+        delete suppliedContext.catalog;
+        delete suppliedContext.events;
+        delete suppliedContext.services;
+        delete suppliedContext.knowledgeBase;
+      }
       // Structured qualification owns closing/pause when enabled, including tenants
       // whose older product-only closing is still configured.
       const safeContext = qualifies && suppliedContext.catalog?.salesMode === true
@@ -139,9 +148,11 @@ export class MultiTenantAiService {
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(safeContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
-      const selectionFormat = qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
+      const selectionFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
+      const recheckInstructions = intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS;
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
-        qualifies ? qualificationInstructions(config.leadQualificationCriteria) : ""].filter(Boolean).join("\n\n");
+        intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
+          : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : ""].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...historyInput(history, request.messageId),
@@ -154,7 +165,7 @@ export class MultiTenantAiService {
       const estimatedInputTokens = estimateTokens(`${instructions}\n${JSON.stringify(inputMessages)}${selectionFormat ? `\n${JSON.stringify(selectionFormat)}` : ""}`);
       // Reserve the bounded repair budget before any provider call. Unused budget
       // is released by the same finalization; actual usage is summed below.
-      const repairInputTokens = qualifies ? estimatedInputTokens + estimateTokens(QUALIFICATION_RECHECK_INSTRUCTIONS) : 0;
+      const repairInputTokens = qualifies ? estimatedInputTokens + estimateTokens(recheckInstructions) : 0;
       const estimatedTokens = estimatedInputTokens + repairInputTokens + config.maxOutputTokens * (qualifies ? 2 : 1);
       const estimatedCost = calculateCost(pricing, {
         inputTokens: estimatedInputTokens + repairInputTokens,
@@ -202,7 +213,7 @@ export class MultiTenantAiService {
         const remainingMs = this.timeoutMs - (performance.now() - startedAt);
         if (remainingMs < 1) throw timeoutError();
         const response = await responseWithTimeout(client, repair
-          ? { ...providerRequest, instructions: `${instructions}\n\n${QUALIFICATION_RECHECK_INSTRUCTIONS}` } : providerRequest,
+          ? { ...providerRequest, instructions: `${instructions}\n\n${recheckInstructions}` } : providerRequest,
         remainingMs, { headers: { "X-Client-Request-Id": repair
           ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
         const usage = normalizeUsage(response);
@@ -215,8 +226,46 @@ export class MultiTenantAiService {
         return { response, text };
       };
       let { response, text } = await requestResponse();
-      let parsedText = text, leadQualification, qualificationIssue;
-      if (qualifies) {
+      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff;
+      if (intakeOnly) {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const structured = JSON.parse(text);
+          if (!structured || typeof structured.text !== "string" || structured.text.length > 4096
+            || Object.keys(structured).length !== 2) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_INTAKE" });
+          let intake;
+          try {
+            intake = parseLeadIntake(structured.leadQualification, { configVersion: config.version,
+              evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)],
+              adReferral: safeContext.adContext?.referral });
+          } catch (error) {
+            if (error.code !== "AI_INVALID_LEAD_INTAKE" || !/^(NAME|CITY|MODEL)(?:_EVIDENCE)?$/u.test(error.validationReason)) throw error;
+            qualificationIssue = error.validationReason;
+            structured.text = intakeQuestion(qualificationIssue);
+          }
+          if (intake?.status === "qualified") leadQualification = intake.leadQualification;
+          if (intake?.status === "not_qualified") {
+            nonLeadHandoff = { configVersion: config.version };
+            parsedText = config.nonLeadHandoffMessage;
+            break;
+          }
+          if (!leadQualification && !qualificationIssue && announcesQualificationClosing(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING)) {
+            if (attempt === 0) {
+              this.logger.warn?.("ai_qualification_recheck", { empresaId: request.empresaId, conversationId: request.conversationId,
+                correlationId: request.correlationId, code: "AI_QUALIFICATION_RECHECK", validationReason: "UNCONFIRMED_CLOSING" });
+              ({ response, text } = await requestResponse(true));
+              continue;
+            }
+            qualificationIssue = "UNCONFIRMED_CLOSING";
+            structured.text = intakeQuestion(qualificationIssue);
+          }
+          if (qualificationIssue) this.logger.warn?.("ai_qualification_deferred", { empresaId: request.empresaId,
+            conversationId: request.conversationId, correlationId: request.correlationId,
+            code: "AI_QUALIFICATION_DEFERRED", validationReason: qualificationIssue });
+          if (!leadQualification && !structured.text.trim()) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_INTAKE" });
+          parsedText = structured.text.trim();
+          break;
+        }
+      } else if (qualifies) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
@@ -251,7 +300,8 @@ export class MultiTenantAiService {
       }
       const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies })
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
-      const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification } : baseReply;
+      const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification }
+        : nonLeadHandoff ? { text: config.nonLeadHandoffMessage, nonLeadHandoff } : baseReply;
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

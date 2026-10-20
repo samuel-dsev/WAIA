@@ -68,9 +68,13 @@ export function normalizeAiConfig(input, empresaId) {
     ? [...new Set(input.allowedContextKeys.map((key) => requiredText(key, "allowedContextKeys", 100)))]
     : [];
   if (input.leadQualificationEnabled === true && !optionalText(input.leadQualificationCriteria, "leadQualificationCriteria", 2000)) throw new TypeError("Critérios de triagem obrigatórios.");
+  if (input.leadIntakeOnlyEnabled === true && (input.leadQualificationEnabled !== true
+    || !optionalText(input.nonLeadHandoffMessage, "nonLeadHandoffMessage", 1000))) throw new TypeError("Triagem simples exige qualificação e mensagem de atendimento humano.");
   return Object.freeze({
     empresaId,
     enabled: input.enabled === true,
+    leadIntakeOnlyEnabled: input.leadIntakeOnlyEnabled === true,
+    nonLeadHandoffMessage: input.leadIntakeOnlyEnabled === true ? optionalText(input.nonLeadHandoffMessage, "nonLeadHandoffMessage", 1000) : "",
     leadQualificationEnabled: input.leadQualificationEnabled === true,
     leadQualificationCriteria: optionalText(input.leadQualificationCriteria, "leadQualificationCriteria", 2000),
     leadQualificationClosing: optionalText(input.leadQualificationClosing, "leadQualificationClosing", 1000),
