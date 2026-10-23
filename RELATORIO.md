@@ -1,7 +1,14 @@
 # Continuidade — WAIA
 
-Atualizado em 20/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 23/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## Pausa ao responder pelo WhatsApp Business — 23/10/2026
+
+- Usuário confirmou origem WhatsApp Business, não envio pelo painel. Candidata v1.23.0 adiciona opção publicada por empresa; ao receber whatsapp.smb.message.echoes autenticado e compatível com número/WABA/aplicativo, pausa somente a conversa aberta do destinatário, com retomada manual. Não cria contato/conversa, ficha, resposta ou notificação ao grupo.
+- Transação tenant-scoped registra nota interna fixa e deduplica pelo identificador do provedor antes de pausar; preserva posse humana/histórico. Migração 026 acrescenta instante de retomada; eco repetido ou anterior à retomada não repausa, observada a precisão de segundos do provedor. Permissão existente bloqueia respostas pendentes; chamada ao provedor já iniciada não pode ser desfeita.
+- Candidata isolada de HEAD, sem equipe/MFA: 580 aprovados/21 skips, zero falhas em Node 22, mais sete verificações PostgreSQL reais aprovadas. Banco/papéis temporários próprios em waia-test removidos; banco/volumes existentes preservados, serviço devolvido parado. As falhas iniciais da suíte decorreram do executor Docker sem NODE_ENV=test e tmpfs, corrigidos sem alterar regras do produto.
+- 17 arquivos, escopo, referência YCloud e procedimento em [PAUSA_WHATSAPP_BUSINESS.md](docs/PAUSA_WHATSAPP_BUSINESS.md). Commit/push/deploy ainda não autorizados para esta versão; configuração ALFATECH e eventos do endpoint YCloud ainda preservados. Conferir automações de saudação/ausência do aplicativo e dispositivos compatíveis antes da ativação. Sem teste externo ou envio de mensagens reais nesta preparação.
 
 ## Triagem comercial simples ALFATECH — preparação em 20/10/2026
 

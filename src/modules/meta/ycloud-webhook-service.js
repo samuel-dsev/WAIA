@@ -20,7 +20,7 @@ function providerTimestamp(value) {
   return String(Math.floor(millis / 1000));
 }
 
-export function createYCloudWebhookService({ connectionResolver, credentialVault, ingestionService, repository, clock = () => Date.now() }) {
+export function createYCloudWebhookService({ connectionResolver, credentialVault, ingestionService, repository, businessAppPause, clock = () => Date.now() }) {
   async function ingest({ webhookPublicId, rawBody, signature, correlationId }) {
     if (typeof webhookPublicId !== "string" || !/^[A-Za-z0-9_-]{16,200}$/u.test(webhookPublicId)) reject(404, "YCLOUD_CONNECTION_NOT_FOUND");
     const connection = await connectionResolver.resolveByWebhookPublicId(webhookPublicId);
@@ -35,8 +35,9 @@ export function createYCloudWebhookService({ connectionResolver, credentialVault
     let payload;
     try { payload = JSON.parse(rawBody.toString("utf8")); } catch { reject(400, "YCLOUD_PAYLOAD_INVALID"); }
     if (!payload || payload.apiVersion !== "v2" || typeof payload.id !== "string" || !payload.id || payload.id.length > 128) reject(400, "YCLOUD_PAYLOAD_INVALID");
-    // History, phone-app echoes and administrative events never enter the AI queue.
-    if (!["whatsapp.inbound_message.received", "whatsapp.message.updated"].includes(payload.type)) return { accepted: true, eventCount: 0 };
+    // Phone-app echoes control automation separately; history never enters AI.
+    const echo = payload.type === "whatsapp.smb.message.echoes";
+    if (!["whatsapp.inbound_message.received", "whatsapp.message.updated", "whatsapp.smb.message.echoes"].includes(payload.type)) return { accepted: true, eventCount: 0 };
     const inbound = payload.type === "whatsapp.inbound_message.received";
     const message = inbound ? payload.whatsappInboundMessage : payload.whatsappMessage;
     if (!message || typeof message !== "object") reject(400, "YCLOUD_PAYLOAD_INVALID");
@@ -44,6 +45,17 @@ export function createYCloudWebhookService({ connectionResolver, credentialVault
     const number = connection.numbers?.find((item) => ["ativo", "active"].includes(item.status)
       && businessPhone && e164(item.numeroE164) === businessPhone && String(item.wabaId) === String(message.wabaId));
     if (!number) reject(403, "YCLOUD_CONNECTION_MISMATCH");
+    if (echo) {
+      if (message.groupId) return { accepted: true, eventCount: 0 };
+      const recipientPhone = e164(message.to)?.slice(1);
+      if (!recipientPhone || typeof message.wamid !== "string" || !/^[^\s\x00-\x1f]{1,512}$/u.test(message.wamid)) reject(400, "YCLOUD_PAYLOAD_INVALID");
+      const timestamp = providerTimestamp(message.sendTime);
+      if (Number(timestamp) * 1000 > clock() + 60_000) reject(400, "YCLOUD_PAYLOAD_INVALID");
+      await businessAppPause?.receive({ empresaId: connection.empresaId, appId: connection.id,
+        numberId: number.id, recipientPhone, externalMessageId: message.wamid, sentAt: message.sendTime });
+      await repository.recordValidWebhook({ empresaId: connection.empresaId, appId: connection.id });
+      return { accepted: true, eventCount: 0 };
+    }
     let value;
     if (inbound) {
       if (message.groupId) return { accepted: true, eventCount: 0 };

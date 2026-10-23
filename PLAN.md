@@ -1,6 +1,6 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 20/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 23/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
 Pedido de 20/10/2026: simplificar ALFATECH para nome, cidade e modelo de interesse de novo comprador, aproveitando o nome no anúncio e desconectando planilha/catálogo do atendimento. Pós-venda/manutenção/outros assuntos devem seguir ao humano sem ficha/notificação. Candidata local v1.22.0 opt-in por empresa: 575 testes aprovados/20 skips em Node 22 e 15 verificações PostgreSQL reais aprovadas; roteiro/escopo/limites em [TRIAGEM_COMERCIAL.md](docs/TRIAGEM_COMERCIAL.md). Rascunho 69 preparado pelo painel, sem publicação; novo modo e desabilitação operacional do conector serão concluídos após deploy aprovado. Empresa observada suspensa, sem reativação. Equipe/MFA preservados; commit/push/deploy/publicação dependem de aprovação específica.
@@ -46,6 +46,10 @@ Adendo de 08/10/2026: roteiro único da IA preparado localmente como v1.14.0, po
 Adendo de 07/10/2026: conector YCloud da Filaretti publicado em produção como v1.12.1 (`b780ae9`), com autorização explícita. Conexão validada pelo painel e webhook ativo na YCloud. A ativação do número encontrou validação administrativa ainda exclusiva da Meta; correção preparada como v1.12.2, aguardando aprovação de commit/push e publicação. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5.
 
 Deploy de 07/10/2026: imagem v1.12.1 imutável validada em Node 22, com zero vulnerabilidades; migrações 021/022/024 aplicadas, sem F2/023. Serviços saudáveis e rollback preservado. Backup verificado e cópia cifrada na estação; renovação OAuth do backup Google Drive pendente. Evidência operacional em RELATORIO.md.
+
+## Pausa ao responder pelo WhatsApp Business — 23/10/2026
+
+Pedido confirmado: ao responder pelo aplicativo WhatsApp Business, pausar somente a conversa daquele cliente, com retomada manual. Candidata local v1.23.0 opt-in por empresa, evento YCloud autenticado fora da fila de IA, nota interna/deduplicação atômicas e barreira contra eventos anteriores à retomada; sem ficha ou notificação por esse evento. 580 testes aprovados/21 skips em Node 22 e sete verificações PostgreSQL reais aprovadas em banco temporário exclusivo de waia-test, removido sem alterar o banco existente. Migração aditiva 026, sem 023/equipe/MFA. 17 arquivos e limites em [PAUSA_WHATSAPP_BUSINESS.md](docs/PAUSA_WHATSAPP_BUSINESS.md). Ainda sem commit/push/deploy, nova assinatura de evento YCloud ou publicação da ALFATECH; teste real pendente. Demais alterações locais preservadas e excluídas da candidata.
 
 ## Objetivo
 

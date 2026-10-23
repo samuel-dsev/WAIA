@@ -159,6 +159,7 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
       flows: { definitions: structuredClone(config.flows.definitions) },
       humanHandoff: {
         message: config.humanHandoff.message,
+        ...(config.humanHandoff.pauseOnBusinessAppMessage === undefined ? {} : { pauseOnBusinessAppMessage: config.humanHandoff.pauseOnBusinessAppMessage }),
         ...(config.humanHandoff.salesInterestMessage == null ? {} : { salesInterestMessage: config.humanHandoff.salesInterestMessage }),
         channel: config.humanHandoff.channel,
         cooldownSeconds: config.humanHandoff.cooldownSeconds,

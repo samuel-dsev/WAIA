@@ -24,6 +24,11 @@ function cooldownSeconds(value) {
   return value;
 }
 
+function pauseOnBusinessAppMessage(value) {
+  if (typeof value !== "boolean") throw new TypeError("humanHandoff.pauseOnBusinessAppMessage deve ser booleano.");
+  return value;
+}
+
 function stringId(value, path) {
   const id = requiredText(value, path, { max: 100 });
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(id)) {
@@ -220,6 +225,7 @@ export function parseTenantRuntimeConfig(input) {
     flows: { definitions: flows },
     humanHandoff: {
       message: optionalText(input.humanHandoff?.message, "humanHandoff.message", { max: 1000 }),
+      ...(input.humanHandoff?.pauseOnBusinessAppMessage === undefined ? {} : { pauseOnBusinessAppMessage: pauseOnBusinessAppMessage(input.humanHandoff.pauseOnBusinessAppMessage) }),
       ...(input.humanHandoff?.salesInterestMessage == null ? {} : { salesInterestMessage: optionalText(input.humanHandoff.salesInterestMessage, "humanHandoff.salesInterestMessage", { max: 1000 }) }),
       channel: optionalText(input.humanHandoff?.channel, "humanHandoff.channel", { max: 300 }),
       cooldownSeconds: cooldownSeconds(input.humanHandoff?.cooldownSeconds),

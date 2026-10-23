@@ -69,6 +69,19 @@ test("modo comercial do catálogo é opt-in por empresa e não altera revisões 
   for (const value of [0, "true", null]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ ai: { catalogSalesEnabled: value } })).valid, false);
 });
 
+test("pausa por mensagem do aplicativo é opt-in e preserva configurações anteriores", () => {
+  const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
+  assert.equal(Object.hasOwn(old.configuration.humanHandoff, "pauseOnBusinessAppMessage"), false);
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(old), true);
+  for (const enabled of [true, false]) {
+    const compiled = compileTenantRuntimeConfigV2(minimalConfig({ humanHandoff: { pauseOnBusinessAppMessage: enabled } }), { empresaId: "tenant-a", configVersion: 2 });
+    assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled), true);
+    const runtime = createConfiguredTenantRuntime({ definition: materializeLegacyTenantDefinition(compiled), stateRepository: memoryStateRepository() });
+    assert.equal(runtime.config.humanHandoff.pauseOnBusinessAppMessage, enabled);
+  }
+  for (const value of [null, 0, "true"]) assert.equal(validateTenantRuntimeConfigV2(minimalConfig({ humanHandoff: { pauseOnBusinessAppMessage: value } })).valid, false);
+});
+
 test("encerramento comercial é opcional, validado e preservado na compilação e no runtime", () => {
   const message = "Ótimo, anotei seu interesse aqui!";
   const previous = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });

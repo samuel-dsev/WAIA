@@ -371,6 +371,7 @@ export class PostgresConversationRepository {
       const result = await client.query(
         `UPDATE conversas
             SET modo_atendimento = $3, operador_usuario_id = $4,
+                business_app_resumed_at = CASE WHEN $3 = 'bot' THEN $5::timestamptz ELSE business_app_resumed_at END,
                 lock_version = lock_version + 1, updated_at = $5
           WHERE empresa_id = $1 AND id = $2
           RETURNING *`,

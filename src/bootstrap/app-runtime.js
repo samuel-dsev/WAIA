@@ -110,6 +110,7 @@ import QRCode from "qrcode";
 import { PostgresGroupNotifierRepository } from "../modules/group-notifier/postgres-repository.js";
 import { GroupNotifierAdminService } from "../modules/group-notifier/admin-service.js";
 import { createYCloudWebhookService, createYCloudWebhookHandler } from "../modules/meta/ycloud-webhook-service.js";
+import { PostgresBusinessAppPause } from "../modules/meta/business-app-pause.js";
 import { createRetentionRunner, startRetentionScheduler } from "../operations/retention.js";
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
@@ -425,6 +426,7 @@ export function createPostgresRuntime({
   const ycloudWebhookService = credentialVault ? createYCloudWebhookService({
     connectionResolver: metaAppRepository, credentialVault,
     ingestionService: webhookIngestionService, repository: metaAppRepository,
+    businessAppPause: new PostgresBusinessAppPause(pool),
   }) : null;
   const queue = new BullMqJobQueue({
     connection: redis,

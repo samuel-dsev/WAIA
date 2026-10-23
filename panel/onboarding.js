@@ -570,11 +570,12 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       { name: "salesInterestMessage", path: "humanHandoff.salesInterestMessage", label: "Encerramento por interesse em produto (vazio = desativado)", value: handoff.salesInterestMessage || "", type: "textarea" },
       { name: "handoffChannel", path: "humanHandoff.channel", label: "Canal humano", value: handoff.channel || "" },
       { name: "cooldownSeconds", path: "humanHandoff.cooldownSeconds", label: "Retomar bot após (segundos; 0 = somente manual)", value: handoff.cooldownSeconds ?? 0, type: "number" },
+      { name: "pauseOnBusinessAppMessage", path: "humanHandoff.pauseOnBusinessAppMessage", label: "Pausar somente esta conversa ao enviar uma mensagem pelo WhatsApp Business (YCloud; retomada manual)", value: handoff.pauseOnBusinessAppMessage === true, type: "checkbox" },
       { name: "assigneeRef", path: "humanHandoff.assigneeRef", label: "Responsável padrão", value: handoff.assigneeRef || "", type: "select", optional: true, options: [["", "Definir mais tarde"], ...state.users.map((user) => [`user:${user.id}`, `${user.name} · ${user.email}`])] },
     ];
     card.append(stepForm(schema, (values) => {
       Object.assign(identity, { welcomeMessage: values.welcomeMessage, fallbackMessage: values.fallbackMessage, address: values.address, schedules: values.schedules, publicRules: values.publicRules, establishmentRules: values.establishmentRules, privacyPolicy: values.privacyPolicy, consentText: values.consentText });
-      state.configuration.humanHandoff = { message: values.handoffMessage, ...(values.salesInterestMessage ? { salesInterestMessage: values.salesInterestMessage } : {}), channel: values.handoffChannel, cooldownSeconds: Number(values.cooldownSeconds), ...(values.assigneeRef ? { assigneeRef: values.assigneeRef } : {}) };
+      state.configuration.humanHandoff = { message: values.handoffMessage, ...(values.salesInterestMessage ? { salesInterestMessage: values.salesInterestMessage } : {}), channel: values.handoffChannel, cooldownSeconds: Number(values.cooldownSeconds), ...(handoff.pauseOnBusinessAppMessage !== undefined || values.pauseOnBusinessAppMessage ? { pauseOnBusinessAppMessage: Boolean(values.pauseOnBusinessAppMessage) } : {}), ...(values.assigneeRef ? { assigneeRef: values.assigneeRef } : {}) };
     }));
     const script = createAttendanceScriptEditor({ value: state.configuration.ai.prompt || "", onInput: (value) => {
       state.configuration.ai.prompt = value;

@@ -24,16 +24,17 @@ function signed(payload, timestamp = NOW / 1000, secret = SECRET) {
   return { webhookPublicId: PUBLIC_ID, rawBody, signature: `t=${timestamp},s=${digest}` };
 }
 function fixture() {
-  const events = [], vaultCalls = [], records = [];
+  const events = [], vaultCalls = [], records = [], echoes = [];
   const connection = { id: "app-a", empresaId: "tenant-a", mode: "ycloud", state: "active", appSecretCredentialId: "sign-a",
     numbers: [{ id: "number-a", phoneNumberId: "phone-a", wabaId: "waba-a", numeroE164: BUSINESS, status: "ativo" }] };
   const service = createYCloudWebhookService({
     connectionResolver: { resolveByWebhookPublicId: async () => connection },
     credentialVault: { getCredentialForUse: async (input) => { vaultCalls.push(input); return SECRET; } },
     ingestionService: { ingestEvents: async (input) => events.push(...input) },
+    businessAppPause: { receive: async (input) => echoes.push(input) },
     repository: { recordValidWebhook: async (input) => records.push(input) }, clock: () => NOW,
   });
-  return { service, events, vaultCalls, records, connection };
+  return { service, events, vaultCalls, records, echoes, connection };
 }
 test("YCloud autentica bytes brutos e normaliza entrada para a fila existente", async () => {
   const f = fixture();
@@ -84,6 +85,51 @@ test("YCloud não envia eco, histórico ou grupos para IA", async () => {
   }
   const f = fixture(), payload = envelope(); payload.whatsappInboundMessage.groupId = "synthetic-group";
   await f.service.ingest(signed(payload)); assert.equal(f.events.length, 0);
+});
+
+function echoEnvelope(changes = {}) {
+  return envelope({ type: "whatsapp.smb.message.echoes", whatsappMessage: {
+    wamid: "wamid.phone-app", wabaId: "waba-a", from: BUSINESS, to: VISITOR,
+    sendTime: new Date(NOW).toISOString(), type: "text", text: { body: "Mensagem privada não repassada ao controle" }, ...changes,
+  } });
+}
+
+test("YCloud encaminha eco autenticado ao controle da conversa, sem corpo nem job de IA", async () => {
+  const f = fixture();
+  assert.deepEqual(await f.service.ingest(signed(echoEnvelope())), { accepted: true, eventCount: 0 });
+  assert.deepEqual(f.echoes, [{ empresaId: "tenant-a", appId: "app-a", numberId: "number-a",
+    recipientPhone: VISITOR.slice(1), externalMessageId: "wamid.phone-app", sentAt: new Date(NOW).toISOString() }]);
+  assert.equal(f.events.length, 0);
+  assert.equal(f.records.length, 1);
+});
+
+test("eco manual exige assinatura, número/WABA e destinatário válidos", async () => {
+  for (const changes of [{ from: VISITOR }, { wabaId: "other" }, { to: "group@g.us" }, { wamid: "" }, { sendTime: "bad" }, { sendTime: new Date(NOW + 120000).toISOString() }]) {
+    const f = fixture();
+    await assert.rejects(f.service.ingest(signed(echoEnvelope(changes))));
+    assert.equal(f.echoes.length, 0);
+  }
+  const f = fixture();
+  await assert.rejects(f.service.ingest(signed(echoEnvelope(), NOW / 1000, "wrong")), { statusCode: 401 });
+  assert.equal(f.echoes.length, 0);
+});
+
+test("grupo, histórico e status de envio da API nunca acionam pausa manual", async () => {
+  const f = fixture();
+  await f.service.ingest(signed(echoEnvelope({ groupId: "group", to: "group@g.us" })));
+  await f.service.ingest(signed(envelope({ type: "whatsapp.history" })));
+  const payload = echoEnvelope(); payload.type = "whatsapp.message.updated"; payload.whatsappMessage.status = "sent";
+  await f.service.ingest(signed(payload));
+  assert.equal(f.echoes.length, 0);
+  assert.equal(f.events.length, 1);
+});
+
+test("falha ao persistir pausa do eco é repetível pelo provedor", async () => {
+  const f = fixture();
+  const service = createYCloudWebhookService({ connectionResolver: { resolveByWebhookPublicId: async () => f.connection },
+    credentialVault: { getCredentialForUse: async () => SECRET }, ingestionService: {}, repository: {},
+    businessAppPause: { receive: async () => { throw new Error("synthetic persistence failure"); } }, clock: () => NOW });
+  await assert.rejects(service.ingest(signed(echoEnvelope())), /synthetic persistence failure/u);
 });
 test("YCloud status preserva wamid e rejeita JSON inválido e mensagem sem identidade", async () => {
   const f = fixture();
