@@ -1,6 +1,18 @@
 # Pausa por mensagem no WhatsApp Business — v1.23.0
 
-Preparação local em 23/10/2026. Ainda sem commit, push, deploy, alteração na YCloud ou publicação da configuração da ALFATECH.
+Atualização em 23/10/2026. A capacidade v1.23.0 foi autorizada, commitada em `b6af531` e enviada a dev. Deploy, alteração na YCloud e publicação da opção da ALFATECH ainda não realizados.
+
+## Complemento de segurança v1.23.1
+
+A auditoria da imagem construída do commit aprovado passou a apontar dois avisos no lockfile anterior, bloqueando o gate de CI. Preparada correção pontual: `zod` 4.4.3 → 4.6.7 e dependência transitiva `ip-address` 10.7.3 → 10.7.4. Metadados e versões das demais dependências foram preservados. A referência mínima do Zod passou para `^4.6.7`.
+
+Referências dos avisos: [Zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) e [ip-address](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5).
+
+Imagem de revisão construída com as dependências corrigidas: instalação pelo lockfile e auditoria de produção com zero vulnerabilidades reportadas, 580 testes aprovados/21 skips e sete verificações PostgreSQL reais aprovadas. Código e migração da capacidade anterior não foram alterados. Banco temporário exclusivo removido; waia-test preservado e devolvido parado.
+
+Complemento proposto: `fix: v1.23.1 atualiza dependências sinalizadas na auditoria`, limitado a `package.json`, `package-lock.json`, este documento e às seções desta atualização de `PLAN.md`/`RELATORIO.md`. Commit/push e substituição do deploy aprovado pela v1.23.1 ainda dependem de confirmação específica. A v1.23.0 não foi publicada.
+
+O usuário confirmou ter desativado as mensagens de saudação/ausência do aplicativo. ALFATECH observada suspensa/configuração 33; esse estado deve ser preservado. Rascunho 72 difere da revisão ativa em `/integrations`: antes de publicar a nova opção, alinhar esse ponto pelo painel à revisão ativa para preservar seu comportamento. A sessão YCloud expirou e exige novo login pelo titular. Nenhuma dessas configurações foi alterada nesta etapa.
 
 ## Comportamento
 
@@ -52,5 +64,5 @@ Referência primária: [YCloud — mensagens enviadas pelo aplicativo Business](
 16. `PLAN.md` — somente a seção desta entrega.
 17. `RELATORIO.md` — somente a seção desta entrega.
 
-Mensagem proposta: `feat: v1.23.0 pausa conversa ao responder pelo WhatsApp Business`.
-Commit/push, deploy e publicação/configuração externa dependem de autorização explícita. Depois de publicados, ainda será necessário o teste externo acima para comprovar o dispositivo real.
+Mensagem autorizada e enviada a dev: `feat: v1.23.0 pausa conversa ao responder pelo WhatsApp Business`.
+Deploy e publicação/configuração externa foram autorizados, mas aguardam o complemento de segurança e acesso à sessão YCloud. Depois de publicados, ainda será necessário o teste externo acima para comprovar o dispositivo real.
