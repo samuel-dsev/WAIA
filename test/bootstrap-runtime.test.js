@@ -47,17 +47,36 @@ function fakeRuntime() {
   };
 }
 
-async function request(app, path) {
+async function request(app, path, options) {
   const server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
     const { port } = server.address();
-    return await fetch(`http://127.0.0.1:${port}${path}`);
+    return await fetch(`http://127.0.0.1:${port}${path}`, options);
   } finally {
     server.close();
   }
 }
+
+test('M3 raiz abre portal somente com contas habilitadas e assets não são cacheados', async () => {
+  const config = { environment: 'test', whatsapp: { verifyToken: 'test', appSecret: '' },
+    security: { cookieSecure: false, sessionTtlHours: 12 } };
+  const disabled = createApiApp({ runtime: fakeRuntime(), config });
+  assert.equal((await request(disabled, '/', { redirect: 'manual' })).status, 404);
+  const runtime = fakeRuntime(); runtime.accounts = { service: { sessionMs: 3600000, origin: 'http://localhost' } };
+  const app = createApiApp({ runtime, config });
+  const root = await request(app, '/', { redirect: 'manual' });
+  assert.equal(root.status, 302); assert.equal(root.headers.get('location'), '/portal/');
+  assert.equal(root.headers.get('cache-control'), 'no-store');
+  for (const path of ['/portal/', '/portal/app.js', '/portal/navigation.js', '/portal/security.js']) {
+    const result = await request(app, path); assert.equal(result.status, 200);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+    assert.match(result.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  }
+  const html = await (await request(app, '/portal/')).text();
+  assert.doesNotMatch(html, /id="(?:register|company-form|team|invite-form)"/);
+});
 
 test("API bootstrap expoe health e verificacao do webhook sem servicos externos", async () => {
   const app = createApiApp({

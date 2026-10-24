@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { writeFile } from 'node:fs/promises';
 import { config } from '../src/config.js';
 import { createPostgresRuntime,createApiApp } from '../src/bootstrap/app-runtime.js';
 import { startAccountEmailWorker } from '../src/integrations/email/transport.js';
@@ -10,6 +11,13 @@ assert.equal(new URL(config.redis.url).hostname,'v2-redis');
 assert.equal(config.accounts.emailMode,'fake');
 const runtime=createPostgresRuntime({config});
 await runtime.redis.ping();
+// Local fake mailbox for browser tests only: no HTTP route and no real recipients.
+// The container /tmp is ephemeral; callers must never print these synthetic links.
+const sendFake = runtime.accounts.transport.send.bind(runtime.accounts.transport);
+runtime.accounts.transport.send = async (message) => {
+  await sendFake(message);
+  await writeFile('/tmp/waia-v2-fake-inbox.json', JSON.stringify([...runtime.accounts.transport.messages.values()]), { mode: 0o600 });
+};
 const stopMail=startAccountEmailWorker(runtime.accounts.service,runtime.accounts.transport);
 const server=createServer(createApiApp({runtime,config}));
 server.listen(3001,'0.0.0.0',()=>console.log('Preview v2 disponível apenas pela publicação loopback configurada; e-mail fake, sem worker de atendimento.'));

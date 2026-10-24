@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 concluída em 1.25.0 com commit local no fechamento**; M3–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md) e [M2_ACESSOS.md](docs/M2_ACESSOS.md).
+Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 commitada em c59a905 / 1.25.0 e M3 concluída em 1.26.0 com commit local no fechamento**; M4–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md), [M2_ACESSOS.md](docs/M2_ACESSOS.md) e [M3_PORTAL.md](docs/M3_PORTAL.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -218,7 +218,7 @@ Dataset de produto para M3/M8:
 
 Senhas definidas pelo fluxo seguro, não neste plano. Roteiros/contatos/conversas sintéticos; sem telefone/token/grupo real. Providers fake e egress de mensagens bloqueado. E2E pode preparar o dataset operando o painel; fixtures técnicas de repositório são independentes, sem substituir cadastro pelo produto por SQL/seed.
 
-**Dataset atual:** M0 validou o alvo isolado vazio; M2 cadastrou pelo painel duas empresas fictícias e três identidades com zero/um/dois vínculos para seu gate administrativo. O dataset completo e o workspace cliente permanecem em M3/M8. Preview local usa API isolada e e-mail fake, sem worker de atendimento; nada foi importado da instalação anterior.
+**Dataset atual:** M0 validou o alvo isolado vazio; M2 cadastrou pelo painel duas empresas fictícias e três identidades com zero/um/dois vínculos para seu gate administrativo. M3 acrescentou pelo painel Aurora/Horizonte/Vale e identidades 0/1/2 vínculos, com ativação e navegação cliente; evidências em M3_PORTAL.md. A homologação completa permanece em M8. Preview local usa API isolada e e-mail fake, sem worker de atendimento; nada foi importado da instalação anterior.
 
 ## 9. Ferramentas e desenvolvimento
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0/M1 têm commits locais e M2 tem gates locais concluídos; M3–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0/M1/M2 têm commits locais e M3 tem gates locais concluídos; M4–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -290,6 +290,8 @@ Estado em 24/10/2026: concluída em 1.25.0, com commit local no fechamento. 607 
 **Gate:** titular cria acessos com duas/uma/zero empresas integralmente pelo painel; falha de auditoria reverte alterações, sem secrets expostos. Subagentes: backend e revisão administrativa.
 
 ### M3 — login e navegação multiempresas
+
+Estado em 24/10/2026: autorizada e concluída em **1.26.0**, com commit local no fechamento. Lista/workspace, ativação/recuperação/MFA, troca segura, dataset pelo painel e browser isolado validados. Escopo, comandos, revisões e limites em [M3_PORTAL.md](docs/M3_PORTAL.md). Sem push/deploy; M4 aguarda autorização.
 
 - Retirar cadastro/criação/equipe do portal; login inicial, ativação, recuperação e MFA próprios.
 - Lista obrigatória zero/uma/várias empresas com Abrir atendimento, nome persistente e deep link seguro.

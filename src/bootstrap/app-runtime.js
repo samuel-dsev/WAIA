@@ -619,6 +619,7 @@ export function createApiApp({
   app.get("/data-deletion", createLegalPageHandler({ file: "data-deletion.html", config: config.legal }));
   app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
   if (runtime.accounts) {
+    app.get('/', (_req, res) => { res.set('Cache-Control', 'no-store'); res.redirect(302, '/portal/'); });
     app.use('/portal', (_req, res, next) => {
       res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
         'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });

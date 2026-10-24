@@ -12,7 +12,7 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 - Em 23/10/2026, checkout confirmado em `dev`, HEAD `3b8a295` / v1.23.1. Criada a branch **`new`**, conforme pedido, sem commit, push, mudança de produção ou perda das alterações locais preexistentes.
 - M0 concluída e commitada somente localmente em **89d46af / v1.23.3**, após autorização. Snapshot exato: 580 pass/21 skips, 17 integrações aprovadas. Ambiente e comandos em [M0_AMBIENTE.md](docs/M0_AMBIENTE.md).
 - M1 concluída e commitada somente localmente em **88f7b21 / v1.24.0**. Snapshot selecionado: 600 pass/22 skips e 28 integrações aprovadas. Detalhes em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md).
-- M2 autorizada e concluída em **v1.25.0**, com commit local no fechamento conforme padrão de 24/10. 607 pass/23 skips, 59 integrações, schema 28, fluxo administrativo no navegador e revisões independentes aprovados. Sem push/deploy. Preview e limites em [M2_ACESSOS.md](docs/M2_ACESSOS.md). M3 aguarda autorização; 2.0.0 permanece futura.
+- M2 autorizada e concluída em **v1.25.0**, com commit local no fechamento conforme padrão de 24/10. 607 pass/23 skips, 59 integrações, schema 28, fluxo administrativo no navegador e revisões independentes aprovados. Sem push/deploy. Preview e limites em [M2_ACESSOS.md](docs/M2_ACESSOS.md). M3 autorizada e concluída em v1.26.0, com commit local no fechamento; 2.0.0 permanece futura. Portal e evidências em [M3_PORTAL.md](docs/M3_PORTAL.md).
 - Novo escopo substitui o SaaS aberto previsto em setembro: sem signup público, criação de empresa/equipe pelo cliente, billing ou novos conectores nesta entrega.
 - Equipe/MFA e registros pós-deploy locais preservados. M0 caracterizou o schema 023; M1 incorporou segurança pessoal/MFA necessária e bloqueou equipe cliente. Portal/equipe e demais registros anteriores não são aprovados por arrasto.
 - F0/F1 históricos e antigas F2–F9 não equivalem a estas novas etapas. Histórico/evidências em RELATORIO.md; detalhes únicos em WAIA_2.0.0.md.
@@ -24,7 +24,7 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 | M0 | Baseline, isolamento, inventário e CI new | Alvo sintético isolado; 023 e trabalho local caracterizados | Commit local 89d46af |
 | M1 | Identidade e autorização | Sem audience admin para cliente; revogação e bloqueio de signup | Commit local 88f7b21 |
 | M2 | Administração geral de acessos/vínculos | Cadastro N:N pelo painel, transacional e auditado | Concluída 1.25.0; commit local no fechamento |
-| M3 | Login, lista e workspace | Zero/uma/várias empresas, troca segura e fictícios pelo painel | Planejada |
+| M3 | Login, lista e workspace | Zero/uma/várias empresas, troca segura e fictícios pelo painel | Concluída 1.26.0; commit local no fechamento |
 | M4 | Edição do atendimento | DTO permitido, merge no servidor e conflito 409 | Planejada |
 | M5 | Simulação/publicação | Sem publicar técnico oculto ou reativar suspensa | Planejada |
 | M6 | Funcionalidades liberadas | Capacidades respeitam habilitação/limites da empresa | Planejada |
@@ -33,7 +33,7 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 | M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Planejada |
 | M10 | Aceite e entrega 2.0.0 | Definição de pronto, manuais e autorizações de publicação | Planejada |
 
-Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase de implementação a autorizar é **M3**.
+Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase de implementação a autorizar é **M4**.
 
 ## Regras de continuidade
 

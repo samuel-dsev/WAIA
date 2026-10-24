@@ -3,6 +3,18 @@
 Atualizado em 24/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M3 — login e navegação multiempresas, 24/10/2026
+
+Usuário autorizou iniciar M3 com leitura do plano e commits anteriores. Checkout principal `new`, base **c59a905 / 1.25.0**; M0/M1/M2 conferidas no Git. M3 entregue em **1.26.0**, com commit local no fechamento conforme AGENTS; sem push, promoção, deploy ou implementação da M4.
+
+Portal sem cadastro/criação/equipe, com login inicial, ativação, recuperação e MFA próprios. Lista obrigatória zero/uma/várias empresas; workspace com nome persistente, estado/permissões e retorno seguro. Reutilizadas APIs sanitizadas da M1, sem novo DTO de atendimento antes da M4. Cancelamento e geração de navegação impedem resposta/401 antigo de trocar contexto; logout/expiração/restauração limpam dados, revalidam sessão/vínculo e não usam Web Storage. Perfil não salvo pede confirmação e sobrevive à troca de aba; MFA/códigos pessoais permanecem até confirmação/saída, com limpeza ao trocar sessão.
+
+Pelo painel do alvo v2 isolado, criadas Aurora Serviços Demo, Horizonte Comércio Demo e Vale Atendimento Demo; Ana com duas, Bia com uma e menos capacidades, Caio com Vale, acesso sem empresa e identidade para suspensão. Dataset M2 preservado. Senhas definidas pelo fluxo de ativação, sem SQL/seed por cliente. Preview em **http://127.0.0.1:5035/portal/** e painel **http://127.0.0.1:5035/panel/**; rede/API sem egress, PostgreSQL/Redis/mídia dedicados, e-mail fake e nenhum worker de atendimento. Caixa fake somente no /tmp privado do container, sem endpoint ou impressão de links.
+
+Snapshot selecionado: **16 arquivos**, Node22 **639 casos, 616 aprovados/23 skips, zero falhas**; **59 integrações PostgreSQL/Redis aprovadas** sem skips/falhas, sintaxe de 306 arquivos, auditoria zerada e 64 links documentais conferidos. Schema 28 preservado. Browser real Edge/Playwright: lista 0/1/2, ativação, MFA/recuperação, ID alheio neutro, deep link após login, troca com respostas 200/401 retidas, revogação/suspensão, logout, foco, descarte de edição e visual desktop/390px. Repetições respeitaram o limitador de login. Revisões independentes de segurança e testes incorporadas, sem bloqueador alto pendente. Capturas/provas locais em `.tmp/m3/`; roteiro reproduzível em `scripts/m3-browser-check.mjs`.
+
+Limites: e-mail real, dispositivo físico, edição/publicação de atendimento e homologação pública continuam nas fases posteriores. Trabalho preexistente alheio preservado fora do commit, inclusive `.env.example`, Compose, `src/config.js`, registro pós-deploy e `portal/security-team.js`; UI pessoal necessária foi separada em `portal/security.js`. Manual e comandos em [M3_PORTAL.md](docs/M3_PORTAL.md). Próxima fase a autorizar: **M4**.
+
 ## M2 — acessos administrativos, 24/10/2026
 
 Usuário autorizou commit da M1, continuação da M2 e commit local automático no fim de cada fase validada. Padrão registrado em AGENTS, sem push/deploy automáticos. M1 commitada na `new` como **88f7b21 / v1.24.0**: 49 arquivos selecionados, 600 testes aprovados/22 skips e 28 integrações reais aprovadas; trabalho anterior alheio preservado fora do commit.
