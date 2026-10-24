@@ -372,7 +372,12 @@ export class PostgresOnboardingRepository {
 
   withActivationTransaction({ empresaId, actorId }, callback) {
     if (typeof callback !== "function") throw new TypeError("callback de ativação é obrigatório.");
-    return this.transactionRunner(this.pool, { empresaId, usuarioId: actorId }, callback);
+    return this.transactionRunner(this.pool, { empresaId, usuarioId: actorId }, async (transaction) => {
+      // Customer publication locks its identity before the company. Match that
+      // order before the audit FK can acquire an actor lock after company/draft.
+      await transaction.client.query('SELECT id FROM usuarios WHERE id=$1 FOR KEY SHARE', [actorId]);
+      return callback(transaction);
+    });
   }
 
   withPublicationTransaction(context, callback) {
@@ -386,7 +391,7 @@ export class PostgresOnboardingRepository {
               configuracao_ativa_versao, publicada_at
          FROM empresas
         WHERE id = $1 AND deleted_at IS NULL
-        FOR UPDATE`,
+        FOR NO KEY UPDATE`,
       [empresaId],
     )).rows[0]);
     if (!tenant) return Object.freeze({ tenant: null, draft: null });

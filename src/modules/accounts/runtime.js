@@ -7,7 +7,7 @@ import { FakeEmailTransport, HttpEmailTransport } from '../../integrations/email
 import { IdentitySecurity } from '../auth/identity-security.js';
 import { AttendanceService } from '../attendance/attendance-service.js';
 
-export function createAccountsRuntime({ pool, redis, config, security: sharedSecurity }) {
+export function createAccountsRuntime({ pool, redis, config, security: sharedSecurity, attendance = {} }) {
   if (!config.accounts?.enabled) return null;
   const settings = config.accounts;
   if (Buffer.byteLength(String(config.security.sessionPepper || '')) < 32) throw new Error('Pepper de sessão insuficiente.');
@@ -23,6 +23,7 @@ export function createAccountsRuntime({ pool, redis, config, security: sharedSec
     codec, keyring, limiter,
     origin: settings.origin, companyLimit: settings.companyLimit,
     sessionMs: settings.sessionMs, idleMs: settings.idleMs, verifyMs: settings.verifyMs, resetMs: settings.resetMs });
-  service.attendance = new AttendanceService({ pool, idleMs: settings.idleMs });
+  service.attendance = new AttendanceService({ pool, idleMs: settings.idleMs, limiter,
+    environment: config.environment, platformAiCredentialConfigured: Boolean(config.openai.apiKey), ...attendance });
   return { service, transport };
 }

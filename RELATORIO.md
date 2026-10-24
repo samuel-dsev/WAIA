@@ -3,6 +3,20 @@
 Atualizado em 24/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M5 — simulação e publicação, 24/10/2026
+
+Usuário autorizou iniciar M5 com plano e histórico de commits. Checkout `new`, base **d671141 / v1.27.0**, M0–M4 conferidas no Git. Entrega **1.28.0**, com commit local no fechamento conforme AGENTS. Sem push, promoção, deploy ou avanço à M6.
+
+Portal oferece simulação de mensagem isolada, diff de negócio antes/depois, confirmação explícita de empresa/versão e chave idempotente mantida em retry. API estrita projeta apenas negócio/texto e exige read+simulate/publish. Baseline publicada íntegra obrigatória; compilação e comparação do técnico completo bloqueiam mudança oculta/base não aprovada. Simulador usa runtime existente com IA/integrações fake e nenhum gateway. Orçamento Redis 20 por usuário/120 por empresa por janela de 15 min, separado por ação, falha fechado.
+
+Publicação reutiliza preflight fora dos locks e revalida sessão/vínculo/capacidade/status/versão/diff na transação final. Pipeline/readiness enforcement, revisão/ponte ativa/auditoria/recibo são atômicos e não chamam activate. Migração030 guarda recibos com RLS forçada/negação customer; recursos técnicos continuam fechados no RLS. Operações privadas fixas usam contexto interno após autorização, restaurado no sucesso/rollback. Locks NO KEY UPDATE evitam ciclo com FK da auditoria; escritor admin trava ator primeiro. ID canônico do banco impede publicar envelope com UUID maiúsculo incompatível com runtime. Revisões independentes incorporadas sem bloqueador alto pendente.
+
+Node22: **663 casos, 637 aprovados/26 skips opt-in, zero falhas**; **86 integrações PostgreSQL/Redis aprovadas, sem skips/falhas**, schema30/upgrade equivalentes e isolamento conferido. Testes opt-in M5 incluídos na CI, sem execução remota. Detalhes em [M5_PUBLICACAO.md](docs/M5_PUBLICACAO.md). Testes PostgreSQL verificam publicação e loader reais, idempotência concorrente, preservação do vizinho/técnico/suspensão e revisão anterior após falha; readiness real com metadados fictícios e preflight positivo fake. Redis real verifica orçamento compartilhado/falha fechada. Primeiro ensaio identificou uma expectativa de teste incorreta: saudação usa menu determinístico, preservando precedência; expectativa corrigida sem alterar runtime.
+
+Browser Edge sem pageerrors: fluxo real de login/grant administrativo/salvar/isolamento e bloqueios de base/readiness. Simulação/publicação visual bem-sucedidas usam page.route fictício explicitamente separado de servidor real; diff/checkbox/retry503 mesma chave/409/troca lenta/XSS e desktop390px inspecionados. Preview mantém dependências incompletas, sem inventar número/app/token operacional para contornar gates. Não é prova E2E de publicação real via navegador. Prova de publicação/runtime real vem das integrações PostgreSQL, sem envio WhatsApp/OpenAI/e-mail real. Evidências `.tmp/m5/` não versionadas.
+
+Schema030 aplicado aditivamente ao preview isolado com ledger/checksums e dataset preservado; `waia-test`, rede/volumes v2 reutilizados, sem reset/seed/importação ou worker de atendimento. Preview mantido em **http://127.0.0.1:5035/portal/** e **http://127.0.0.1:5035/panel/**. Snapshot selecionado de **25 arquivos**, sintaxe de **319 arquivos JavaScript** aprovada, excluindo alterações locais anteriores alheias. Manual, arquivos, comandos e limites em [M5_PUBLICACAO.md](docs/M5_PUBLICACAO.md). Próxima fase a autorizar: **M6**; 2.0.0 permanece futura.
+
 ## M4 — editor de atendimento, 24/10/2026
 
 Usuário autorizou prosseguir para M4. Checkout `new`, base **2d28a8c / v1.26.0**. M4 concluída em **1.27.0**, com commit local no fechamento conforme AGENTS. Sem push, promoção, deploy ou avanço para M5.

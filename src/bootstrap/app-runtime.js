@@ -367,7 +367,8 @@ export function createPostgresRuntime({
       occurredAt: event.occurredAt,
     }) },
   });
-  const accounts=createAccountsRuntime({pool,redis,config,security:identitySecurity});
+  const accounts=createAccountsRuntime({pool,redis,config,security:identitySecurity,
+    attendance:{readinessService,flowPublisher:flowRepository,preflight:(input)=>onboardingService.preflight(input)}});
   const accessService=accounts?new AccessService({
     repository:new AccessRepository({pool,security:identitySecurity}),keyring,origin:config.accounts.origin,
     limiter:new AccountRateLimiter({redis,environment:config.environment}),

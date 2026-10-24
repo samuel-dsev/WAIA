@@ -14,9 +14,12 @@ const element = (tag, text, className = '') => {
   const result = document.createElement(tag); result.textContent = text; result.className = className; return result;
 };
 export function createAttendanceEditor({ root, initial, companyId, api, onDirty, notice, onAccessDenied }) {
-  let model = initial, epoch = 0, scriptEditor, disposed = false;
+  let model = initial, epoch = 0, scriptEditor, disposed = false, busy = false, publicationBlocked = false;
   const controls = new Map(), replies = new Map();
   let form, status, conflict, save, reload, localDirty = false;
+  let simulate, simulationMessage, simulationReply, publicationNote, review, confirmation, publish, accepted;
+  let publicationAttempt = null;
+  const path = `/api/app/v1/companies/${companyId}/attendance`;
   const values = () => {
     const changes = {};
     for (const [key, { input, kind }] of controls) {
@@ -44,13 +47,36 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
       input.setCustomValidity(error);
     }
     localDirty = Object.keys(values()).length > 0; onDirty(localDirty);
+    if (localDirty && confirmation) { confirmation.hidden = true; accepted.checked = false; }
+    refreshActions();
+  }
+  function refreshActions() {
+    if (!model || disposed) return;
+    const saved = !localDirty && !publicationBlocked;
+    if (simulate) simulate.disabled = busy || !saved || !model.canSimulate;
+    if (review) review.disabled = busy || !saved || !model.canPublish || !model.publication?.ready;
+    if (publish) publish.disabled = busy || !saved || !model.canPublish || !model.publication?.ready || !accepted.checked;
+    if (publicationNote) publicationNote.textContent = localDirty
+      ? 'Salve as alterações antes de simular ou revisar a publicação.'
+      : publicationBlocked ? 'Recarregue a versão atual antes de simular ou publicar.'
+        : model.publication?.reason || 'Revise as alterações salvas antes de publicar.';
+  }
+  function setBusy(value) {
+    busy = value;
+    root.querySelectorAll('input,textarea,button').forEach((input) => { input.disabled = value; });
+    refreshActions();
   }
   function showConflict() {
+    publicationBlocked = true;
+    if (confirmation) { confirmation.hidden = true; accepted.checked = false; }
     conflict.hidden = false;
     conflict.textContent = 'Este rascunho mudou em outra sessão. Seus textos continuam nesta tela. Recarregue a versão atual para revisar antes de salvar novamente.';
+    refreshActions();
   }
   function render(data) {
     scriptEditor?.dispose(); model = data; controls.clear(); replies.clear(); root.replaceChildren();
+    simulate = simulationMessage = simulationReply = publicationNote = review = confirmation = publish = accepted = null;
+    busy = false; publicationBlocked = false; publicationAttempt = null;
     localDirty = false; onDirty(false);
     const title = element('h3', 'Atendimento');
     status = element('p', `Rascunho ${data.draftVersion} · ${data.activeVersion ? `Publicado: versão ${data.activeVersion}` : 'Ainda não publicado'}`, 'attendance-state');
@@ -95,29 +121,110 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
     reload.addEventListener('click', async () => {
       if (localDirty && !window.confirm('Descartar as alterações locais e carregar a versão atual?')) return;
       const version = ++epoch;
-      const inputs = [...form.querySelectorAll('input,textarea,button')]; inputs.forEach((input) => { input.disabled = true; });
-      try { const latest = await api(`/api/app/v1/companies/${companyId}/attendance`, null, 'GET');
+      setBusy(true);
+      try { const latest = await api(path, null, 'GET');
         if (disposed || version !== epoch) return; render(latest); notice('Versão atual carregada.');
       } catch (error) { if (!disposed && version === epoch && error.name !== 'AbortError') handleError(error); }
-      finally { inputs.forEach((input) => { input.disabled = false; }); }
+      finally { if (!disposed && version === epoch) setBusy(false); }
     });
     form.append(conflict, save, reload); root.append(form);
     form.addEventListener('submit', async (event) => {
       event.preventDefault(); if (!data.canEdit || save.disabled) return;
       const changes = values(); if (!Object.keys(changes).length) { notice('Não há alterações para salvar.'); return; }
       const version = ++epoch;
-      const inputs = [...form.querySelectorAll('input,textarea,button')]; inputs.forEach((input) => { input.disabled = true; });
+      setBusy(true);
       try {
-        const saved = await api(`/api/app/v1/companies/${companyId}/attendance/draft`, { draftVersion: model.draftVersion, changes }, 'PATCH');
+        const saved = await api(`${path}/draft`, { draftVersion: model.draftVersion, changes }, 'PATCH');
         if (disposed || version !== epoch) return; render(saved); notice(`Rascunho ${saved.draftVersion} salvo. O atendimento publicado foi preservado.`);
       } catch (error) { if (!disposed && version === epoch && error.name !== 'AbortError') handleError(error); }
-      finally { inputs.forEach((input) => { input.disabled = false; }); }
+      finally { if (!disposed && version === epoch) setBusy(false); }
     });
+    renderRelease();
+    refreshActions();
+  }
+  function renderRelease() {
+    if (!model.canSimulate && !model.canPublish) return;
+    const section = element('section', ''); section.setAttribute('aria-label', 'Simulação e publicação');
+    section.append(element('h3', 'Simulação e publicação'));
+    publicationNote = element('p', '', 'attendance-info'); section.append(publicationNote);
+    if (model.canSimulate) {
+      const simulation = document.createElement('form'); simulation.id = 'attendance-simulation';
+      const label = element('label', 'Mensagem para testar'); simulationMessage = document.createElement('textarea');
+      simulationMessage.id = 'attendance-simulation-message'; simulationMessage.name = 'message';
+      simulationMessage.maxLength = 1000; simulationMessage.required = true; simulationMessage.rows = 3; label.append(simulationMessage);
+      simulate = element('button', 'Simular rascunho'); simulate.type = 'submit';
+      simulationReply = element('p', '', 'secret'); simulationReply.hidden = true; simulationReply.setAttribute('role', 'status');
+      simulation.append(element('p', 'Teste o rascunho salvo. IA e integrações são fictícias nesta simulação; nenhuma mensagem é enviada pelo WhatsApp.', 'help'), label, simulate, simulationReply);
+      section.append(simulation);
+      simulation.addEventListener('submit', async (event) => {
+        event.preventDefault(); if (simulate.disabled || !simulationMessage.value.trim()) return;
+        const version = ++epoch, draftVersion = model.draftVersion, message = simulationMessage.value;
+        setBusy(true); simulationReply.hidden = false; simulationReply.textContent = 'Simulando…';
+        try {
+          const result = await api(`${path}/simulate`, { draftVersion, message });
+          if (disposed || version !== epoch) return;
+          simulationReply.textContent = result.reply || 'A simulação não produziu uma resposta.';
+          notice(`Simulação do rascunho ${result.draftVersion} concluída. Nenhuma mensagem enviada pelo WhatsApp.`);
+        } catch (error) {
+          if (!disposed && version === epoch && error.name !== 'AbortError') { simulationReply.textContent = ''; simulationReply.hidden = true; handleError(error); }
+        } finally { if (!disposed && version === epoch) setBusy(false); }
+      });
+    }
+    if (model.canPublish) {
+      review = element('button', 'Revisar publicação'); review.type = 'button';
+      confirmation = element('div', ''); confirmation.hidden = true; confirmation.setAttribute('role', 'group');
+      confirmation.setAttribute('aria-label', 'Confirmar publicação do atendimento');
+      confirmation.append(element('h4', `Publicar rascunho ${model.draftVersion}`),
+        element('p', `Empresa: ${model.company.name}. Versão publicada atual: ${model.activeVersion ?? 'nenhuma'}.`));
+      const changes = Array.isArray(model.publication?.changes) ? model.publication.changes : [];
+      for (const change of changes) {
+        const item = document.createElement('details');
+        item.append(element('summary', change.label), element('p', 'Publicado', 'help'),
+          element('pre', displayValue(change.before), 'secret'), element('p', 'Rascunho', 'help'), element('pre', displayValue(change.after), 'secret'));
+        confirmation.append(item);
+      }
+      if (!changes.length) confirmation.append(element('p', 'Não há alterações de atendimento para publicar.', 'help'));
+      const label = element('label', '', 'check'); accepted = document.createElement('input'); accepted.type = 'checkbox';
+      accepted.id = 'attendance-publish-confirmation';
+      label.append(accepted, document.createTextNode(`Conferi as alterações e confirmo publicar o rascunho ${model.draftVersion} para ${model.company.name}.`));
+      publish = element('button', 'Confirmar publicação'); publish.type = 'button';
+      const cancel = element('button', 'Cancelar revisão', 'text'); cancel.type = 'button';
+      confirmation.append(label, publish, cancel); section.append(review, confirmation);
+      accepted.addEventListener('change', refreshActions);
+      cancel.addEventListener('click', () => { confirmation.hidden = true; accepted.checked = false; refreshActions(); review.focus(); });
+      review.addEventListener('click', () => {
+        if (review.disabled) return;
+        confirmation.hidden = false; accepted.checked = false; refreshActions(); accepted.focus();
+      });
+      publish.addEventListener('click', async () => {
+        if (publish.disabled || confirmation.hidden) return;
+        const version = ++epoch, draftVersion = model.draftVersion, reviewToken = model.publication.reviewToken;
+        publicationAttempt ??= crypto.randomUUID(); setBusy(true);
+        try {
+          const result = await api(`${path}/publish`, { draftVersion, reviewToken, idempotencyKey: publicationAttempt, confirmed: true });
+          if (disposed || version !== epoch) return;
+          // The acknowledged revision remains visible even if a subsequent refresh is unavailable.
+          render({ ...model, activeVersion: result.activeVersion, publishedAt: result.publishedAt,
+            publication: { ready: false, reason: 'Publicação concluída. Recarregue para revisar o estado atual.', changes: [], reviewToken: null } });
+          notice(`Versão ${result.activeVersion} publicada para ${model.company.name}.`);
+          try {
+            const latest = await api(path, null, 'GET');
+            if (!disposed && version === epoch) render(latest);
+          } catch { /* The publication itself was acknowledged; do not offer an ambiguous retry. */ }
+        } catch (error) { if (!disposed && version === epoch && error.name !== 'AbortError') handleError(error); }
+        finally { if (!disposed && version === epoch) setBusy(false); }
+      });
+    }
+    root.append(section);
+  }
+  function displayValue(value) {
+    if (value == null || value === '') return 'Não preenchido';
+    return Array.isArray(value) ? value.join('\n') : typeof value === 'string' ? value : JSON.stringify(value);
   }
   function handleError(error) {
     if ([403, 404].includes(error.status)) { onAccessDenied(); return; }
     if (error.status === 409) showConflict();
-    notice(error.message || 'Não foi possível salvar. Seus textos continuam nesta tela.', true);
+    notice(error.message || 'Não foi possível concluir. Seus textos continuam nesta tela.', true);
   }
   render(initial);
   return {
@@ -127,6 +234,16 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
         render(latest); notice('As permissões do atendimento foram atualizadas.'); return;
       }
       if (latest.draftVersion !== model.draftVersion) showConflict();
+      else {
+        if (latest.activeVersion !== model.activeVersion || latest.publication?.reviewToken !== model.publication?.reviewToken) {
+          publicationBlocked = true;
+        }
+        model = { ...model, canSimulate: latest.canSimulate, canPublish: latest.canPublish,
+          activeVersion: latest.activeVersion, publication: latest.publication };
+        // A background permission/revision refresh invalidates any previous confirmation.
+        if (confirmation) { confirmation.hidden = true; accepted.checked = false; }
+        publicationAttempt = null; refreshActions();
+      }
     },
     dispose() { disposed = true; epoch++; scriptEditor?.dispose(); controls.forEach(({ input }) => { input.value = ''; }); replies.forEach((input) => { input.value = ''; }); root.replaceChildren(); model = null; },
   };

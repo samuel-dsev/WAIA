@@ -77,10 +77,11 @@ export function withIdentityTransaction(pool, { usuarioId }, callback) {
 // Only authenticated server context reaches this helper. Roles/tenant IDs from
 // a request body never define authorization. Locks serialize revocation with use.
 export function withCustomerTransaction(pool, { usuarioId, sessionId, empresaId, permission,
-  now = new Date(), idleMs = 3600_000 } = {}, callback) {
+  now = new Date(), idleMs = 3600_000, lockCompany = false } = {}, callback) {
   const userId = requiredUuid(usuarioId, 'usuarioId');
   const session = requiredUuid(sessionId, 'sessionId');
   const tenantId = optionalUuid(empresaId, 'empresaId');
+  if (typeof lockCompany !== 'boolean') throw new TypeError('lockCompany deve ser booleano.');
   if (tenantId && (typeof permission !== 'string' || !permission)) throw new AccountError('ACCESS_DENIED', 403, 'Você não tem permissão para esta operação.');
   if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !Number.isSafeInteger(idleMs) || idleMs < 1) throw invalidSession();
   // Narrow, fixed authorization queries need locks before customer RLS denies
@@ -100,7 +101,7 @@ export function withCustomerTransaction(pool, { usuarioId, sessionId, empresaId,
       const membership = (await tx.client.query(`SELECT m.status,m.permissoes permissions,e.status AS "companyStatus"
         FROM usuarios_empresas m JOIN empresas e ON e.id=m.empresa_id
         WHERE m.usuario_id=$1 AND m.empresa_id=$2 AND m.status='ativo' AND e.deleted_at IS NULL
-        FOR SHARE OF m,e`, [userId, tenantId])).rows[0];
+        FOR SHARE OF m ${lockCompany ? 'FOR NO KEY UPDATE OF e' : 'FOR SHARE OF e'}`, [userId, tenantId])).rows[0];
       if (!membership) throw new AccountError('COMPANY_NOT_FOUND', 404, 'Empresa não encontrada.');
       if (permission && !effectiveCustomerCapabilities(membership).includes(permission)) {
         throw new AccountError('ACCESS_DENIED', 403, 'Você não tem permissão para esta operação.');

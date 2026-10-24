@@ -168,7 +168,7 @@ try {
   const urls = checkedUrls();
   const targets = databaseNames.map((name) => ({ name, owner: poolFor(urls.owner, name), app: poolFor(urls.app, name) }));
   const files = await readSqlDirectory(directory);
-  assert.ok([26,27,28,29].includes(files.length));
+  assert.ok([26,27,28,29,30].includes(files.length));
   const team = files.find((file) => file.filename === '023_team_and_mfa.sql');
   assert.ok(team);
   // Reproduce the previous release (001–022 + 024–026). New boundaries must

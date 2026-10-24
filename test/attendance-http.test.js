@@ -16,6 +16,8 @@ test('M4 HTTP mantém sessão, origem, CSRF, no-store e erros sanitizados no edi
         if (body?.draftVersion === 2) throw new Error('credential:synthetic-private-reference');
         return { draftVersion: 4, fields: body.changes };
       },
+      simulate: async (principal, id, body) => { calls.push({ principal, id, body }); return { reply: 'Simulado' }; },
+      publish: async (principal, id, body) => { calls.push({ principal, id, body }); return { activeVersion: 5 }; },
     } };
   const app = express(); app.use(express.json()); app.use('/app', createCustomerRouter({ service }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -35,6 +37,12 @@ test('M4 HTTP mantém sessão, origem, CSRF, no-store e erros sanitizados no edi
     assert.equal(conflict.status, 409); assert.equal((await conflict.json()).code, 'DRAFT_VERSION_CONFLICT');
     const failure = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ draftVersion: 2 }) });
     assert.equal(failure.status, 503); assert.equal((await failure.text()).includes('synthetic-private-reference'), false);
-    assert.equal((await fetch(`${base}/publish`, { method: 'POST', headers, body: '{}' })).status, 404);
+    for (const operation of ['simulate', 'publish']) {
+      assert.equal((await fetch(`${base}/${operation}`, { method: 'POST', headers: { ...headers, origin: 'https://foreign.example' }, body: '{}' })).status, 403);
+      assert.equal((await fetch(`${base}/${operation}`, { method: 'POST', headers: { ...headers, 'x-csrf-token': 'wrong' }, body: '{}' })).status, 403);
+      const response = await fetch(`${base}/${operation}`, { method: 'POST', headers, body: '{}' });
+      assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal(calls.at(-1).principal, auth);
+    }
   } finally { server.close(); await once(server, 'close'); }
 });

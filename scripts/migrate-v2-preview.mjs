@@ -15,12 +15,12 @@ try {
   const role = (await pool.query(`SELECT current_database() name,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`)).rows[0];
   assert.deepEqual(role, { name: 'waia_v2_app', rolsuper: false, rolbypassrls: false });
   const files = await readSqlDirectory(fileURLToPath(new URL('../db/migrations/', import.meta.url)));
-  assert.equal(files.length, 29);
+  assert.equal(files.length, 30);
   const rows = (await pool.query('SELECT filename,checksum FROM schema_migrations ORDER BY filename')).rows;
-  assert.ok([28, 29].includes(rows.length));
+  assert.ok([29, 30].includes(rows.length));
   rows.forEach((row, index) => { assert.equal(row.filename, files[index].filename); assert.ok(files[index].acceptedChecksums.has(row.checksum.trim())); });
   const pending = files.slice(rows.length).map((file) => file.filename);
-  assert.ok(pending.length === 0 || pending.length === 1 && pending[0] === '029_customer_attendance_draft.sql');
+  assert.ok(pending.length === 0 || pending.length === 1 && pending[0] === '030_attendance_publications.sql');
   const result = await runMigrations(pool);
-  console.log(JSON.stringify({ status: 'passed', database: 'waia_v2_app', applied: result.applied.length, migrations: 29, data: 'preserved' }));
+  console.log(JSON.stringify({ status: 'passed', database: 'waia_v2_app', applied: result.applied.length, migrations: 30, data: 'preserved' }));
 } finally { await pool.end(); }

@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0/M1/M2/M3 têm commits locais e M4 tem gates locais concluídos; M5–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M4 têm commits locais e M5 tem gates locais concluídos; M6–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -316,6 +316,8 @@ Estado em 24/10/2026: autorizada e concluída em **1.27.0**, com commit local no
 **Gate:** cliente salva somente conteúdo autorizado e campos técnicos permanecem intactos/ausentes da rede. Subagentes: API/configuração e segurança por campo.
 
 ### M5 — simulação e publicação
+
+Estado em 24/10/2026: autorizada e concluída em **1.28.0**, base **d671141**, com commit local no fechamento. Compilação/diff técnico, simulador isolado, preflight, revalidação após probes e publicação idempotente sem ativação. Contrato, PostgreSQL/Redis e navegador validados; o sucesso visual usa fixtures explícitas e a publicação/runtime reais são provados em PostgreSQL, sem fornecedores reais. [M5_PUBLICACAO.md](docs/M5_PUBLICACAO.md) registra comandos, revisões e limites. Sem push/deploy; M6 aguarda autorização.
 
 - Reutilizar compilação/preflight/simulador e sanitizar resultados/traces; orçamento no servidor, sem envio WhatsApp.
 - Confirmação explícita com versão/diff de negócio e idempotência.

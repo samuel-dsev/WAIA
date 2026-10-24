@@ -228,7 +228,7 @@ test("publicação e ativação expõem primitivas transacionais, tenant-scoped 
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/FROM empresas[^]*FOR UPDATE/u.test(sql)) return { rows: [tenantRow] };
+      if (/FROM empresas[^]*FOR NO KEY UPDATE/u.test(sql)) return { rows: [tenantRow] };
       if (/FROM configuracoes_rascunho[^]*FOR UPDATE/u.test(sql)) return { rows: [draftRow] };
       if (/INSERT INTO configuracoes_revisoes/u.test(sql)) return { rows: [{ empresa_id: TENANT_ID, config_version: 2 }] };
       if (/UPDATE empresas/u.test(sql)) return { rows: [{ ...tenantRow, status: sql.includes("status = 'ativa'") ? "ativa" : tenantRow.status }] };
