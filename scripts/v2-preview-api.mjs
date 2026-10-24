@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { config } from '../src/config.js';
+import { createPostgresRuntime,createApiApp } from '../src/bootstrap/app-runtime.js';
+import { startAccountEmailWorker } from '../src/integrations/email/transport.js';
+assert.equal(config.environment,'development');
+assert.equal(new URL(config.database.url).pathname,'/waia_v2_app');
+assert.equal(new URL(config.database.url).hostname,'v2-postgres');
+assert.equal(new URL(config.redis.url).hostname,'v2-redis');
+assert.equal(config.accounts.emailMode,'fake');
+const runtime=createPostgresRuntime({config});
+await runtime.redis.ping();
+const stopMail=startAccountEmailWorker(runtime.accounts.service,runtime.accounts.transport);
+const server=createServer(createApiApp({runtime,config}));
+server.listen(3001,'0.0.0.0',()=>console.log('Preview v2 disponível apenas pela publicação loopback configurada; e-mail fake, sem worker de atendimento.'));
+const stop=async()=>{await stopMail.close();await new Promise(resolve=>server.close(resolve));await runtime.redis.quit();await runtime.pool.end();process.exit(0);};
+process.on('SIGTERM',stop);process.on('SIGINT',stop);

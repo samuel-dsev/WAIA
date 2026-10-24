@@ -86,7 +86,7 @@ export function withCustomerTransaction(pool, { usuarioId, sessionId, empresaId,
   // Narrow, fixed authorization queries need locks before customer RLS denies
   // UPDATE authority. No caller callback runs with this bootstrap privilege.
   return runTransaction(pool, { tenantId, userId, isPlatformAdmin: true, audience: '' }, async (tx) => {
-    const identity = await tx.client.query("SELECT id FROM usuarios WHERE id=$1 AND status='ativo' AND deleted_at IS NULL FOR UPDATE", [userId]);
+    const identity = await tx.client.query("SELECT id FROM usuarios WHERE id=$1 AND status='ativo' AND deleted_at IS NULL AND NOT activation_required FOR UPDATE", [userId]);
     if (!identity.rowCount) throw invalidSession();
     const found = await tx.client.query(`SELECT s.id FROM auth_sessions s JOIN usuarios u ON u.id=s.usuario_id
       WHERE s.id=$1 AND s.usuario_id=$2 AND s.audience='customer' AND s.revoked_at IS NULL

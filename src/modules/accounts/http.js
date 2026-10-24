@@ -26,6 +26,7 @@ export function createAccountRouter({ service, secure = true }) {
   router.post('/password/forgot', route(async (req, res) => res.status(202).json(await service.requestToken(req.body, 'reset', req.ip))));
   router.post('/email/verify', route(async (req, res) => { await service.verify(req.body, req.ip); res.sendStatus(204); }));
   router.post('/password/reset', route(async (req, res) => { await service.reset(req.body, req.ip); res.clearCookie(CUSTOMER_COOKIE, options); res.sendStatus(204); }));
+  router.post('/activate',route(async(req,res)=>{await service.activate(req.body,req.ip);res.clearCookie(CUSTOMER_COOKIE,options);res.sendStatus(204);}));
   router.post('/login', route(async (req, res) => {
     const result = await service.login(req.body, req.ip, token(req));
     if(result.mfaRequired) return res.status(202).json(result);

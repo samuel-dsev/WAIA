@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { createAccountsRuntime } from "../modules/accounts/runtime.js";
 import { IdentitySecurity } from '../modules/auth/identity-security.js';
 import { AccountRateLimiter } from '../modules/accounts/rate-limiter.js';
+import { AccessRepository } from '../modules/access/access-repository.js';
+import { AccessService } from '../modules/access/access-service.js';
 import { createAccountRouter, createCustomerRouter } from "../modules/accounts/http.js";
 import { startAccountEmailWorker } from "../integrations/email/transport.js";
 import express from "express";
@@ -365,6 +367,12 @@ export function createPostgresRuntime({
       occurredAt: event.occurredAt,
     }) },
   });
+  const accounts=createAccountsRuntime({pool,redis,config,security:identitySecurity});
+  const accessService=accounts?new AccessService({
+    repository:new AccessRepository({pool,security:identitySecurity}),keyring,origin:config.accounts.origin,
+    limiter:new AccountRateLimiter({redis,environment:config.environment}),
+    activationMs:config.accounts.verifyMs,resetMs:config.accounts.resetMs,
+  }):null;
   const adminService = new AdminService({
     repository: adminRepository,
     onboardingService,
@@ -451,7 +459,8 @@ export function createPostgresRuntime({
     groupNotifierService,
     onboardingService,
     authService,
-    accounts: createAccountsRuntime({ pool, redis, config, security:identitySecurity }),
+    accounts,
+    accessService,
     aiService,
     tenantDefinitionRepository,
     metaGateway,
@@ -649,6 +658,7 @@ export function createApiApp({
   app.use("/api/admin/auth", adminNetwork, authRouter);
   app.use("/api/admin", adminNetwork, createAdminRouter({
     adminService: runtime.adminService,
+    accessService:runtime.accessService,
     groupNotifierService: runtime.groupNotifierService,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),

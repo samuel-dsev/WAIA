@@ -20,6 +20,7 @@ docs/*
 !docs/NOTIFICACOES_GRUPOS.md
 !docs/M0_AMBIENTE.md
 !docs/M1_IDENTIDADE.md
+!docs/M2_ACESSOS.md
 RELATORIO.md
 AGENTS.md
 package-lock.json

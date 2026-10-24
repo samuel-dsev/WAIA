@@ -1,7 +1,19 @@
 # Continuidade — WAIA
 
-Atualizado em 23/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 24/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## M2 — acessos administrativos, 24/10/2026
+
+Usuário autorizou commit da M1, continuação da M2 e commit local automático no fim de cada fase validada. Padrão registrado em AGENTS, sem push/deploy automáticos. M1 commitada na `new` como **88f7b21 / v1.24.0**: 49 arquivos selecionados, 600 testes aprovados/22 skips e 28 integrações reais aprovadas; trabalho anterior alheio preservado fora do commit.
+
+M2 concluída em **1.25.0**, com commit local no fechamento. Área Acessos e Usuários com acesso por empresa; criação/reuso com 0/N vínculos, capacidades core, suspensão global/vínculo, remoção protegida de owner legado, ativação/reenvio/recuperação assistida e revogação. API exige admin global/MFA, perímetro/CSRF, reautenticação recente, versão, idempotência e auditoria na mesma transação. CRUD legado de escrita de users/memberships bloqueado no HTTP/serviço. Serialização administrativa antes dos locks resolve a disputa de continuidade apontada na M1.
+
+Migração aditiva 028 aplicada somente no v2 dedicado: flag de ativação, versão administrativa, token activate e ledger com RLS. Usuário novo não recebe senha utilizável; login/reset/sessão não contornam ativação. Token de propósito próprio não concede vínculo/papel e é único/expirável, com digest e entrega cifrada. Reset preserva MFA; accepted não comprova recebimento. Transporte fake recusa destinatário real.
+
+Validações: Node22 **630 casos, 607 aprovados, 23 skips, zero falhas**; **59 integrações PostgreSQL/Redis aprovadas** sem skips/falhas; banco vazio 28/upgrade 25→023+027+028 equivalentes, ledger/checksums e pool corretos. Browser: admin/MFA, duas empresas fictícias, acessos 0/1/2, reuso sem sobrescrever identidade, capacidades, filtro por empresa e reautenticação vencida retomando a intenção. Corrigida corrida assíncrona entre salvar/lista/detalhe e retestada. Revisões independentes sem bloqueador alto pendente.
+
+Preview preservado em **http://127.0.0.1:5035/panel/**: API interna sem egress; proxy fixo sem credenciais publica só loopback e está na allowlist administrativa. PostgreSQL/Redis/mídia próprios; somente e-mail fake, sem worker de atendimento. Bootstrap único e segredos sintéticos globais em .secrets ignorado. Dataset do browser preservado no waia_v2_app; testes repetidos com --tests-only não o alteram. Ambiente antigo e VPS preservados. Procedimentos, evidências e limites em [M2_ACESSOS.md](docs/M2_ACESSOS.md); screenshot local .tmp/m2-accessos.png. E-mail real, cliente/workspace, responsividade completa e publicação continuam nas fases posteriores. M3 não iniciada.
 
 ## M1 — identidade e autorização, 23/10/2026
 

@@ -3,7 +3,10 @@ export class FakeEmailTransport {
     if (!['test','development'].includes(environment)) throw new Error('E-mail fake proibido neste ambiente.');
     this.messages = new Map();
   }
-  async send(message) { this.messages.set(message.idempotencyKey, structuredClone(message)); }
+  async send(message) {
+    if(typeof message?.to!=='string'||!/@[^@\s]+\.(?:example|invalid)$/i.test(message.to)) throw new Error('Transporte fake aceita somente destinatários sintéticos.');
+    this.messages.set(message.idempotencyKey, structuredClone(message));
+  }
 }
 
 // Contrato para gateway transacional da plataforma. URL/remetente nao sao controlados por tenants.

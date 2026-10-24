@@ -205,94 +205,21 @@ test("somente administrador global consulta usuário existente por e-mail exato 
   );
 });
 
-test("repositório em memória lista e edita vínculo de usuário global como o PostgreSQL", async () => {
-  const repository = new MemoryAdminRepository({
-    environment: "test",
-    tenants: [{ id: "tenant-a", name: "A", status: "draft" }, { id: "tenant-b", name: "B", status: "active" }],
-    records: {
-      users: [{ id: "user-global", empresaId: "tenant-b", name: "Pessoa Global", email: "global@example.test", role: "tenant_operator", status: "active" }],
-    },
-  });
-  const service = new AdminService({ repository });
-
-  await service.create({
-    auth: platform,
-    empresaId: "tenant-a",
-    resource: "memberships",
-    body: { userId: "user-global", role: "tenant_operator", status: "active", permissions: ["contacts.read"] },
-  });
-  let users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
-  assert.equal(users.items[0].id, "user-global");
-  assert.equal(users.items[0].membershipStatus, "active");
-  assert.deepEqual(users.items[0].permissions, ["contacts.read"]);
-
-  await service.update({
-    auth: platform,
-    empresaId: "tenant-a",
-    resource: "memberships",
-    id: "user-global",
-    body: { status: "suspended", permissions: [] },
-  });
-  users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
-  assert.equal(users.items[0].membershipStatus, "suspended");
-  assert.deepEqual(users.items[0].permissions, []);
-
-  await service.remove({ auth: platform, empresaId: "tenant-a", resource: "users", id: "user-global" });
-  users = await service.list({ auth: platform, empresaId: "tenant-a", resource: "users", query: {} });
-  assert.equal(users.items.length, 0);
-  assert.equal((await service.lookupGlobalUser({ auth: platform, email: "global@example.test" })).id, "user-global");
-});
-
-test("empresa mantém ao menos um administrador ativo ao editar ou remover a equipe", async () => {
-  const repository = new MemoryAdminRepository({
-    environment: "test",
+test("CRUD legado não cria nem altera identidades e vínculos fora da área Acessos", async () => {
+  const repository = new MemoryAdminRepository({ environment: "test",
     tenants: [{ id: "tenant-a", name: "A", status: "draft" }],
-    records: {
-      users: [{
-        id: "admin-a",
-        empresaId: "tenant-a",
-        name: "Administrador",
-        email: "admin@example.test",
-        role: "tenant_admin",
-        status: "active",
-      }],
-    },
-  });
+    records: { users: [{ id: "user-global", empresaId: "tenant-a", name: "Pessoa",
+      email: "global@waia.example", role: "tenant_admin", status: "active" }] } });
   const service = new AdminService({ repository });
-  await assert.rejects(
-    service.update({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a", body: { role: "tenant_operator" } }),
-    (error) => error.code === "VALIDATION_ERROR" && error.details?.field === "role",
-  );
-  await assert.rejects(
-    service.remove({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a" }),
-    (error) => error.code === "VALIDATION_ERROR",
-  );
-  const secondAdmin = await service.create({
-    auth: tenantAdmin,
-    empresaId: "tenant-a",
-    resource: "users",
-    body: {
-      name: "Segundo Administrador",
-      email: "segundo@example.test",
-      role: "tenant_admin",
-      status: "active",
-      initialPassword: "senha-sintetica-forte",
-      permissions: ["contacts.read", "contacts.update"],
-    },
-  });
-  assert.deepEqual(secondAdmin.permissions, ["contacts.read", "contacts.update"]);
-  const updatedPermissions = await service.update({
-    auth: tenantAdmin,
-    empresaId: "tenant-a",
-    resource: "users",
-    id: secondAdmin.id,
-    body: { permissions: ["orders.read", "orders.update"] },
-  });
-  assert.deepEqual(updatedPermissions.permissions, ["orders.read", "orders.update"]);
-  assert.deepEqual(
-    await service.remove({ auth: tenantAdmin, empresaId: "tenant-a", resource: "users", id: "admin-a" }),
-    { deleted: true },
-  );
+  for(const auth of [platform,tenantAdmin,operator]) for(const resource of ["users","memberships"]) {
+    await assert.rejects(service.create({auth,empresaId:"tenant-a",resource,body:{name:"Outra",initialPassword:"synthetic-password"}}),{code:"FORBIDDEN"});
+    await assert.rejects(service.update({auth,empresaId:"tenant-a",resource,id:"user-global",body:{status:"blocked"}}),{code:"FORBIDDEN"});
+    await assert.rejects(service.remove({auth,empresaId:"tenant-a",resource,id:"user-global"}),{code:"FORBIDDEN"});
+  }
+  const users=await service.list({auth:platform,empresaId:"tenant-a",resource:"users",query:{}});
+  assert.equal(users.items.length,1);
+  assert.equal(users.items[0].status,"active");
+  assert.equal((await service.lookupGlobalUser({auth:platform,email:"global@waia.example"})).id,"user-global");
 });
 
 test("onboarding exige administrador do tenant e ativação exige plataforma", async () => {

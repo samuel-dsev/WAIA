@@ -29,6 +29,7 @@ function run(args, env = process.env) {
 let owner;
 let app;
 let redis;
+const testsOnly=process.argv.includes('--tests-only');
 async function assertNoBusinessData() {
   await owner.query('BEGIN');
   try {
@@ -55,9 +56,9 @@ async function preflightDevelopmentDatabase() {
     WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')`)).rows[0].n;
   if (!tables) return;
   const files = await readSqlDirectory(fileURLToPath(new URL('../db/migrations/', import.meta.url)));
-  const rows = (await owner.query('SELECT filename,checksum FROM schema_migrations')).rows;
-  assert.ok(rows.length === files.length || (rows.length === 26 && files.length === 27));
-  for (const row of rows) assert.ok(files.find((file) => file.filename === row.filename)?.acceptedChecksums.has(row.checksum.trim()));
+  const rows = (await owner.query('SELECT filename,checksum FROM schema_migrations ORDER BY filename')).rows;
+  assert.ok(rows.length>=26 && rows.length<=files.length);
+  rows.forEach((row,index)=>{assert.equal(row.filename,files[index].filename);assert.ok(files[index].acceptedChecksums.has(row.checksum.trim()));});
   await assertNoBusinessData();
 }
 try {
@@ -73,15 +74,14 @@ try {
   owner = new pg.Pool({ connectionString: developmentUrl, max: 1 });
   app = new pg.Pool({ connectionString: target(process.env.DATABASE_URL, 'waia_v2_app'), max: 1 });
   // Validate this third target BEFORE any migration or functional fixture writes.
-  await preflightDevelopmentDatabase();
+  if(!testsOnly)await preflightDevelopmentDatabase();
   run(['scripts/m0-schema-check.mjs']);
-  run(['--test', 'test/accounts-postgres.test.js', 'test/team-postgres.test.js',
+  run(['--test', 'test/accounts-postgres.test.js', 'test/team-postgres.test.js', 'test/access-admin-postgres.test.js',
     'test/accounts-redis.test.js', 'test/redis-integration.test.js', 'test/ai-reply-delay-redis.test.js'], {
     ...process.env, DATABASE_URL: upgradeApp, DATABASE_MIGRATOR_URL: upgradeOwner,
     RUN_POSTGRES_INTEGRATION: 'true', RUN_REDIS_INTEGRATION: 'true',
   });
-  await runMigrations(owner);
-  await assertNoBusinessData();
+  if(!testsOnly){await runMigrations(owner);await assertNoBusinessData();}
   redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });
   assert.equal(await redis.ping(), 'PONG');
   const filename = `/app/.data/media/m0-${randomUUID()}`;
@@ -96,9 +96,9 @@ try {
     socket.once('timeout', () => { socket.destroy(); reject(new Error('Egress blocked')); });
     socket.once('error', reject);
   }));
-  console.log(JSON.stringify({ status: 'passed', developmentDatabase: 'waia_v2_app',
-    businessRows: 0, redis: 'dedicated/PONG', media: 'dedicated/write-read-remove',
-    egress: 'blocked', api: 'not-started', worker: 'not-started' }));
+  console.log(JSON.stringify({ status: 'passed', developmentDatabase: testsOnly?'not-touched':'waia_v2_app',
+    businessRows: testsOnly?'not-checked':0, redis: 'dedicated/PONG', media: 'dedicated/write-read-remove',
+    egress: 'blocked', api: 'not-started-by-validator', worker: 'not-started-by-validator' }));
 } catch (error) {
   console.error(JSON.stringify({ status: 'failed', code: error.code || 'CHECK_FAILED' }));
   process.exitCode = 1;

@@ -88,12 +88,17 @@ export class AccountService {
     await this.repository.consumeToken({ digest: digest(token), purpose: 'reset', passwordHash: await hashPassword(value),
       now: this.clock(), mail: (u) => this.#mail({ email: u.email, purpose: 'password_changed' }) });
   }
+  async activate(body,ip) {
+    const {token,password:value}=this.parse('reset',body);
+    await this.rate('activate',token,ip,5);
+    await this.repository.activate({digest:digest(token),passwordHash:await hashPassword(value),now:this.clock()});
+  }
   async login(body, ip, oldToken) {
     const input = this.parse('login', body);
     await this.rate('login', `${ip}:${input.email}`, ip, 5);
     const u = await this.repository.findCredentials(input.email);
     const valid = await verifyPassword(input.password, u?.password_hash || DUMMY_PASSWORD_HASH);
-    if (!u || !valid || u.status !== 'ativo') throw new AccountError('INVALID_CREDENTIALS', 401, 'E-mail ou senha inválidos.');
+    if (!u || !valid || u.status !== 'ativo' || u.activation_required) throw new AccountError('INVALID_CREDENTIALS', 401, 'E-mail ou senha inválidos.');
     if (this.security) {
       const challenge = await this.security.login({userId:u.id,passwordHash:u.password_hash,audience:'customer'});
       if (challenge) return challenge;

@@ -798,6 +798,7 @@ export class PostgresAdminRepository {
 
   async #updateUser({ empresaId, id, changes, transaction }) {
     return usePlatformTransaction(this.pool, { transaction }, async ({ client }) => {
+      await client.query('SELECT pg_advisory_xact_lock(810420267)');
       const current = (await client.query('SELECT * FROM usuarios WHERE id=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
       if (!current) return null;
       const membership = await client.query("SELECT 1 FROM usuarios_empresas WHERE empresa_id = $1 AND usuario_id = $2", [empresaId, id]);
@@ -841,6 +842,7 @@ export class PostgresAdminRepository {
     const run = resource === "users" ? usePlatformTransaction : useTenantTransaction;
     return run(this.pool, { empresaId, transaction }, async ({ client }) => {
       // Security mutations always lock identity before membership/session rows.
+      await client.query('SELECT pg_advisory_xact_lock(810420267)');
       await client.query('SELECT id FROM usuarios WHERE id=$1 FOR UPDATE', [userId]);
       const current = (await client.query(
         `SELECT ue.papel AS role, ue.status AS membership_status, u.status AS user_status

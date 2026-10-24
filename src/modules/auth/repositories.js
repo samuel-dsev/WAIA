@@ -57,7 +57,7 @@ export class PostgresAuthRepository {
       `INSERT INTO auth_sessions (usuario_id, token_hash, ip, user_agent, expires_at, created_at, last_seen_at,security_version,audience,mfa_verified_at,reauthenticated_at)
        SELECT id,$2,$3,$4,$5,$6,$6,security_version,'admin',$7,$7 FROM usuarios
        WHERE id=$1 AND status='ativo' AND deleted_at IS NULL AND mfa_habilitado
-         AND papel_plataforma='administrador' RETURNING *`,
+         AND papel_plataforma='administrador' AND NOT activation_required RETURNING *`,
       [input.userId, input.tokenHash, input.ip, input.userAgent, input.expiresAt, input.createdAt,input.mfaVerifiedAt],
     )).rows[0]);});
   }
@@ -68,7 +68,7 @@ export class PostgresAuthRepository {
            FROM auth_sessions s JOIN usuarios u ON u.id = s.usuario_id
           WHERE s.token_hash = $1 AND s.audience = 'admin' AND s.revoked_at IS NULL AND s.expires_at > $2 AND u.deleted_at IS NULL
             AND s.security_version=u.security_version AND u.mfa_habilitado AND s.mfa_verified_at IS NOT NULL
-            AND u.papel_plataforma='administrador' AND u.status='ativo'`,
+            AND u.papel_plataforma='administrador' AND u.status='ativo' AND NOT u.activation_required`,
         [tokenHash, now],
       );
       const row = result.rows[0];

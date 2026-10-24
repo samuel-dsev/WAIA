@@ -670,6 +670,7 @@ export class AdminService {
   }
 
   async create({ auth, empresaId, resource, body }) {
+    if(['users','memberships'].includes(resource)) throw new AdminForbiddenError();
     const definition = adminResource(resource);
     if (!definition || ["none", "credential"].includes(definition.write)) throw new AdminForbiddenError();
     assertTenantBody(empresaId, body);
@@ -687,6 +688,7 @@ export class AdminService {
   }
 
   async update({ auth, empresaId, resource, id, body }) {
+    if(['users','memberships'].includes(resource)) throw new AdminForbiddenError();
     const definition = adminResource(resource);
     if (!definition || ["none", "credential"].includes(definition.write)) throw new AdminForbiddenError();
     assertTenantBody(empresaId, body);
@@ -723,6 +725,7 @@ export class AdminService {
   }
 
   async remove({ auth, empresaId, resource, id }) {
+    if(['users','memberships'].includes(resource)) throw new AdminForbiddenError();
     const definition = adminResource(resource);
     if (!definition || ["none", "credential"].includes(definition.write)) throw new AdminForbiddenError();
     await this.#tenant(auth, empresaId, definition, { write: true, action: `${resource}.delete`, resource });

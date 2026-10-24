@@ -38,7 +38,7 @@ export class IdentitySecurity {
       binding:{empresaId:'platform-accounts',credentialId:id,provider:'email',purpose:'account-delivery'}});
     await c.query('INSERT INTO account_email_outbox(id,usuario_id,envelope,expires_at) VALUES($1,$2,$3,$4)',[id,u.id,envelope,new Date(this.clock().getTime()+86400000)]);
   }
-  async #user(c,id) { return (await c.query("SELECT * FROM usuarios WHERE id=$1 AND status='ativo' AND deleted_at IS NULL FOR UPDATE",[id])).rows[0]; }
+  async #user(c,id) { return (await c.query("SELECT * FROM usuarios WHERE id=$1 AND status='ativo' AND deleted_at IS NULL AND NOT activation_required FOR UPDATE",[id])).rows[0]; }
   #allowedAudience(u,audience) {
     return ['admin','customer'].includes(audience) && typeof this.codecs?.[audience]?.issue==='function'
       && (audience!=='admin' || u.papel_plataforma==='administrador');

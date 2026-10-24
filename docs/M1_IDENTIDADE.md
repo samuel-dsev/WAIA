@@ -9,6 +9,9 @@ Em 24/10/2026, o usuário autorizou o commit local da M1 e a M2 e padronizou
 commit local ao final de cada fase validada. Preferência registrada em AGENTS,
 sem autorização automática de push, deploy ou fase seguinte.
 
+Commit local concluído em **88f7b21 / 1.24.0**. Continuidade da M2 autorizada
+e resultados registrados em [M2_ACESSOS.md](M2_ACESSOS.md).
+
 Snapshot selecionado para esse commit: 49 arquivos, sem portal/equipe e registros
 operacionais alheios. Revalidado em Node 22: 600 pass/22 skips/zero falhas e 28
 integrações reais aprovadas. Evidências em `.tmp/m0/m1-commit-baseline.tap`,

@@ -4,6 +4,15 @@ import { randomBytes } from 'node:crypto';
 import { AccountService } from '../src/modules/accounts/account-service.js';
 import { AccountRateLimiter } from '../src/modules/accounts/rate-limiter.js';
 import { FakeEmailTransport, HttpEmailTransport } from '../src/integrations/email/transport.js';
+
+test('transporte fake recusa destinatário real e aceita somente domínio reservado',async()=>{
+  const fake=new FakeEmailTransport({environment:'test'});
+  for(const to of ['person@company.com','person@waia.example.evil','person@example.invalid.evil']) {
+    await assert.rejects(fake.send({to,idempotencyKey:to}));
+  }
+  await fake.send({to:'ana.demo@waia.example',idempotencyKey:'synthetic'});
+  assert.equal(fake.messages.size,1);
+});
 import { createSessionTokenCodec } from '../src/modules/auth/token-codec.js';
 import { VersionedKeyring } from '../src/security/versioned-keyring.js';
 import { createAccountsRuntime } from '../src/modules/accounts/runtime.js';

@@ -1,11 +1,12 @@
 import express from "express";
-import { publicAdminError } from "./errors.js";
+import { publicAdminError, AdminForbiddenError } from "./errors.js";
+import { createAccessRouter } from '../access/http.js';
 
 const asyncRoute = (handler) => async (request, response, next) => {
   try { await handler(request, response); } catch (error) { next(error); }
 };
 
-export function createAdminRouter({ adminService, groupNotifierService = null, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
+export function createAdminRouter({ adminService, accessService = null, groupNotifierService = null, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
   const router = express.Router();
   router.use(authenticate);
   router.use((request, _response, next) => {
@@ -13,6 +14,11 @@ export function createAdminRouter({ adminService, groupNotifierService = null, a
     return csrf(request, _response, next);
   });
   router.get("/session", (request, response) => response.json(adminService.session(request.auth)));
+  if(accessService) router.use('/access-users',(req,res,next)=>['GET','HEAD','OPTIONS'].includes(req.method)?next():sensitiveRateLimit(req,res,next),createAccessRouter({service:accessService}));
+  router.use('/tenants/:empresaId/:resource',(request,_response,next)=>{
+    if(['users','memberships'].includes(request.params.resource)&&!['GET','HEAD','OPTIONS'].includes(request.method)) return next(new AdminForbiddenError());
+    next();
+  });
   if (groupNotifierService) {
     const action = (method) => asyncRoute(async (req, res) => { res.set("Cache-Control", "private, no-store"); res.json(await method(req)); });
     router.get("/group-notifier", action((req) => groupNotifierService.status(req.auth)));

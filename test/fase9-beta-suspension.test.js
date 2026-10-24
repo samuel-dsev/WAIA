@@ -540,9 +540,8 @@ test("Beta é publicada, ativada e suspensa pelas rotas do painel sem afetar o C
         permissions: ["appointments.read", "appointments.update"],
       },
     });
-    assert.equal(admin.status, 201);
-    assert.equal(admin.payload.role, "tenant_admin");
-    assert.equal(admin.payload.initialPassword, "[REDACTED]");
+    assert.equal(admin.status, 403);
+    assert.equal(admin.payload.error.code, "FORBIDDEN");
     assert.doesNotMatch(JSON.stringify(admin.payload), /senha-sintetica-admin/u);
 
     const operator = await api.call(`/api/admin/tenants/${betaId}/users`, {
@@ -557,8 +556,8 @@ test("Beta é publicada, ativada e suspensa pelas rotas do painel sem afetar o C
         permissions: ["appointments.read", "appointments.update"],
       },
     });
-    assert.equal(operator.status, 201);
-    assert.equal(operator.payload.role, "tenant_operator");
+    assert.equal(operator.status, 403);
+    assert.equal(operator.payload.error.code, "FORBIDDEN");
 
     const draft = await api.call(`/api/admin/tenants/${betaId}/configuration/draft`, {
       method: "PUT",
@@ -700,11 +699,12 @@ test("Beta é publicada, ativada e suspensa pelas rotas do painel sem afetar o C
 
     const auditActions = fixture.repository.audit.map(({ action }) => action);
     for (const action of [
-      "tenant.create", "users.create", "numbers.create",
+      "tenant.create", "numbers.create",
       "onboarding.simulator.message", "tenant.suspend",
     ]) {
       assert.ok(auditActions.includes(action), `auditoria ausente: ${action}`);
     }
+    assert.equal(auditActions.includes('users.create'),false,'Rotas legadas recusadas não criam identidade.');
     assert.equal(fixture.repository.activationAudits[0].empresaId, betaId);
     assert.equal(fixture.repository.activationAudits[0].actorId, "platform-phase9");
     assert.ok(fixture.csrfCalls.some((entry) => entry.endsWith(`/tenants/${betaId}/suspend`)));

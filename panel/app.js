@@ -1,6 +1,7 @@
 import { createOnboardingWizard } from "./onboarding.js";
 import { renderGroupNotifier } from "./group-notifier.js";
 import { createAttendanceScriptEditor, scriptSaveRequest } from "./attendance-script.js";
+import { createAccessUsersPanel } from "./access-users.js";
 
 const API_BASE = "/api/admin";
 const REFRESH_INTERVAL_MS = 30_000;
@@ -21,6 +22,7 @@ const TENANT_STATUS_ACTIONS = Object.freeze({
 });
 
 const VIEW_DEFINITIONS = {
+  accessUsers: { title: "Acessos", eyebrow: "Administração geral", description: "Crie acessos individuais e defina as empresas e permissões de cada pessoa.", permission: "platform", filters: false },
   groupNotifier: { title: "Notificações e leads", eyebrow: "Atendimento", description: "Remetente central, destino por empresa e resumo dos leads qualificados.", permission: "operations", filters: false },
   dashboard: {
     title: "Visão geral",
@@ -192,11 +194,12 @@ const VIEW_DEFINITIONS = {
     ],
   },
   users: {
-    title: "Usuários e permissões",
+    title: "Usuários com acesso",
     eyebrow: "Acesso",
-    description: "Vínculos, papéis e permissões efetivas da empresa.",
+    description: "Acessos individuais vinculados à empresa selecionada.",
     resource: "users",
-    permission: "users",
+    permission: "platform",
+    filters: false,
     columns: [
       ["name", "Nome"], ["email", "E-mail"], ["role", "Papel"],
       ["status", "Estado"], ["lastLoginAt", "Último acesso"], ["updatedAt", "Atualização"],
@@ -233,6 +236,7 @@ const state = {
   requestController: null,
   receiptObjectUrl: null,
   onboardingWizard: null,
+  accessUsersPanel: null,
   settingsScriptDirty: false,
   settingsScriptSaving: false,
 };
@@ -299,7 +303,7 @@ async function apiFetch(path, { method = "GET", body, signal, headers = {} } = {
     const error = new Error(payload?.message || nestedError?.message
       || (typeof payload?.error === "string" ? payload.error : "Não foi possível concluir a solicitação."));
     error.status = response.status;
-    error.code = payload?.code || nestedError?.code || "ADMIN_API_ERROR";
+    error.code = payload?.code || nestedError?.code || (typeof payload?.error === "string" ? payload.error : "ADMIN_API_ERROR");
     error.details = payload?.details || nestedError?.details || {};
     error.path = payload?.path || nestedError?.path || error.details?.path || null;
     error.field = payload?.field || nestedError?.field || error.details?.field || null;
@@ -330,6 +334,7 @@ function normalizedSession(payload) {
 }
 
 function showLogin(message = "") {
+  state.accessUsersPanel?.dispose(); state.accessUsersPanel = null;
   document.getElementById('mfaLoginForm').hidden=true;
   document.getElementById('mfaLoginSecret').textContent='';
   document.getElementById('mfaRecoveryCodes').textContent='';
@@ -474,6 +479,7 @@ async function navigate(view, { updateHash = true } = {}) {
     toast("Você não possui permissão para essa área.");
     return;
   }
+  if (!await leaveAccessUsers()) return;
   if (!await leaveSettingsScript()) return;
   if (state.currentView === "onboarding" && next !== "onboarding" && !await disposeOnboardingWizard()) return;
   state.currentView = next;
@@ -500,9 +506,6 @@ function addViewActions(view) {
   if (view === "numbers" && allowed("settings") && state.selectedEmpresaId) {
     elements.viewActions.append(button("Vincular número", () => openNumberForm(), "button button-primary"));
   }
-  if (view === "users" && allowed("users") && state.selectedEmpresaId) {
-    elements.viewActions.append(button("Adicionar usuário", () => openUserForm(), "button button-primary"));
-  }
   if (["catalog", "events", "menus", "integrations"].includes(view)
     && allowed("settings") && state.selectedEmpresaId) {
     elements.viewActions.append(button("Adicionar", () => openResourceCreate(view), "button button-primary"));
@@ -511,6 +514,8 @@ function addViewActions(view) {
 }
 
 async function loadCurrentView({ silent = false } = {}) {
+  if (!await leaveAccessUsers()) return;
+  state.accessUsersPanel?.dispose(); state.accessUsersPanel = null;
   if (!await leaveSettingsScript()) return;
   const definition = VIEW_DEFINITIONS[state.currentView];
   state.requestController?.abort();
@@ -520,6 +525,15 @@ async function loadCurrentView({ silent = false } = {}) {
     setContentState("loading", `Carregando ${definition.title.toLocaleLowerCase("pt-BR")}…`);
   }
   try {
+    if (["accessUsers", "users"].includes(state.currentView)) {
+      elements.pagination.hidden = true; setContentState(null);
+      if (state.currentView === "users" && !state.selectedEmpresaId) {
+        setContentState("empty", "Selecione uma empresa para consultar os usuários com acesso."); return;
+      }
+      state.accessUsersPanel = createAccessUsersPanel({ root: elements.viewContent, apiFetch, confirmAction, toast,
+        getTenants: () => state.tenants, onSessionExpired: () => showLogin("Sua sessão expirou. Entre novamente.") });
+      return await state.accessUsersPanel.render({ empresaId: state.currentView === "users" ? state.selectedEmpresaId : "", signal: state.requestController.signal });
+    }
     if (state.currentView === "onboarding") return await loadOnboarding(state.requestController.signal);
     if (state.currentView === "settings") return await loadSettings(state.requestController.signal);
     if (state.currentView === "groupNotifier") {
@@ -1544,6 +1558,7 @@ function canAutoRefreshCurrentView() {
     && !elements.appShell.hidden
     && state.currentView !== "onboarding"
     && state.currentView !== "groupNotifier"
+    && !["accessUsers", "users"].includes(state.currentView)
     && !elements.detailDialog.open
     && !document.querySelector("dialog.wizard-dialog[open]");
 }
@@ -1554,6 +1569,10 @@ async function leaveSettingsScript() {
   if (!await confirmAction("Há alterações no roteiro que ainda não foram salvas. Deseja descartá-las?", "Roteiro não salvo")) return false;
   state.settingsScriptDirty = false;
   return true;
+}
+
+async function leaveAccessUsers() {
+  return state.accessUsersPanel ? state.accessUsersPanel.canLeave() : true;
 }
 
 function stopRefresh() {
@@ -1616,6 +1635,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
 });
 
 elements.logoutButton.addEventListener("click", async () => {
+  if (!await leaveAccessUsers()) return;
   if (!await leaveSettingsScript()) return;
   if (!await disposeOnboardingWizard()) return;
   try { await apiFetch("/auth/logout", { method: "POST", body: {} }); } catch { /* sessão local será encerrada */ }
@@ -1649,6 +1669,7 @@ elements.primaryNav.addEventListener("click", (event) => {
 elements.tenantSelect.addEventListener("change", async () => {
   const previousTenantId = state.selectedEmpresaId;
   const nextTenantId = elements.tenantSelect.value;
+  if (!await leaveAccessUsers()) { elements.tenantSelect.value = previousTenantId; return; }
   if (!await leaveSettingsScript()) {
     elements.tenantSelect.value = previousTenantId;
     return;
@@ -1707,7 +1728,7 @@ elements.detailDialog.addEventListener("close", () => {
 });
 window.addEventListener("hashchange", () => state.session && navigate(location.hash.slice(1), { updateHash: false }));
 window.addEventListener("beforeunload", (event) => {
-  if (state.settingsScriptDirty || state.settingsScriptSaving) { event.preventDefault(); event.returnValue = ""; }
+  if (state.settingsScriptDirty || state.settingsScriptSaving || state.accessUsersPanel?.hasUnsavedChanges()) { event.preventDefault(); event.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => {
   if (state.refreshEnabled && state.session && canAutoRefreshCurrentView()) loadCurrentView({ silent: true });

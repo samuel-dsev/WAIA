@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **23/10/2026**. Estado: **M0 commitada localmente, M1 concluída localmente**, M2–M10 planejadas. Branch **`new`**, HEAD **89d46af / v1.23.3** (M0); candidata M1 **v1.24.0**, sem novo commit/push/deploy. Base de origem `3b8a295` / v1.23.1, com alterações anteriores preservadas. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md) e [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md).
+Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 concluída em 1.25.0 com commit local no fechamento**; M3–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md) e [M2_ACESSOS.md](docs/M2_ACESSOS.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -218,7 +218,7 @@ Dataset de produto para M3/M8:
 
 Senhas definidas pelo fluxo seguro, não neste plano. Roteiros/contatos/conversas sintéticos; sem telefone/token/grupo real. Providers fake e egress de mensagens bloqueado. E2E pode preparar o dataset operando o painel; fixtures técnicas de repositório são independentes, sem substituir cadastro pelo produto por SQL/seed.
 
-**Empresas ainda não cadastradas:** M0 validou o alvo isolado `waia_v2_app`, com schema novo e sem dados de negócio. A criação efetiva pelo painel está prevista em M3/M8, após autorização. API/worker permanecem desligados nesta etapa.
+**Dataset atual:** M0 validou o alvo isolado vazio; M2 cadastrou pelo painel duas empresas fictícias e três identidades com zero/um/dois vínculos para seu gate administrativo. O dataset completo e o workspace cliente permanecem em M3/M8. Preview local usa API isolada e e-mail fake, sem worker de atendimento; nada foi importado da instalação anterior.
 
 ## 9. Ferramentas e desenvolvimento
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0 tem commit local e M1 tem gate técnico local concluído; M2–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0/M1 têm commits locais e M2 tem gates locais concluídos; M3–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -266,7 +266,7 @@ Após autorização, M0 commitada somente localmente em **89d46af**. O snapshot 
 
 ### M1 — identidade e autorização
 
-Estado em 23/10/2026: concluída localmente, candidata 1.24.0, sem novo commit/push/deploy. Baseline 600 pass/22 skips; 28 integrações reais aprovadas, auditoria zero e schema 27/upgrade histórico equivalentes. Revisões e limites em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md). M2 não iniciada.
+Fechamento técnico em 23/10/2026: 1.24.0, baseline 600 pass/22 skips; 28 integrações reais aprovadas, auditoria zero e schema 27/upgrade histórico equivalentes. Commit local autorizado e concluído em 24/10 como **88f7b21**, sem push/deploy. Revisões e limites em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md).
 
 - Catálogo único de capacidades por vínculo e verificação em rotas/serviços; negar poderes técnicos ao customer, inclusive owner.
 - Bloquear audience admin para clientes; preservar perímetro/login/MFA do administrador geral.
@@ -278,6 +278,8 @@ Estado em 23/10/2026: concluída localmente, candidata 1.24.0, sem novo commit/p
 **Gate:** sem escalada/IDOR/autoprovisionamento; audiences separadas; revogação comprovada em PostgreSQL/Redis reais. Subagentes: identidade e revisão de ataques.
 
 ### M2 — painel geral de acessos
+
+Estado em 24/10/2026: concluída em 1.25.0, com commit local no fechamento. 607 testes aprovados/23 skips, 59 integrações reais aprovadas, schema 28/upgrade histórico equivalentes e fluxo 0/1/2 empresas validado pelo painel. Reautenticação, idempotência e auditoria transacionais comprovadas. Preview, revisões e limites em [M2_ACESSOS.md](docs/M2_ACESSOS.md). M3 não iniciada.
 
 - Serviço transacional/idempotente de criar/reutilizar identidade, vincular empresas/capacidades e auditar; unicidade sob concorrência.
 - Área Acessos e Usuários na empresa com busca/paginação, resumo de permissão e confirmação crítica.

@@ -35,13 +35,13 @@ export class AccountRepository {
   }
   findCredentials(email) {
     return withPlatformTransaction(this.pool, {}, async ({ client }) => (await client.query(
-      'SELECT id,email,nome,password_hash,status,email_verified_at,security_version,mfa_habilitado FROM usuarios WHERE email=$1 AND deleted_at IS NULL', [email],
+      'SELECT id,email,nome,password_hash,status,email_verified_at,security_version,mfa_habilitado,activation_required FROM usuarios WHERE email=$1 AND deleted_at IS NULL', [email],
     )).rows[0] || null);
   }
   requestToken({ userId, mail, token }) {
     return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {
       const r = (await c.query('SELECT * FROM usuarios WHERE id=$1 AND deleted_at IS NULL FOR UPDATE', [userId])).rows[0];
-      if (!r || r.status !== 'ativo' || (token.purpose === 'verify' && r.email_verified_at)) return;
+      if (!r || r.status !== 'ativo' || r.activation_required || (token.purpose === 'verify' && r.email_verified_at)) return;
       await this.#queue(c, userId, mail, token);
       await this.#audit(c, userId, `account.${token.purpose}.requested`);
     });
@@ -52,7 +52,7 @@ export class AccountRepository {
       const found = (await c.query('SELECT usuario_id FROM account_tokens WHERE digest=$1 AND purpose=$2', [digest, purpose])).rows[0];
       if (!found) throw invalidToken();
       const user = (await c.query('SELECT * FROM usuarios WHERE id=$1 FOR UPDATE', [found.usuario_id])).rows[0];
-      if (!user || user.status !== 'ativo' || user.deleted_at) throw invalidToken();
+      if (!user || user.status !== 'ativo' || user.deleted_at || user.activation_required) throw invalidToken();
       const token = (await c.query(`UPDATE account_tokens SET consumed_at=$3 WHERE digest=$1 AND purpose=$2
         AND consumed_at IS NULL AND expires_at>$3 RETURNING id`, [digest, purpose, now])).rows[0];
       if (!token) throw invalidToken();
@@ -69,10 +69,25 @@ export class AccountRepository {
     await c.query('UPDATE usuarios SET password_hash=$2 WHERE id=$1', [userId, hash]);
     await invalidateIdentitySecurity(c, { userId, now });
   }
+  activate({ digest, passwordHash, now }) {
+    return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {
+      const found=(await c.query("SELECT usuario_id FROM account_tokens WHERE digest=$1 AND purpose='activate'",[digest])).rows[0];
+      if(!found) throw invalidToken();
+      const user=(await c.query('SELECT * FROM usuarios WHERE id=$1 FOR UPDATE',[found.usuario_id])).rows[0];
+      if(!user || user.deleted_at || user.status!=='ativo' || !user.activation_required || user.papel_plataforma!=='nenhum') throw invalidToken();
+      const consumed=await c.query(`UPDATE account_tokens SET consumed_at=$2 WHERE digest=$1 AND purpose='activate'
+        AND consumed_at IS NULL AND expires_at>$2 RETURNING id`,[digest,now]);
+      if(!consumed.rowCount) throw invalidToken();
+      await c.query(`UPDATE usuarios SET password_hash=$2,activation_required=false,email_verified_at=$3,
+        access_version=access_version+1 WHERE id=$1`,[user.id,passwordHash,now]);
+      await invalidateIdentitySecurity(c,{userId:user.id,now});
+      await this.#audit(c,user.id,'account.activate.completed');
+    });
+  }
   login({ userId, passwordHash, tokenHash, oldHash, now, expiresAt }) {
     return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {
       const u = (await c.query('SELECT * FROM usuarios WHERE id=$1 FOR UPDATE', [userId])).rows[0];
-      if (!u || u.status !== 'ativo' || u.deleted_at || u.password_hash !== passwordHash || u.mfa_habilitado || u.papel_plataforma==='administrador') throw invalidSession();
+      if (!u || u.status !== 'ativo' || u.deleted_at || u.activation_required || u.password_hash !== passwordHash || u.mfa_habilitado || u.papel_plataforma==='administrador') throw invalidSession();
       if (oldHash) await c.query("UPDATE auth_sessions SET revoked_at=$2 WHERE token_hash=$1 AND audience='customer'", [oldHash, now]);
       await c.query(`INSERT INTO auth_sessions(usuario_id,token_hash,audience,security_version,created_at,last_seen_at,expires_at)
         VALUES($1,$2,'customer',$3,$4,$4,$5)`, [u.id, tokenHash, u.security_version, now, expiresAt]);
@@ -85,7 +100,7 @@ export class AccountRepository {
       const r = (await c.query(`SELECT u.*,s.id session_id FROM auth_sessions s JOIN usuarios u ON u.id=s.usuario_id
         WHERE s.token_hash=$1 AND s.audience='customer' AND s.revoked_at IS NULL AND s.expires_at>$2
         AND s.last_seen_at>$3 AND s.security_version=u.security_version AND u.status='ativo'
-        AND u.deleted_at IS NULL AND (NOT u.mfa_habilitado OR s.mfa_verified_at IS NOT NULL)
+        AND u.deleted_at IS NULL AND NOT u.activation_required AND (NOT u.mfa_habilitado OR s.mfa_verified_at IS NOT NULL)
         AND (u.papel_plataforma<>'administrador' OR s.mfa_verified_at IS NOT NULL)`, [tokenHash, now, new Date(now.getTime() - idleMs)])).rows[0];
       if (!r) throw invalidSession();
       await c.query('UPDATE auth_sessions SET last_seen_at=$2 WHERE id=$1 AND revoked_at IS NULL', [r.session_id, now]);

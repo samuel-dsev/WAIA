@@ -85,6 +85,15 @@ export function createAuthRouter({ authService, secureCookies = false, sessionTt
     } catch (error) { next(error); }
   });
   router.get("/session", authenticate, (request, response) => response.json(publicPrincipal(request.auth)));
+  router.post('/reauthenticate',authenticate,csrf,async(request,response,next)=>{
+    try {
+      strictBody(request.body,['password','code']);
+      if(request.get('origin')!==`${request.protocol}://${request.get('host')}`) throw new AuthorizationDeniedError();
+      if(request.auth.audience!=='admin'||request.auth.platformRole!=='platform_admin'||!authService.security) throw new AuthorizationDeniedError();
+      await authService.security.reauthenticate(request.auth,{password:request.body.password,code:request.body.code},request.ip);
+      response.sendStatus(204);
+    } catch(error){next(error);}
+  });
   router.post('/mfa/login', async(request,response,next)=>{
     try {
       strictBody(request.body, ['challenge','code']);
