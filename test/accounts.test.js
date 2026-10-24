@@ -12,7 +12,7 @@ const setup = (extra = {}) => new AccountService({ repository: {}, codec: create
   keyring: VersionedKeyring.fromBase64({ activeVersion: '1', keys: { '1': randomBytes(32).toString('base64') } }),
   limiter: new AccountRateLimiter({ environment: 'test' }), origin: 'http://localhost:3001', ...extra });
 
-test('conta pública rejeita mass assignment e exige aceite', () => {
+test('schemas de conta rejeitam mass assignment e preservam política de senha', () => {
   const service = setup();
   for (const field of ['platformRole','empresa_id','status','securityVersion','verified']) {
     assert.throws(() => service.parse('register', { name: 'Teste', email: 'user@example.invalid', password: 'synthetic-password', acceptedTerms: true, [field]: true }), { code: 'VALIDATION_ERROR' });
@@ -38,8 +38,8 @@ test('contas ficam desligadas por padrão e fake nunca entra em produção', () 
 });
 test('tokens e credenciais nunca aparecem no resultado público ou outbox em claro', async () => {
   let saved;
-  const service = setup({ repository: { async register(data) { saved = data; } } });
-  const result = await service.register({ name: 'Cliente', email: 'user@example.invalid', password: 'synthetic-password', acceptedTerms: true }, '127.0.0.1');
+  const service = setup({ repository: { async findCredentials() { return {id:'synthetic-user'}; }, async requestToken(data) { saved = data; } } });
+  const result = await service.requestToken({ email: 'user@example.invalid' }, 'verify', '127.0.0.1');
   assert.deepEqual(Object.keys(result), ['message']);
   assert.equal(saved.token.digest.length, 32);
   assert.equal(JSON.stringify(saved.mail).includes('user@example.invalid'), false);
@@ -48,10 +48,10 @@ test('tokens e credenciais nunca aparecem no resultado público ou outbox em cla
 });
 test('entrega usa chave idempotente e falha do provedor só persiste estado', async () => {
   let stored, finish;
-  const service = setup({ repository: { async register(input) { stored = input; },
+  const service = setup({ repository: { async findCredentials() { return {id:'synthetic-user'}; }, async requestToken(input) { stored = input; },
     async claimMail() { return { id: stored.mail.id, envelope: stored.mail.envelope, lease_id: 'lease', attempts: 1 }; },
     async finishMail(input) { finish = input; } } });
-  await service.register({ name: 'Cliente', email: 'user@example.invalid', password: 'synthetic-password', acceptedTerms: true }, '127.0.0.1');
+  await service.requestToken({ email: 'user@example.invalid' }, 'verify', '127.0.0.1');
   const fake = new FakeEmailTransport({ environment: 'test' });
   await service.deliverNext(fake);
   assert.equal(finish.success, true);

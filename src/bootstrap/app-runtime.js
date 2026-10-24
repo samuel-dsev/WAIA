@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createAccountsRuntime } from "../modules/accounts/runtime.js";
+import { IdentitySecurity } from '../modules/auth/identity-security.js';
+import { AccountRateLimiter } from '../modules/accounts/rate-limiter.js';
 import { createAccountRouter, createCustomerRouter } from "../modules/accounts/http.js";
 import { startAccountEmailWorker } from "../integrations/email/transport.js";
 import express from "express";
@@ -341,7 +343,12 @@ export function createPostgresRuntime({
   const tokenCodec = createSessionTokenCodec({
     pepper: requiredSecret(config.security.sessionPepper, "SESSION_PEPPER"),
   });
+  const identitySecurity=new IdentitySecurity({pool,keyring,
+    sessionMsByAudience:{admin:config.security.sessionTtlHours*3600_000,customer:config.accounts.sessionMs},
+    codecs:{admin:tokenCodec,customer:createSessionTokenCodec({pepper:`${config.security.sessionPepper}:customer`})},
+    limiter:new AccountRateLimiter({redis,environment:config.environment})});
   const authService = new AuthService({
+    security:identitySecurity,
     repository: authRepository,
     tokenCodec,
     rateLimiter: config.environment === "production"
@@ -444,7 +451,7 @@ export function createPostgresRuntime({
     groupNotifierService,
     onboardingService,
     authService,
-    accounts: createAccountsRuntime({ pool, redis, config }),
+    accounts: createAccountsRuntime({ pool, redis, config, security:identitySecurity }),
     aiService,
     tenantDefinitionRepository,
     metaGateway,

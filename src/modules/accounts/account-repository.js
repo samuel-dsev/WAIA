@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { withPlatformTransaction, withIdentityTransaction } from '../../infra/postgres/transaction.js';
+import { withPlatformTransaction, withIdentityTransaction, withCustomerTransaction } from '../../infra/postgres/transaction.js';
+import { invalidateIdentitySecurity } from '../auth/identity-lifecycle.js';
 import { AccountError, invalidSession, invalidToken } from './errors.js';
 import { parseTenantRuntimeConfigV2Draft } from '../configuration/tenant-runtime-config-v2.js';
 
-const publicUser = (r) => ({ id: r.id, name: r.nome, email: r.email, verified: Boolean(r.email_verified_at) });
-const company = (r) => ({ id: r.id, name: r.nome, status: r.status, owner: r.owner === true, onboarding: 'pending' });
+const publicUser = (r) => ({ id: r.id, name: r.nome, email: r.email, verified: Boolean(r.email_verified_at), mfaEnabled: r.mfa_habilitado === true });
+const company = (r) => ({ id: r.id, name: r.nome, status: r.status, owner: r.owner === true, role: r.role || (r.owner ? 'administrador' : 'operador'), onboarding: r.status === 'rascunho' ? 'pending' : 'existing' });
 
 // Bootstrap somente por operacoes fechadas: nenhum controller recebe SQL/client.
 export class AccountRepository {
@@ -65,16 +66,13 @@ export class AccountRepository {
     });
   }
   async #password(c, userId, hash, now) {
-    await c.query('UPDATE usuarios SET password_hash=$2,security_version=security_version+1,updated_at=$3 WHERE id=$1', [userId, hash, now]);
-    await c.query('UPDATE auth_sessions SET revoked_at=$2 WHERE usuario_id=$1 AND revoked_at IS NULL', [userId, now]);
-    await c.query("UPDATE account_tokens SET consumed_at=$2 WHERE usuario_id=$1 AND purpose='reset' AND consumed_at IS NULL", [userId, now]);
-    await c.query(`UPDATE account_email_outbox SET envelope=NULL,status='expired' WHERE usuario_id=$1 AND token_id IN
-      (SELECT id FROM account_tokens WHERE usuario_id=$1 AND purpose='reset') AND status IN ('pending','sending')`, [userId]);
+    await c.query('UPDATE usuarios SET password_hash=$2 WHERE id=$1', [userId, hash]);
+    await invalidateIdentitySecurity(c, { userId, now });
   }
   login({ userId, passwordHash, tokenHash, oldHash, now, expiresAt }) {
     return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {
       const u = (await c.query('SELECT * FROM usuarios WHERE id=$1 FOR UPDATE', [userId])).rows[0];
-      if (!u || u.status !== 'ativo' || u.deleted_at || u.password_hash !== passwordHash || u.mfa_habilitado) throw invalidSession();
+      if (!u || u.status !== 'ativo' || u.deleted_at || u.password_hash !== passwordHash || u.mfa_habilitado || u.papel_plataforma==='administrador') throw invalidSession();
       if (oldHash) await c.query("UPDATE auth_sessions SET revoked_at=$2 WHERE token_hash=$1 AND audience='customer'", [oldHash, now]);
       await c.query(`INSERT INTO auth_sessions(usuario_id,token_hash,audience,security_version,created_at,last_seen_at,expires_at)
         VALUES($1,$2,'customer',$3,$4,$4,$5)`, [u.id, tokenHash, u.security_version, now, expiresAt]);
@@ -87,42 +85,48 @@ export class AccountRepository {
       const r = (await c.query(`SELECT u.*,s.id session_id FROM auth_sessions s JOIN usuarios u ON u.id=s.usuario_id
         WHERE s.token_hash=$1 AND s.audience='customer' AND s.revoked_at IS NULL AND s.expires_at>$2
         AND s.last_seen_at>$3 AND s.security_version=u.security_version AND u.status='ativo'
-        AND u.deleted_at IS NULL AND NOT u.mfa_habilitado`, [tokenHash, now, new Date(now.getTime() - idleMs)])).rows[0];
+        AND u.deleted_at IS NULL AND (NOT u.mfa_habilitado OR s.mfa_verified_at IS NOT NULL)
+        AND (u.papel_plataforma<>'administrador' OR s.mfa_verified_at IS NOT NULL)`, [tokenHash, now, new Date(now.getTime() - idleMs)])).rows[0];
       if (!r) throw invalidSession();
       await c.query('UPDATE auth_sessions SET last_seen_at=$2 WHERE id=$1 AND revoked_at IS NULL', [r.session_id, now]);
       return { user: publicUser(r), sessionId: r.session_id, audience: 'customer' };
     });
   }
-  logout({ userId, sessionId, now }) {
-    return withIdentityTransaction(this.pool, { usuarioId: userId }, async ({ client }) => {
+  logout({ userId, sessionId, now, idleMs }) {
+    return withCustomerTransaction(this.pool, { usuarioId: userId, sessionId, now, idleMs }, async ({ client }) => {
       await client.query(
       "UPDATE auth_sessions SET revoked_at=$3 WHERE id=$1 AND usuario_id=$2 AND audience='customer'", [sessionId, userId, now],
       );
       await this.#audit(client, userId, 'account.logout');
     });
   }
-  updateProfile({ userId, name }) {
-    return withIdentityTransaction(this.pool, { usuarioId: userId }, async ({ client: c }) => {
+  updateProfile({ userId, sessionId, name, now, idleMs }) {
+    return withCustomerTransaction(this.pool, { usuarioId: userId, sessionId, now, idleMs }, async ({ client: c }) => {
       const user = publicUser((await c.query('UPDATE usuarios SET nome=$2 WHERE id=$1 RETURNING *', [userId, name])).rows[0]);
       await this.#audit(c, userId, 'account.profile.changed');
       return user;
     });
   }
-  changePassword({ userId, previousHash, passwordHash, mail, now }) {
+  changePassword({ userId, sessionId, previousHash, passwordHash, mail, now, idleMs = 3600_000 }) {
     return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {
       const user = (await c.query('SELECT * FROM usuarios WHERE id=$1 FOR UPDATE', [userId])).rows[0];
       if (!user || user.password_hash !== previousHash || user.status !== 'ativo' || user.deleted_at) throw invalidSession();
+      const session = await c.query(`SELECT id FROM auth_sessions WHERE id=$1 AND usuario_id=$2
+        AND audience='customer' AND revoked_at IS NULL AND expires_at>$3 AND last_seen_at>$4
+        AND security_version=$5 AND ($6::boolean=false OR mfa_verified_at IS NOT NULL)`,
+        [sessionId,userId,now,new Date(now.getTime()-idleMs),user.security_version,
+          user.mfa_habilitado || user.papel_plataforma==='administrador']);
+      if (!session.rowCount) throw invalidSession();
       await this.#password(c, userId, passwordHash, now);
       await this.#queue(c, userId, mail);
       await this.#audit(c, userId, 'account.password.changed');
     });
   }
-  listCompanies(userId) {
-    return withIdentityTransaction(this.pool, { usuarioId: userId }, async ({ client: c }) => (await c.query(`
-      SELECT e.id,e.nome,e.status,(o.usuario_id=$1) owner FROM empresas e
+  listCompanies(userId, { sessionId, now = new Date(), idleMs = 3600_000 } = {}) {
+    return withCustomerTransaction(this.pool, { usuarioId: userId, sessionId, now, idleMs }, async ({ client: c }) => (await c.query(`
+      SELECT e.id,e.nome AS name,e.status,m.status AS "membershipStatus",m.permissoes AS permissions FROM empresas e
       JOIN usuarios_empresas m ON m.empresa_id=e.id AND m.usuario_id=$1 AND m.status='ativo'
-      LEFT JOIN company_owners o ON o.empresa_id=e.id AND o.usuario_id=$1
-      WHERE e.deleted_at IS NULL ORDER BY e.created_at,e.id LIMIT 100`, [userId])).rows.map(company));
+      WHERE e.deleted_at IS NULL AND e.status<>'arquivada' ORDER BY e.created_at,e.id LIMIT 100`, [userId])).rows);
   }
   createCompany({ userId, name, key, payloadHash, limit, now }) {
     return withPlatformTransaction(this.pool, {}, async ({ client: c }) => {

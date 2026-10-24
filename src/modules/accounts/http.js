@@ -1,5 +1,6 @@
 import express from 'express';
 import { AccountError } from './errors.js';
+import { customerProvisioningDenied } from './account-service.js';
 
 export const CUSTOMER_COOKIE = 'waia_customer_session';
 function token(request) {
@@ -7,6 +8,7 @@ function token(request) {
   return part?.slice(CUSTOMER_COOKIE.length + 1) || null;
 }
 const route = (fn) => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
+const provisionDenied = (_req, _res, next) => next(customerProvisioningDenied());
 
 export function createAccountRouter({ service, secure = true }) {
   const router = express.Router();
@@ -18,14 +20,20 @@ export function createAccountRouter({ service, secure = true }) {
     }
     next();
   });
-  router.post('/register', route(async (req, res) => res.status(202).json(await service.register(req.body, req.ip))));
+  router.post('/register', provisionDenied);
+  router.use(['/invitations', '/ownership'], provisionDenied);
   router.post('/email/resend', route(async (req, res) => res.status(202).json(await service.requestToken(req.body, 'verify', req.ip))));
   router.post('/password/forgot', route(async (req, res) => res.status(202).json(await service.requestToken(req.body, 'reset', req.ip))));
   router.post('/email/verify', route(async (req, res) => { await service.verify(req.body, req.ip); res.sendStatus(204); }));
   router.post('/password/reset', route(async (req, res) => { await service.reset(req.body, req.ip); res.clearCookie(CUSTOMER_COOKIE, options); res.sendStatus(204); }));
   router.post('/login', route(async (req, res) => {
     const result = await service.login(req.body, req.ip, token(req));
+    if(result.mfaRequired) return res.status(202).json(result);
     res.cookie(CUSTOMER_COOKIE, result.token, options).json({ user: result.user, csrfToken: result.csrfToken });
+  }));
+  router.post('/mfa/login',route(async(req,res)=>{
+    const result=await service.completeMfa(req.body,req.ip);
+    res.cookie(CUSTOMER_COOKIE,result.token,options).json({user:result.user,csrfToken:result.csrfToken,recoveryCodes:result.recoveryCodes});
   }));
   router.use(async (req, _res, next) => {
     try {
@@ -37,6 +45,13 @@ export function createAccountRouter({ service, secure = true }) {
     } catch (e) { next(e); }
   });
   router.get('/session', route(async (req, res) => res.json({ user: req.customer.user, csrfToken: service.codec.csrf(token(req)) })));
+  router.get('/sessions',route(async(req,res)=>res.json({sessions:await service.security.sessions(req.customer)})));
+  router.delete('/sessions/:id',route(async(req,res)=>{if(!/^[\da-f-]{36}$/i.test(req.params.id)) throw new AccountError('VALIDATION_ERROR',422,'Sessão inválida.');await service.security.revoke(req.customer,req.params.id);res.sendStatus(204);}));
+  router.post('/mfa/setup',route(async(req,res)=>res.json(await service.security.setup(req.customer,req.body?.password,req.ip))));
+  router.post('/mfa/confirm',route(async(req,res)=>res.json(await service.security.complete({auth:req.customer,challenge:req.body?.challenge,code:req.body?.code,audience:'customer',purpose:'enroll',ip:req.ip}))));
+  router.post('/reauthenticate',route(async(req,res)=>{await service.security.reauthenticate(req.customer,{password:req.body?.password,code:req.body?.code},req.ip);res.sendStatus(204);}));
+  router.post('/mfa/recovery',route(async(req,res)=>res.json(await service.security.manage(req.customer,'codes'))));
+  router.post('/mfa/disable',route(async(req,res)=>{await service.security.manage(req.customer,'disable');res.clearCookie(CUSTOMER_COOKIE,options);res.sendStatus(204);}));
   router.post('/logout', route(async (req, res) => { await service.logout(req.customer); res.clearCookie(CUSTOMER_COOKIE, options); res.sendStatus(204); }));
   router.patch('/profile', route(async (req, res) => res.json({ user: await service.profile(req.customer, req.body) })));
   router.post('/password/change', route(async (req, res) => {
@@ -49,6 +64,8 @@ export function createAccountRouter({ service, secure = true }) {
 
 export function createCustomerRouter({ service }) {
   const router = express.Router();
+  router.post('/companies', provisionDenied);
+  router.use('/companies/:empresaId/team', provisionDenied);
   router.use(async (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -63,10 +80,6 @@ export function createCustomerRouter({ service }) {
   });
   router.get('/companies', route(async (req, res) => res.json({ companies: await service.companies(req.customer) })));
   router.get('/companies/:empresaId', route(async (req, res) => res.json(await service.company(req.customer, req.params.empresaId))));
-  router.post('/companies', route(async (req, res) => {
-    await service.rate('company-create', req.customer.user.id, req.ip, 20);
-    res.status(201).json(await service.createCompany(req.customer, req.body, req.get('idempotency-key')));
-  }));
   router.use(accountErrors);
   return router;
 }

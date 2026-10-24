@@ -3,8 +3,8 @@ import test from "node:test";
 import { AdminService, MemoryAdminRepository } from "../src/modules/admin/index.js";
 
 const NOW = new Date("2026-09-02T18:00:00.000Z");
-const admin = { user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
-const operator = { user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
+const admin = { audience: 'admin', user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
+const operator = { audience: 'admin', user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
 
 function setup() {
   const calls = [];

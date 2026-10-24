@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **23/10/2026**. Estado: **M0 concluída localmente**, M1–M10 planejadas. Branch: **`new`**, criada de `dev`, HEAD `3b8a295` / v1.23.1, preservando alterações locais. Candidata M0: **v1.23.3**, sem commit/push. **2.0.0 é a entrega futura**. Evidências e ambiente: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md).
+Atualizado em **23/10/2026**. Estado: **M0 commitada localmente, M1 concluída localmente**, M2–M10 planejadas. Branch **`new`**, HEAD **89d46af / v1.23.3** (M0); candidata M1 **v1.24.0**, sem novo commit/push/deploy. Base de origem `3b8a295` / v1.23.1, com alterações anteriores preservadas. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md) e [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -38,9 +38,9 @@ Inventário inicial por leitura do checkout em 23/10/2026, anterior à M0 e sem 
 
 Referências locais: `dev`/HEAD de origem `3b8a295514bfe75884d82e2e9238a76475783dc2`; `main` local `707a46d` / v1.10.6. Não equivalem a verificação remota ou de produção. `new` parte do mesmo commit; alterações não commitadas acompanham o checkout e não ficam isoladas somente pela criação da branch.
 
-Trabalho preexistente preservado: equipe/MFA em `023_team_and_mfa.sql` não rastreada, `team-service.js`, `identity-security.js`, `totp.js`, `portal/security-team.js` e alterações em auth/accounts/panel/bootstrap/testes; registros pós-deploy em documentos e `.tmp/`. A parte de equipe/propriedade/credenciais para cliente conflita com o pedido atual. Revisar e aproveitar somente o necessário, sem resetar nem publicar por arrasto.
+Trabalho preexistente no inventário inicial: equipe/MFA em `023_team_and_mfa.sql`, então não rastreada, `team-service.js`, `identity-security.js`, `totp.js`, `portal/security-team.js` e alterações em auth/accounts/panel/bootstrap/testes; registros pós-deploy em documentos e `.tmp/`. M0 versionou somente o schema 023 caracterizado; M1 incorporou segurança pessoal/MFA necessária e bloqueou equipe/propriedade cliente. Demais alterações preservadas, sem reset ou publicação por arrasto.
 
-Lacunas críticas confirmadas: login administrativo aceita perfis de empresa no legado; `tenant_admin` tem poderes técnicos; rotas de register/criação de empresa estão abertas quando contas são habilitadas; RLS por contexto não prova vínculo ativo; o update administrativo genérico de usuário precisa delegar a um serviço que invalide sessões após mudanças de segurança.
+Lacunas críticas do inventário inicial, tratadas na M1: login administrativo de perfis de empresa, poderes técnicos herdados, autoprovisionamento, falta de verificação de vínculo e mutação de segurança sem revogação uniforme. Contratos, testes e limites do fechamento em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md).
 
 ## 3. Jornadas e telas
 
@@ -190,7 +190,7 @@ Modelo:
 - V2/revisões: uma fonte para admin/cliente, projeção por campo, controle otimista e autoria; sem cópia de prompt.
 - Auditoria: provisionamento, vínculo, redução de capacidade, recuperação/revogação e publicação; sem secret em logs.
 
-Migrações sempre aditivas; nunca editar conteúdo aplicado. **023 é trabalho local não versionado**, com 024–026 existentes. O runner ordena pelo nome e aplica qualquer faltante: pode aplicar 023 depois de 026. Inventariar ledger/checksums antes de incorporar/renumerar; não presumir que 023 nunca foi aplicada em outro alvo. Testar banco vazio e baseline sintética com 024–026 e sem 023. Nenhuma migração cadastra empresas fictícias.
+Migrações sempre aditivas; nunca editar conteúdo aplicado. **023 foi caracterizada e versionada na M0**; M1 acrescentou a **027**. O runner ordena por nome e aplica faltantes: no upgrade histórico 001–022+024–026, aplica 023 antes da 027. Inventariar ledger/checksums; não renumerar nem presumir que 023 nunca foi aplicada em outro alvo. Banco vazio e baseline histórica sintética foram testados. Nenhuma migração cadastra empresas fictícias.
 
 ## 8. Separação de ambientes e dataset fictício
 
@@ -244,15 +244,17 @@ Para cada fase de implementação autorizada:
 5. Principal integra, resolve divergências, verifica o resultado e solicita revisão independente do diff final. Achado crítico/alto de acesso ou perda de dados impede fechamento.
 6. Relatório registra revisão dos subagentes, achados resolvidos, evidência e limites; declaração do agente não substitui teste/aceite.
 
-Antes de commit: apresentar arquivos, resultados, versão e mensagem e aguardar confirmação explícita. Depois da confirmação, commit/push **da `new`**, não da `dev` por padrão. Próxima fase, promoção e publicação exigem autorização própria.
+Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates validados, apresentar arquivos, resultados, versão e mensagem e fazer commit **local na `new`**. Push não é automático. Próxima fase, push, promoção e publicação exigem autorização própria.
 
 ## 11. Etapas detalhadas M0–M10
 
-M0 tem gate técnico local concluído; M1–M10 permanecem planejadas e dependem de autorização por etapa. Branch/documentação isoladas não concluem M0. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0 tem commit local e M1 tem gate técnico local concluído; M2–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
 Estado em 23/10/2026: concluída localmente, candidata 1.23.3, sem commit/push/deploy. Baseline 605 testes (583 pass/22 skips), integrações selecionadas 30/30, auditoria zero, schema vazio/upgrade tardio 023 e isolamento comprovados. Inventário, revisão independente e limites em [M0_AMBIENTE.md](docs/M0_AMBIENTE.md). CI preparada, execução remota ainda não realizada.
+
+Após autorização, M0 commitada somente localmente em **89d46af**. O snapshot selecionado, sem incorporar o produto anterior de equipe, passou em 580 testes/21 skips e 17 integrações; distinção de conjuntos registrada no runbook.
 
 - Registrar branch/HEAD/versão/diff e separar alterações preexistentes do escopo de cada fase; não incluir `.tmp/` inteira em commit.
 - Reproduzir unitários/sintaxe em Node 22 e documentar falhas/skips prévios; identificar dependências da 023/equipe/MFA.
@@ -263,6 +265,8 @@ Estado em 23/10/2026: concluída localmente, candidata 1.23.3, sem commit/push/d
 **Gate:** baseline reproduzível, isolamento comprovado e inventário/estratégia de schema aprovados, sem dado real alterado. Subagentes: segurança e operação.
 
 ### M1 — identidade e autorização
+
+Estado em 23/10/2026: concluída localmente, candidata 1.24.0, sem novo commit/push/deploy. Baseline 600 pass/22 skips; 28 integrações reais aprovadas, auditoria zero e schema 27/upgrade histórico equivalentes. Revisões e limites em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md). M2 não iniciada.
 
 - Catálogo único de capacidades por vínculo e verificação em rotas/serviços; negar poderes técnicos ao customer, inclusive owner.
 - Bloquear audience admin para clientes; preservar perímetro/login/MFA do administrador geral.

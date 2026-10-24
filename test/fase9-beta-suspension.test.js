@@ -386,12 +386,13 @@ function createApiFixture() {
   });
   let betaId = null;
   const authFor = (role) => {
-    if (role === "platform") return { user: { id: "platform-phase9" }, platformRole: "platform_admin", memberships: [] };
+    if (role === "platform") return { audience: 'admin', user: { id: "platform-phase9" }, platformRole: "platform_admin", memberships: [] };
     if (!betaId) throw new Error("A Beta precisa existir antes da autenticação tenant-scoped.");
     if (role === "beta-admin") {
-      return { user: { id: "beta-admin-phase9" }, memberships: [{ empresaId: betaId, role: "tenant_admin", permissions: [] }] };
+      return { audience: 'admin', user: { id: "beta-admin-phase9" }, memberships: [{ empresaId: betaId, role: "tenant_admin", permissions: [] }] };
     }
     return {
+      audience: 'admin',
       user: { id: "beta-operator-phase9" },
       memberships: [{
         empresaId: betaId,

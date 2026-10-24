@@ -21,8 +21,8 @@
 - Verificações proporcionais ao risco, com resultados e limites claros. Não declarar integrações reais comprovadas por testes em memória.
 - Ao final de cada alteração, atualizar `package.json` e `package-lock.json`: patch para correção/documentação, minor para capacidade compatível, major para quebra deliberada de contrato.
 - A versão alvo 2.0.0 só é entrega quando seus gates estiverem cumpridos; não antecipar versão estável por planejamento ou implementação parcial.
-- Antes de cada commit, apresentar arquivos, validações, versão e mensagem, e aguardar confirmação explícita.
-- Após confirmação, fazer commit com versão no título e push de `dev`; aguardar nova confirmação antes da próxima fase. Promoção de main/deploy seguem autorização específica.
+- Ao encerrar cada fase autorizada com os gates validados, apresentar arquivos, validações, versão e mensagem e fazer o commit local com versão no título, conforme padrão autorizado pelo usuário em 24/10/2026. Não incluir alterações preexistentes alheias à fase.
+- Não fazer push automaticamente. Push, promoção de main e deploy exigem autorização específica; aguardar nova autorização antes da próxima fase. Usar a branch indicada no plano ativo (atualmente `new` para M0–M10).
 
 ## Aprendizado de preferências
 

@@ -19,6 +19,7 @@ docs/*
 !docs/ESPERA_RESPOSTAS_IA.md
 !docs/NOTIFICACOES_GRUPOS.md
 !docs/M0_AMBIENTE.md
+!docs/M1_IDENTIDADE.md
 RELATORIO.md
 AGENTS.md
 package-lock.json

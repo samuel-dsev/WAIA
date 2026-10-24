@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from '../auth/password.js';
 import { encryptCredentialSecret, decryptCredentialSecret } from '../../security/credential-crypto.js';
 import { AccountError, invalidSession } from './errors.js';
+import { effectiveCustomerCapabilities } from '../auth/permissions.js';
+
+export const customerProvisioningDenied = () => new AccountError('ADMIN_PROVISIONING_REQUIRED', 403,
+  'Solicite ao administrador WAIA a liberação ou alteração do acesso.');
 
 const email = z.string().trim().toLowerCase().email().max(254);
 const name = z.string().trim().min(2).max(160);
@@ -24,7 +28,8 @@ const binding = (id) => ({ empresaId: 'platform-accounts', credentialId: id, pro
 
 export class AccountService {
   constructor({ repository, codec, keyring, limiter, origin, clock = () => new Date(), companyLimit = 1,
-    sessionMs = 12 * 3600_000, idleMs = 3600_000, verifyMs = 24 * 3600_000, resetMs = 30 * 60_000 }) {
+    sessionMs = 12 * 3600_000, idleMs = 3600_000, verifyMs = 24 * 3600_000, resetMs = 30 * 60_000, security = null, team = null }) {
+    Object.assign(this, { security, team });
     Object.assign(this, { repository, codec, keyring, limiter, origin, clock, companyLimit, sessionMs, idleMs, verifyMs, resetMs });
     if (new URL(origin).origin !== origin || !Number.isInteger(companyLimit) || companyLimit < 1) throw new Error('Configuração de contas inválida.');
     for (const n of [sessionMs, idleMs, verifyMs, resetMs]) if (!Number.isSafeInteger(n) || n < 60_000) throw new Error('Prazo de conta inválido.');
@@ -61,12 +66,7 @@ export class AccountService {
     finally { await delay(Math.max(0, 250 - (Date.now() - start))); }
   }
   async register(body, ip) {
-    const input = this.parse('register', body);
-    await this.rate('register', input.email, ip);
-    return this.#neutral(async () => {
-      const passwordHash = await hashPassword(input.password);
-      await this.repository.register({ ...input, userId: randomUUID(), passwordHash, ...this.#token(input.email, 'verify') });
-    });
+    throw customerProvisioningDenied();
   }
   async requestToken(body, purpose, ip) {
     const input = this.parse('email', body);
@@ -94,7 +94,10 @@ export class AccountService {
     const u = await this.repository.findCredentials(input.email);
     const valid = await verifyPassword(input.password, u?.password_hash || DUMMY_PASSWORD_HASH);
     if (!u || !valid || u.status !== 'ativo') throw new AccountError('INVALID_CREDENTIALS', 401, 'E-mail ou senha inválidos.');
-    // MFA sera entregue na F2; nunca permitir bypass em conta ja protegida.
+    if (this.security) {
+      const challenge = await this.security.login({userId:u.id,passwordHash:u.password_hash,audience:'customer'});
+      if (challenge) return challenge;
+    }
     if (u.mfa_habilitado) throw new AccountError('MFA_REQUIRED', 403, 'Esta conta requer autenticação adicional. Procure o suporte.');
     const issued = this.codec.issue();
     const user = await this.repository.login({ userId: u.id, passwordHash: u.password_hash, tokenHash: issued.tokenHash,
@@ -106,27 +109,42 @@ export class AccountService {
     if (!tokenHash) throw invalidSession();
     return this.repository.authenticate({ tokenHash, now: this.clock(), idleMs: this.idleMs });
   }
-  logout(auth) { return this.repository.logout({ userId: auth.user.id, sessionId: auth.sessionId, now: this.clock() }); }
-  profile(auth, body) { return this.repository.updateProfile({ userId: auth.user.id, ...this.parse('profile', body) }); }
+  async completeMfa(body, ip) {
+    const result = await this.security.complete({challenge:body?.challenge,code:body?.code,ip,audience:'customer'});
+    const auth = await this.authenticate(result.issued.token);
+    return {user:auth.user,token:result.issued.token,csrfToken:result.issued.csrfToken,recoveryCodes:result.recoveryCodes};
+  }
+  logout(auth) { return this.repository.logout({ userId: auth.user.id, sessionId: auth.sessionId, now: this.clock(), idleMs: this.idleMs }); }
+  profile(auth, body) { return this.repository.updateProfile({ userId: auth.user.id, sessionId: auth.sessionId,
+    now: this.clock(), idleMs: this.idleMs, ...this.parse('profile', body) }); }
   async changePassword(auth, body) {
     const input = this.parse('change', body);
     const u = await this.repository.findCredentials(auth.user.email);
     if (!u || u.id !== auth.user.id || !await verifyPassword(input.currentPassword, u.password_hash)) throw invalidSession();
-    await this.repository.changePassword({ userId: u.id, previousHash: u.password_hash, passwordHash: await hashPassword(input.password),
-      mail: this.#mail({ email: u.email, purpose: 'password_changed' }), now: this.clock() });
+    await this.repository.changePassword({ userId: u.id, sessionId: auth.sessionId,
+      previousHash: u.password_hash, passwordHash: await hashPassword(input.password),
+      mail: this.#mail({ email: u.email, purpose: 'password_changed' }), now: this.clock(), idleMs: this.idleMs });
   }
-  companies(auth) { return this.repository.listCompanies(auth.user.id); }
+  async companies(auth) {
+    const companies = await this.repository.listCompanies(auth.user.id,
+      { sessionId: auth.sessionId, now: this.clock(), idleMs: this.idleMs });
+    return companies.filter((company) => ['ativo', 'active'].includes(company.membershipStatus)).map((company) => ({
+      id: company.id, name: company.name, status: company.status,
+      effectiveCapabilities: effectiveCustomerCapabilities({
+        status: company.membershipStatus, permissions: company.permissions,
+        enabledCapabilities: company.enabledCapabilities, companyStatus: company.status,
+      }),
+    }));
+  }
   async company(auth, id) {
     if (!z.string().uuid().safeParse(id).success) throw new AccountError('COMPANY_NOT_FOUND', 404, 'Empresa não encontrada.');
     const found = (await this.companies(auth)).find((c) => c.id === id);
     if (!found) throw new AccountError('COMPANY_NOT_FOUND', 404, 'Empresa não encontrada.');
+    if (!found.effectiveCapabilities.includes('attendance.read')) throw new AccountError('ACCESS_DENIED', 403, 'Você não tem permissão para esta operação.');
     return found;
   }
-  createCompany(auth, body, key) {
-    const input = this.parse('company', body);
-    if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(key)) throw new AccountError('IDEMPOTENCY_KEY_REQUIRED', 422, 'Reenvie a solicitação com uma chave válida.');
-    return this.repository.createCompany({ userId: auth.user.id, ...input, key, payloadHash: digest(JSON.stringify(input)).toString('hex'),
-      limit: this.companyLimit, now: this.clock() });
+  async createCompany(auth, body, key) {
+    throw customerProvisioningDenied();
   }
   async deliverNext(transport) {
     const mail = await this.repository.claimMail(this.clock());

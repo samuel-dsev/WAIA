@@ -300,6 +300,7 @@ test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { 
 
     const service = new AdminService({ repository: new PostgresAdminRepository(appPool) });
     const auth = {
+      audience: 'admin',
       user: { id: operatorId },
       memberships: [{ empresaId, role: "tenant_operator", permissions: [] }],
     };
@@ -428,6 +429,7 @@ test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { 
       [empresaId, operatorId],
     );
     const adminAuth = {
+      audience: 'admin',
       user: { id: operatorId },
       memberships: [{ empresaId, role: "tenant_admin", permissions: [] }],
     };

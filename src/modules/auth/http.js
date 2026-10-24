@@ -2,6 +2,7 @@ import express from "express";
 import { AuthError, AuthenticationRequiredError, AuthorizationDeniedError } from "./errors.js";
 import { authErrorResponse, publicPrincipal } from "./auth-service.js";
 import { requirePermission } from "./permissions.js";
+import { AccountError } from '../accounts/errors.js';
 
 export const SESSION_COOKIE = "waia_session";
 export const CSRF_COOKIE = "waia_csrf";
@@ -19,6 +20,11 @@ function cookies(header = "") {
 }
 
 function sessionToken(request) { return cookies(request.headers.cookie)[SESSION_COOKIE] || null; }
+function strictBody(body, fields) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !fields.includes(key))) {
+    throw new AuthorizationDeniedError();
+  }
+}
 
 export function sessionCookieOptions({ secure = false, maxAgeMs = 12 * 60 * 60_000 } = {}) {
   return { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: maxAgeMs };
@@ -56,8 +62,15 @@ export function createAuthRouter({ authService, secureCookies = false, sessionTt
   const cookieOptions = sessionCookieOptions({ secure: secureCookies, maxAgeMs: sessionTtlMs });
   const authenticate = createAuthMiddleware({ authService });
   const csrf = requireCsrf({ authService });
+  router.use((req,res,next)=>{
+    res.set('Cache-Control','no-store');
+    if(req.path.startsWith('/mfa/') && req.get('origin') && req.get('origin')!==`${req.protocol}://${req.get('host')}`)
+      return next(new AuthorizationDeniedError());
+    next();
+  });
   router.post("/login", async (request, response, next) => {
     try {
+      strictBody(request.body, ['email','password']);
       const result = await authService.login({
         email: request.body?.email,
         password: request.body?.password,
@@ -65,14 +78,25 @@ export function createAuthRouter({ authService, secureCookies = false, sessionTt
         userAgent: request.get("user-agent"),
         existingSessionToken: sessionToken(request),
       });
+      if(result.mfaRequired) return response.status(202).json(result);
       response.cookie(SESSION_COOKIE, result.credentials.sessionToken, cookieOptions);
       response.cookie(CSRF_COOKIE, result.credentials.csrfToken, { ...cookieOptions, httpOnly: false });
       response.status(200).json({ ...publicPrincipal(result.principal), csrfToken: result.credentials.csrfToken });
     } catch (error) { next(error); }
   });
   router.get("/session", authenticate, (request, response) => response.json(publicPrincipal(request.auth)));
+  router.post('/mfa/login', async(request,response,next)=>{
+    try {
+      strictBody(request.body, ['challenge','code']);
+      const result=await authService.completeMfa({challenge:request.body?.challenge,code:request.body?.code,ip:request.ip});
+      response.cookie(SESSION_COOKIE,result.credentials.sessionToken,cookieOptions);
+      response.cookie(CSRF_COOKIE,result.credentials.csrfToken,{...cookieOptions,httpOnly:false});
+      response.set('Cache-Control','no-store').json({...publicPrincipal(result.principal),csrfToken:result.credentials.csrfToken,recoveryCodes:result.recoveryCodes});
+    } catch(e) {next(e);}
+  });
   router.post("/password", authenticate, csrf, async (request, response, next) => {
     try {
+      strictBody(request.body, ['currentPassword','newPassword']);
       await authService.changePassword({
         sessionId: request.auth.sessionId,
         userId: request.auth.user.id,
@@ -95,6 +119,7 @@ export function createAuthRouter({ authService, secureCookies = false, sessionTt
 }
 
 export function authErrorMiddleware(error, _request, response, next) {
+  if(error instanceof AccountError) return response.status(error.status).json({error:error.code,message:error.message});
   if (!(error instanceof AuthError)) return next(error);
   response.status(error.status).json(authErrorResponse(error));
 }

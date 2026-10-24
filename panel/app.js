@@ -330,6 +330,11 @@ function normalizedSession(payload) {
 }
 
 function showLogin(message = "") {
+  document.getElementById('mfaLoginForm').hidden=true;
+  document.getElementById('mfaLoginSecret').textContent='';
+  document.getElementById('mfaRecoveryCodes').textContent='';
+  document.getElementById('mfaRecovery').hidden=true;
+  elements.loginForm.hidden=false;
   stopRefresh();
   state.onboardingWizard?.abort?.();
   state.onboardingWizard = null;
@@ -1556,6 +1561,28 @@ function stopRefresh() {
   state.refreshTimer = null;
 }
 
+let pendingAdminChallenge=null;
+const mfaElement=id=>document.getElementById(id);
+async function finishAdminLogin(payload) {
+  state.session=normalizedSession(payload);
+  await loadTenants(payload?.tenants);showApp();await navigate('dashboard');
+}
+mfaElement('mfaLoginForm').addEventListener('submit',async event=>{
+  event.preventDefault();const submit=event.submitter;submit.disabled=true;
+  try {
+    const payload=await apiFetch('/auth/mfa/login',{method:'POST',body:{challenge:pendingAdminChallenge,code:mfaElement('mfaLoginCode').value}});
+    pendingAdminChallenge=null;mfaElement('mfaLoginCode').value='';mfaElement('mfaLoginSecret').textContent='';mfaElement('mfaLoginForm').hidden=true;
+    state.session=normalizedSession(payload);
+    if(payload.recoveryCodes){mfaElement('mfaRecoveryCodes').textContent=payload.recoveryCodes.join('\n');mfaElement('mfaRecovery').hidden=false;}
+    else await finishAdminLogin(payload);
+  }catch(error){mfaElement('mfaLoginError').hidden=false;mfaElement('mfaLoginError').textContent=error.message||'Não foi possível confirmar o código.';}
+  finally{submit.disabled=false;}
+});
+mfaElement('mfaRecoveryDone').addEventListener('click',async()=>{
+  mfaElement('mfaRecoveryCodes').textContent='';mfaElement('mfaRecovery').hidden=true;
+  try{await loadTenants();showApp();await navigate('dashboard');}catch(error){showLogin(error.message);}
+});
+mfaElement('mfaLoginCancel').addEventListener('click',()=>{pendingAdminChallenge=null;mfaElement('mfaLoginSecret').textContent='';mfaElement('mfaLoginCode').value='';mfaElement('mfaLoginForm').hidden=true;elements.loginForm.hidden=false;showLogin();});
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   elements.loginEmailError.textContent = elements.loginEmail.validity.valid ? "" : "Informe um e-mail válido.";
@@ -1569,8 +1596,13 @@ elements.loginForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: { email: elements.loginEmail.value.trim(), password: elements.loginPassword.value },
     });
-    state.session = normalizedSession(payload);
     elements.loginPassword.value = "";
+    if(payload.mfaRequired){
+      pendingAdminChallenge=payload.challenge;elements.loginForm.hidden=true;mfaElement('mfaLoginForm').hidden=false;
+      mfaElement('mfaLoginHint').textContent=payload.enrollment?'Adicione a chave abaixo ao seu aplicativo autenticador (TOTP) e confirme o código.':'Informe seu código do aplicativo ou um código de recuperação.';
+      mfaElement('mfaLoginSecret').textContent=payload.enrollment?.secret||'';mfaElement('mfaLoginError').hidden=true;mfaElement('mfaLoginCode').focus();return;
+    }
+    state.session = normalizedSession(payload);
     await loadTenants(payload?.tenants);
     showApp();
     await navigate("dashboard");

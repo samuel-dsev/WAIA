@@ -13,16 +13,12 @@ function normalizeEmail(value) {
   return email;
 }
 
-function cleanUserAgent(value) {
-  return String(value || "").replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 500) || null;
-}
-
 function canonicalPlatformRole(value) {
   return value === "platform_admin" || value === "administrador" ? "platform_admin" : null;
 }
 
 function canonicalMembership(value) {
-  if (!value || value.status === "suspended" || value.status === "suspenso") return null;
+  if (!value || !["active", "ativo"].includes(value.status)) return null;
   const role = value.role === "tenant_admin" || value.role === "administrador"
     ? "tenant_admin"
     : value.role === "tenant_operator" || value.role === "operador" ? "tenant_operator" : null;
@@ -30,6 +26,8 @@ function canonicalMembership(value) {
   return Object.freeze({
     empresaId: String(value.empresaId),
     role,
+    status: 'active',
+    companyStatus: value.companyStatus || null,
     permissions: Object.freeze(Array.isArray(value.permissions) ? [...new Set(value.permissions.map(String))] : []),
   });
 }
@@ -37,6 +35,7 @@ function canonicalMembership(value) {
 function principalFrom(user, memberships, session) {
   return Object.freeze({
     sessionId: session.id,
+    audience: 'admin',
     user: Object.freeze({ id: user.id, email: user.email, name: user.name }),
     platformRole: canonicalPlatformRole(user.platformRole),
     memberships: Object.freeze((memberships || []).map(canonicalMembership).filter(Boolean)),
@@ -60,6 +59,7 @@ export class AuthService {
     sessionTtlMs = 12 * 60 * 60 * 1_000,
     dummyPasswordHash = DUMMY_PASSWORD_HASH,
     clock = () => new Date(),
+    security = null,
   } = {}) {
     for (const method of [
       "findUserByEmail", "listMemberships", "createSession", "findSessionByTokenHash",
@@ -78,6 +78,7 @@ export class AuthService {
     this.sessionTtlMs = sessionTtlMs;
     this.dummyPasswordHash = dummyPasswordHash;
     this.clock = clock;
+    this.security = security;
   }
 
   async login({ email: emailInput, password, ip = null, userAgent = null, existingSessionToken = null } = {}) {
@@ -111,7 +112,7 @@ export class AuthService {
 
     const user = await this.repository.findUserByEmail(email);
     const passwordValid = await verifyPassword(password, user?.passwordHash || this.dummyPasswordHash);
-    if (!user || !passwordValid || user.status !== "active") {
+    if (!user || !passwordValid || user.status !== "active" || canonicalPlatformRole(user.platformRole) !== 'platform_admin') {
       await this.#audit("auth.login_failed", {
         actorUserId: user?.id || null,
         result: "denied",
@@ -122,46 +123,26 @@ export class AuthService {
       throw new InvalidCredentialsError();
     }
 
-    const now = this.clock();
-    const expiresAt = new Date(now.getTime() + this.sessionTtlMs);
-    const issued = this.tokenCodec.issue();
-    if (existingSessionToken) {
-      const oldHash = this.tokenCodec.hash(existingSessionToken);
-      if (oldHash) await this.repository.revokeByTokenHash(oldHash, { revokedAt: now, reason: "rotated_on_login" });
-    }
-    const session = await this.repository.createSession({
-      userId: user.id,
-      tokenHash: issued.tokenHash,
-      ip,
-      userAgent: cleanUserAgent(userAgent),
-      createdAt: now,
-      expiresAt,
-    });
-    const memberships = await this.repository.listMemberships(user.id);
-    const principal = principalFrom(user, memberships, session);
-    await this.#audit("auth.login_succeeded", {
-      actorUserId: user.id,
-      result: "success",
-      ip,
-      details: { sessionId: session.id },
-    });
-    return Object.freeze({
-      principal,
-      credentials: Object.freeze({
-        sessionToken: issued.token,
-        csrfToken: issued.csrfToken,
-        expiresAt,
-      }),
-    });
+    if (!this.security) throw new AuthenticationRequiredError();
+    const challenge = await this.security.login({ userId: user.id, passwordHash: user.passwordHash, audience: 'admin' });
+    if (!challenge?.mfaRequired) throw new AuthenticationRequiredError();
+    return challenge;
   }
 
   async authenticate(sessionToken) {
     const tokenHash = this.tokenCodec.hash(sessionToken);
     if (!tokenHash) throw new AuthenticationRequiredError();
     const found = await this.repository.findSessionByTokenHash(tokenHash, { now: this.clock() });
-    if (!found || found.user?.status !== "active") throw new AuthenticationRequiredError();
+    if (!found || found.user?.status !== "active" || canonicalPlatformRole(found.user.platformRole) !== 'platform_admin'
+      || !found.user.mfaEnabled || found.session?.audience !== 'admin' || !found.session.mfaVerifiedAt) throw new AuthenticationRequiredError();
     await this.repository.touchSession(found.session.id, { seenAt: this.clock() });
     return principalFrom(found.user, found.memberships, found.session);
+  }
+  async completeMfa({ challenge, code, ip } = {}) {
+    if(!this.security) throw new AuthenticationRequiredError();
+    const result=await this.security.complete({challenge,code,ip,audience:'admin',purpose:'login'});
+    const principal=await this.authenticate(result.issued.token);
+    return {principal,credentials:{sessionToken:result.issued.token,csrfToken:result.issued.csrfToken,expiresAt:result.session.expires_at},recoveryCodes:result.recoveryCodes};
   }
 
   verifyCsrf({ sessionToken, csrfToken }) {
@@ -183,7 +164,7 @@ export class AuthService {
     if (!sessionId || !userId) throw new AuthenticationRequiredError();
     const user = await this.repository.findUserById(userId);
     const currentValid = await verifyPassword(currentPassword, user?.passwordHash || this.dummyPasswordHash);
-    if (!user || user.status !== "active" || !currentValid) {
+    if (!user || user.status !== "active" || canonicalPlatformRole(user.platformRole) !== 'platform_admin' || !currentValid) {
       await this.#audit("auth.password_change_failed", {
         actorUserId: user?.id || userId,
         result: "denied",
@@ -208,13 +189,9 @@ export class AuthService {
       });
     }
     const changedAt = this.clock();
-    await this.repository.changePassword({ userId, passwordHash, keepSessionId: sessionId, changedAt });
-    await this.#audit("auth.password_changed", {
-      actorUserId: userId,
-      result: "success",
-      ip,
-      details: { sessionId, otherSessionsRevoked: true },
-    });
+    const changed = await this.repository.changePassword({ userId, expectedPasswordHash: user.passwordHash,
+      passwordHash, keepSessionId: sessionId, changedAt });
+    if (!changed) throw new AuthenticationRequiredError();
   }
 
   async #audit(action, event) {

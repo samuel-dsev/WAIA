@@ -56,7 +56,7 @@ async function preflightDevelopmentDatabase() {
   if (!tables) return;
   const files = await readSqlDirectory(fileURLToPath(new URL('../db/migrations/', import.meta.url)));
   const rows = (await owner.query('SELECT filename,checksum FROM schema_migrations')).rows;
-  assert.equal(rows.length, files.length);
+  assert.ok(rows.length === files.length || (rows.length === 26 && files.length === 27));
   for (const row of rows) assert.ok(files.find((file) => file.filename === row.filename)?.acceptedChecksums.has(row.checksum.trim()));
   await assertNoBusinessData();
 }
@@ -75,7 +75,7 @@ try {
   // Validate this third target BEFORE any migration or functional fixture writes.
   await preflightDevelopmentDatabase();
   run(['scripts/m0-schema-check.mjs']);
-  run(['--test', 'test/accounts-postgres.test.js',
+  run(['--test', 'test/accounts-postgres.test.js', 'test/team-postgres.test.js',
     'test/accounts-redis.test.js', 'test/redis-integration.test.js', 'test/ai-reply-delay-redis.test.js'], {
     ...process.env, DATABASE_URL: upgradeApp, DATABASE_MIGRATOR_URL: upgradeOwner,
     RUN_POSTGRES_INTEGRATION: 'true', RUN_REDIS_INTEGRATION: 'true',

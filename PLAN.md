@@ -10,17 +10,18 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 ## Estado e autorização
 
 - Em 23/10/2026, checkout confirmado em `dev`, HEAD `3b8a295` / v1.23.1. Criada a branch **`new`**, conforme pedido, sem commit, push, mudança de produção ou perda das alterações locais preexistentes.
-- M0 autorizada e concluída tecnicamente em 23/10/2026, candidata local v1.23.3. Baseline Node 22, isolamento v2 e schema/upgrade sintéticos verificados; detalhes e comandos em [M0_AMBIENTE.md](docs/M0_AMBIENTE.md). A versão 2.0.0 permanece futura; commit/push e M1 aguardam autorização própria.
+- M0 concluída e commitada somente localmente em **89d46af / v1.23.3**, após autorização. Snapshot exato: 580 pass/21 skips, 17 integrações aprovadas. Ambiente e comandos em [M0_AMBIENTE.md](docs/M0_AMBIENTE.md).
+- M1 autorizada e concluída localmente, candidata **v1.24.0**, sem novo commit/push/deploy. Baseline 600 pass/22 skips, 28 integrações aprovadas, schema 27 e revisões independentes. Detalhes/limites em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md). M2 aguarda autorização; 2.0.0 continua futura.
 - Novo escopo substitui o SaaS aberto previsto em setembro: sem signup público, criação de empresa/equipe pelo cliente, billing ou novos conectores nesta entrega.
-- Equipe/MFA e registros pós-deploy locais preservados. Dependências caracterizadas em M0; seleção funcional de incorporação em M1. Não considerá-los publicados ou aprovados por arrasto.
+- Equipe/MFA e registros pós-deploy locais preservados. M0 caracterizou o schema 023; M1 incorporou segurança pessoal/MFA necessária e bloqueou equipe cliente. Portal/equipe e demais registros anteriores não são aprovados por arrasto.
 - F0/F1 históricos e antigas F2–F9 não equivalem a estas novas etapas. Histórico/evidências em RELATORIO.md; detalhes únicos em WAIA_2.0.0.md.
 
 ## Sequência de execução
 
 | Etapa | Entrega | Gate principal | Estado |
 |---|---|---|---|
-| M0 | Baseline, isolamento, inventário e CI new | Alvo sintético isolado; 023 e trabalho local caracterizados | Concluída localmente; sem commit |
-| M1 | Identidade e autorização | Sem audience admin para cliente; revogação e bloqueio de signup | Planejada |
+| M0 | Baseline, isolamento, inventário e CI new | Alvo sintético isolado; 023 e trabalho local caracterizados | Commit local 89d46af |
+| M1 | Identidade e autorização | Sem audience admin para cliente; revogação e bloqueio de signup | Concluída localmente; candidata 1.24.0 |
 | M2 | Administração geral de acessos/vínculos | Cadastro N:N pelo painel, transacional e auditado | Planejada |
 | M3 | Login, lista e workspace | Zero/uma/várias empresas, troca segura e fictícios pelo painel | Planejada |
 | M4 | Edição do atendimento | DTO permitido, merge no servidor e conflito 409 | Planejada |
@@ -31,7 +32,7 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 | M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Planejada |
 | M10 | Aceite e entrega 2.0.0 | Definição de pronto, manuais e autorizações de publicação | Planejada |
 
-Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase de implementação a autorizar é **M1**.
+Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase de implementação a autorizar é **M2**.
 
 ## Regras de continuidade
 
@@ -41,7 +42,7 @@ Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagen
 - Migrações aditivas; verificar 023 antes de incorporar. Não editar migração aplicada.
 - Clientes configurados pelo painel, sem `.env`, SQL, seed, restart ou deploy por tenant.
 - Cada fase usa subagentes com revisão independente e dono único por arquivo quando houver escrita paralela.
-- Antes de commit: arquivos, validações, versão e mensagem; aguardar confirmação. Commit/push autorizado é da branch `new`; fase seguinte, integração de branches e deploy têm autorização própria.
+- Padrão autorizado em 24/10/2026: ao encerrar a fase validada, apresentar arquivos/validações/versão/mensagem e fazer commit local na `new`. Push, fase seguinte, integração de branches e deploy têm autorização própria.
 - Testes em memória não comprovam PostgreSQL/Redis/serviços reais. Evidenciar skips e limites.
 
 ## Decisões a fechar

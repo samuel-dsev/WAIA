@@ -1,4 +1,5 @@
 import { hashPassword } from "../auth/password.js";
+import { invalidateIdentitySecurity } from '../auth/identity-lifecycle.js';
 import { withPlatformTransaction, withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { AdminConflictError, AdminForbiddenError, AdminValidationError } from "./errors.js";
 
@@ -797,6 +798,8 @@ export class PostgresAdminRepository {
 
   async #updateUser({ empresaId, id, changes, transaction }) {
     return usePlatformTransaction(this.pool, { transaction }, async ({ client }) => {
+      const current = (await client.query('SELECT * FROM usuarios WHERE id=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
+      if (!current) return null;
       const membership = await client.query("SELECT 1 FROM usuarios_empresas WHERE empresa_id = $1 AND usuario_id = $2", [empresaId, id]);
       if (!membership.rowCount) return null;
       const columns = { email: "email", name: "nome", status: "status" };
@@ -813,7 +816,14 @@ export class PostgresAdminRepository {
         params.push(field === "initialPassword" ? await hashPassword(value) : inputValue("users", field, value));
         assignments.push(`${field === "initialPassword" ? "password_hash" : columns[field]} = $${params.length}`);
       }
+      const emailChanged = changes.email !== undefined && changes.email.toLowerCase() !== String(current.email).toLowerCase();
+      if (emailChanged) assignments.push('email_verified_at = NULL');
       if (assignments.length) await client.query(`UPDATE usuarios SET ${assignments.join(", ")} WHERE id = $1 AND deleted_at IS NULL`, params);
+      if (changes.initialPassword !== undefined || emailChanged
+        || (changes.status !== undefined && toUserStatus(changes.status) !== current.status)) {
+        await invalidateIdentitySecurity(client, { userId: id });
+        await client.query("INSERT INTO account_audit(usuario_id,empresa_id,action) VALUES($1,$2,'identity.security.changed')", [id,empresaId]);
+      }
       return outputRow("users", (await client.query(`SELECT u.id, ue.empresa_id AS "empresaId", u.email::text, u.nome AS name, ue.papel AS role, ue.permissoes AS permissions, ue.status AS "membershipStatus", u.status, u.created_at AS "createdAt", u.updated_at AS "updatedAt" FROM usuarios u JOIN usuarios_empresas ue ON ue.usuario_id = u.id AND ue.empresa_id = $1 WHERE u.id = $2 AND u.deleted_at IS NULL`, [empresaId, id])).rows[0]);
     });
   }
@@ -830,6 +840,8 @@ export class PostgresAdminRepository {
   async assertTenantAdminContinuity({ empresaId, userId, resource, changes = {}, remove = false, transaction }) {
     const run = resource === "users" ? usePlatformTransaction : useTenantTransaction;
     return run(this.pool, { empresaId, transaction }, async ({ client }) => {
+      // Security mutations always lock identity before membership/session rows.
+      await client.query('SELECT id FROM usuarios WHERE id=$1 FOR UPDATE', [userId]);
       const current = (await client.query(
         `SELECT ue.papel AS role, ue.status AS membership_status, u.status AS user_status
            FROM usuarios_empresas ue

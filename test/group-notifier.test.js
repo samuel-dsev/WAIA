@@ -403,8 +403,8 @@ test("somente plataforma controla sessão e destinos; cliente não consulta lead
   const calls = [];
   const service = new GroupNotifierAdminService({ status: async () => ({ phase: "connected", qr: "synthetic-private-qr" }),
     configure: async () => calls.push("configure"), leads: async () => [], route: async () => null }, async () => "synthetic-image");
-  const platform = { user: { id: "actor" }, platformRole: "platform_admin" };
-  const tenant = { user: { id: "actor" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] };
+  const platform = { audience: 'admin', user: { id: "actor" }, platformRole: "platform_admin" };
+  const tenant = { audience: 'admin', user: { id: "actor" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] };
   await assert.rejects(service.status(tenant));
   assert.throws(() => service.leads(tenant, "tenant-b"));
   assert.throws(() => service.saveRoute(tenant, "tenant-a", {}));
@@ -420,8 +420,8 @@ test("API administrativa protege QR por autenticação e não aceita mutação s
   app.use("/api/admin", createAdminRouter({ adminService: {}, groupNotifierService: service,
     authenticate(req, res, next) {
       if (!req.get("x-test-profile")) return res.sendStatus(401);
-      req.auth = req.get("x-test-profile") === "platform" ? { user: { id: "actor" }, platformRole: "platform_admin" }
-        : { user: { id: "actor" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] }; next();
+      req.auth = req.get("x-test-profile") === "platform" ? { audience: 'admin', user: { id: "actor" }, platformRole: "platform_admin" }
+        : { audience: 'admin', user: { id: "actor" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] }; next();
     },
     csrf(req, res, next) { if (req.get("x-test-csrf") !== "valid") return res.sendStatus(403); next(); },
   }));

@@ -63,10 +63,13 @@ async function preflight(target, files) {
   stage = `${target.name}:existing-ledger-preflight`;
   assert.ok((await target.owner.query("SELECT to_regclass('public.schema_migrations') AS ledger")).rows[0].ledger,
     'Non-empty target has no migration ledger');
-  await ledger(target.owner, files);
+  const applied = (await target.owner.query('SELECT filename,checksum FROM schema_migrations ORDER BY filename')).rows;
+  const previous = files.filter((file) => file.filename !== '027_customer_authorization_boundary.sql');
+  const pendingM1 = applied.length === 26 && files.length === 27;
+  await ledger(target.owner, pendingM1 ? previous : files);
   stage = `${target.name}:existing-schema-preflight`;
   await schemaSnapshot(target.owner);
-  return 'complete';
+  return pendingM1 ? 'upgrade-pending' : 'complete';
 }
 
 async function ledger(pool, files) {
@@ -165,31 +168,40 @@ try {
   const urls = checkedUrls();
   const targets = databaseNames.map((name) => ({ name, owner: poolFor(urls.owner, name), app: poolFor(urls.app, name) }));
   const files = await readSqlDirectory(directory);
-  assert.equal(files.length, 26);
+  assert.ok([26,27].includes(files.length));
   const team = files.find((file) => file.filename === '023_team_and_mfa.sql');
   assert.ok(team);
-  const baseline = files.filter((file) => file !== team);
+  // Reproduce the previous release (001–022 + 024–026). New boundaries must
+  // be applied AFTER late 023, just as the real migrator orders missing files.
+  const baseline = files.filter((file) => file !== team && Number(file.filename.slice(0,3)) <= 26);
+  const upgradeFiles = files.filter((file) => !baseline.includes(file)).map((file) => file.filename);
   // Validate both databases before the first migration writes anything.
   const states = [];
   for (const target of targets) states.push(await preflight(target, files));
   stage = 'matching-target-states';
   assert.equal(states[0], states[1], 'Mixed/partial target states are refused');
-  const mode = states[0] === 'empty' ? 'fresh-and-upgrade' : 'existing-verified';
+  const mode = states[0] === 'empty' ? 'fresh-and-upgrade'
+    : states[0] === 'upgrade-pending' ? 'incremental-upgrade' : 'existing-verified';
   if (mode === 'fresh-and-upgrade') {
     temporary = await mkdtemp(path.join(tmpdir(), 'waia-m0-migrations-'));
     for (const file of baseline) await cp(path.join(directory, file.filename), path.join(temporary, file.filename));
-    stage = 'waia_v2_empty:apply-26';
-    assert.equal((await runMigrations(targets[0].owner)).applied.length, 26);
+    stage = 'waia_v2_empty:apply-all';
+    assert.equal((await runMigrations(targets[0].owner)).applied.length, files.length);
     stage = 'waia_v2_empty:ledger';
     await ledger(targets[0].owner, files);
-    stage = 'waia_v2_upgrade:apply-25-without-023';
-    assert.equal((await runMigrations(targets[1].owner, { directory: temporary })).applied.length, 25);
+    stage = 'waia_v2_upgrade:apply-without-023';
+    assert.equal((await runMigrations(targets[1].owner, { directory: temporary })).applied.length, baseline.length);
     stage = 'waia_v2_upgrade:baseline-ledger';
     await ledger(targets[1].owner, baseline);
-    stage = 'waia_v2_upgrade:apply-only-023';
-    assert.deepEqual((await runMigrations(targets[1].owner)).applied, [team.filename]);
+    stage = 'waia_v2_upgrade:apply-023-and-new-boundaries';
+    assert.deepEqual((await runMigrations(targets[1].owner)).applied, upgradeFiles);
     stage = 'waia_v2_upgrade:complete-ledger';
     await ledger(targets[1].owner, files);
+  }
+  if (mode === 'incremental-upgrade') for (const target of targets) {
+    stage = `${target.name}:apply-m1-boundary`;
+    assert.deepEqual((await runMigrations(target.owner)).applied, ['027_customer_authorization_boundary.sql']);
+    await ledger(target.owner, files);
   }
   for (const target of targets) {
     stage = `${target.name}:reapply-zero`;
@@ -207,7 +219,8 @@ try {
   stage = 'compare-final-schemas';
   assert.deepEqual(snapshots[0], snapshots[1]);
   console.log(JSON.stringify({ status: 'passed', mode, databases: databaseNames,
-    ...(mode === 'fresh-and-upgrade' ? { emptyApplied: 26, upgradeBaselineApplied: 25, upgradeApplied: [team.filename] } : {}), reapply: 0,
+    ...(mode === 'fresh-and-upgrade' ? { emptyApplied: files.length, upgradeBaselineApplied: baseline.length, upgradeApplied: upgradeFiles } : {}),
+    ...(mode === 'incremental-upgrade' ? { upgradeApplied: ['027_customer_authorization_boundary.sql'] } : {}), reapply: 0,
     ledgerChecksums: 'matched', role: 'restricted', rls: 'forced', poolContext: 'clean',
     businessRows: 0, schemaEqual: true,
     schemaSha256: createHash('sha256').update(JSON.stringify(snapshots[0])).digest('hex') }));

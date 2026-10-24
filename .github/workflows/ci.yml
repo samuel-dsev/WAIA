@@ -93,9 +93,9 @@ jobs:
         env:
           RUN_REDIS_INTEGRATION: 'true'
         run: node --test test/redis-integration.test.js test/accounts-redis.test.js test/ai-reply-delay-redis.test.js
-      - name: Account PostgreSQL baseline
+      - name: Customer identity PostgreSQL boundaries
         env:
           RUN_POSTGRES_INTEGRATION: 'true'
           DATABASE_MIGRATOR_URL: postgres://waia_v2_owner:synthetic-ci-owner@localhost:5432/waia_v2_upgrade
           DATABASE_URL: postgres://waia_v2_app:synthetic-ci-app@localhost:5432/waia_v2_upgrade
-        run: node --test test/accounts-postgres.test.js
+        run: node --test test/accounts-postgres.test.js test/team-postgres.test.js

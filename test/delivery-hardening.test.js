@@ -8,7 +8,7 @@ import { AdminService, MemoryAdminRepository, createAdminRouter } from "../src/m
 import { createRetentionRunner } from "../src/operations/retention.js";
 import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 
-const platform = { user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
+const platform = { audience: 'admin', user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
 
 async function request(app, path, options = {}) {
   const server = createServer(app);

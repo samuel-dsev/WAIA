@@ -5,9 +5,9 @@ import { ConversationService, MemoryConversationRepository } from "../src/module
 import { DraftVersionConflictError } from "../src/modules/configuration/index.js";
 import { TenantNotReadyError } from "../src/modules/onboarding/onboarding-errors.js";
 
-const platform = { user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
-const tenantAdmin = { user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
-const operator = { user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
+const platform = { audience: 'admin', user: { id: "platform" }, platformRole: "platform_admin", memberships: [] };
+const tenantAdmin = { audience: 'admin', user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
+const operator = { audience: 'admin', user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
 
 function fixture() {
   const repository = new MemoryAdminRepository({ environment: "test", tenants: [{ id: "tenant-a", name: "A", status: "active" }, { id: "tenant-b", name: "B", status: "active" }], records: { contacts: [{ id: "contact-a", empresaId: "tenant-a", name: "Contato A" }, { id: "contact-b", empresaId: "tenant-b", name: "Contato B" }] } });

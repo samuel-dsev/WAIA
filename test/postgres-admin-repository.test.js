@@ -243,6 +243,9 @@ test("proteção PostgreSQL bloqueia a perda do último administrador ativo", as
     remove: true,
     transaction,
   });
-  assert.equal(calls.every(({ params }) => params.includes(TENANT_ID)), true);
+  assert.deepEqual(calls[0].params, [ACTOR_ID]);
+  assert.match(calls[0].sql, /SELECT id FROM usuarios.*FOR UPDATE/u);
+  assert.equal(calls.filter(({ sql }) => !/SELECT id FROM usuarios/u.test(sql))
+    .every(({ params }) => params.includes(TENANT_ID)), true);
   assert.equal(calls.some(({ sql }) => /FOR UPDATE OF ue, u/u.test(sql)), true);
 });

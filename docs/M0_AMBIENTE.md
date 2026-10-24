@@ -2,8 +2,9 @@
 
 23/10/2026, America/Sao_Paulo. Checkout principal `new`, HEAD de origem
 `3b8a295514bfe75884d82e2e9238a76475783dc2`. Candidata local **1.23.3**;
-2.0.0 continua futura. M0 autorizada; M1, commit/push e publicação dependem
-de autorização própria.
+2.0.0 continua futura. Este é o registro de fechamento inicial da M0.
+Posteriormente, o usuário autorizou o commit **local** 89d46af e a M1;
+resultados atuais em [M1_IDENTIDADE.md](M1_IDENTIDADE.md). Push/publicação não autorizados.
 
 ## Escopo e trabalho preservado
 
@@ -93,6 +94,10 @@ revogação/MFA e bloqueio do signup/equipe/ownership cliente. Não expor as rot
 atuais sob a suposição de que a M0 já resolve esses contratos.
 
 ## Procedimento reproduzível
+
+Os comandos usam o checkout atual e acompanham a fase vigente (M1: schema 27).
+As contagens históricas da M0 pertencem ao snapshot 89d46af; não confundir com
+os resultados novos do runbook M1.
 
 No checkout principal, branch `new`, com Docker Desktop disponível:
 

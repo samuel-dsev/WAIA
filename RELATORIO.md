@@ -3,6 +3,18 @@
 Atualizado em 23/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M1 — identidade e autorização, 23/10/2026
+
+Usuário autorizou commit **local** da M0 e continuação para M1. Commit M0 **89d46af / v1.23.3** na `new`, sem push: 20 arquivos, 023 como schema caracterizado, produto de equipe fora do commit. Snapshot exato passou em 601 testes (580 pass/21 skips) e 17 integrações. Evidências no runbook M0.
+
+M1 concluída localmente, candidata **1.24.0**, sem novo commit/deploy. Login/sessão admin exigem administrador global ativo e MFA; customer não ganha poder por owner/role/wildcard. Signup/criação de empresa/equipe/convites/ownership bloqueados no HTTP e serviço, independentemente da flag de contas. Reutilizado permissoes do vínculo para catálogo explícito; DTO cliente sanitizado e revalidação de sessão/vínculo/capacidade no servidor. Helper transacional encerra bootstrap privilegiado antes de executar callback customer.
+
+Migração aditiva 027 aplicada somente às bases v2 isoladas, com RLS restritiva, proteção dos campos de identidade/sessão e requisitos de sessão admin. Senha/reset/bloqueio e reativação no CRUD administrativo usam invalidação central e auditoria transacional; sessões/challenges/tokens anteriores não revivem. MFA pessoal necessário incorporado; gestão de equipe permanece negada. Empresa nova não recebe owner cliente automaticamente.
+
+Validação Node 22.23.2: **622 testes, 600 aprovados, 22 skips, zero falhas**; **28 integrações PostgreSQL/Redis aprovadas**, zero skips/falhas; sintaxe 291 arquivos; auditoria zerada. Banco vazio 27 e upgrade histórico 25 → 023+027 equivalentes, checksums/ledger corretos, reaplicação zero e pool limpo. Base waia_v2_app sem dados de negócio, mídia/Redis/egress isolados. API/worker permanecem desligados; instalações anteriores/VPS não acessadas nesta M1. Revisões independentes de identidade/ataques sem bloqueador alto pendente.
+
+Arquivos, decisões e limites em [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md). Remanescentes delimitados para M2: possível deadlock com rollback seguro entre mutações administrativas concorrentes e proteção contra DELETE físico do último admin (não há rota global de exclusão nesta M1). CI preparada, sem execução remota; navegador/jornada final e e-mail real não comprovados. M2 não iniciada.
+
 ## M0 — ambiente e baseline da nova versão, 23/10/2026
 
 M0 autorizada e concluída tecnicamente no checkout principal `new`, HEAD `3b8a295`, candidata **1.23.3**. M1 não iniciada; sem commit, push ou publicação. Trabalho anterior de equipe/MFA e registros operacionais preservados. Inventário, arquivos, comandos e limites: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md).

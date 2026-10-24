@@ -14,6 +14,17 @@
 Evidências, alvos sanitizados, comandos e limites: [M0_AMBIENTE.md](M0_AMBIENTE.md).
 Especificação única de requisitos: [WAIA_2.0.0.md](../WAIA_2.0.0.md).
 
+## Implementação das fronteiras — M1
+
+M1 implementou bloqueio de autoprovisionamento, catálogo explícito customer,
+sessão admin exclusiva do administrador global com MFA, invalidação de
+identidade/auditoria transacionais e contexto customer/RLS na migração 027.
+Empresas novas continuam sem owner cliente automático; vínculos serão geridos
+pelo painel em M2. Bootstrap SQL privilegiado é fechado antes do callback
+customer. Evidências e limites: [M1_IDENTIDADE.md](M1_IDENTIDADE.md).
+As telas de acessos e o DTO de atendimento/publicação permanecem nas fases
+autorizadas seguintes; M1 não os implementa.
+
 ## Histórico preservado — F0/F1
 
 Atualização F1, 18/09/2026: decisões 1, 2, 4, 5 e 6 implementadas localmente em v1.11.0; decisão 3 mantém unificação completa/MFA na F2. Migrações aditivas 021/022 e testes reais com duas identidades, isolamento RLS, rollback de auditoria e revogação passaram. Provedor de e-mail ainda não homologado. Estado operacional em [CONTAS_CLIENTE_F1.md](CONTAS_CLIENTE_F1.md) e evidências atuais em RELATORIO.md. O texto abaixo preserva o contexto da F0.

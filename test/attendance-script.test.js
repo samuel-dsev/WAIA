@@ -84,7 +84,7 @@ test("API legada aceita roteiro multilinha até 20000 caracteres, preservando is
   const repository = new MemoryAdminRepository({ environment: "test", tenants: [{ id: "tenant-a", status: "active" }, { id: "tenant-b", status: "active" }],
     records: { "ai-config": [{ id: "tenant-a", empresaId: "tenant-a", model: "test" }] } });
   const service = new AdminService({ repository });
-  const auth = { user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] };
+  const auth = { audience: 'admin', user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin" }] };
   const update = (prompt, empresaId = "tenant-a") => service.update({ auth, empresaId, resource: "ai-config", id: empresaId, body: { prompt } });
   const script = `Início\r\n\t${"x".repeat(19_980)}\nFim`;
   await update(script);

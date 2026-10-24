@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AdminService, MemoryAdminRepository } from "../src/modules/admin/index.js";
 
-const admin = { user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
-const operator = { user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
+const admin = { audience: 'admin', user: { id: "admin-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_admin", permissions: [] }] };
+const operator = { audience: 'admin', user: { id: "operator-a" }, memberships: [{ empresaId: "tenant-a", role: "tenant_operator", permissions: [] }] };
 
 function fixture() {
   const repository = new MemoryAdminRepository({ environment: "test", tenants: [{ id: "tenant-a" }, { id: "tenant-b" }], records: {

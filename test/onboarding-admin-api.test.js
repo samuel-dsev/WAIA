@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { createAdminRouter } from "../src/modules/admin/router.js";
 
-const auth = { user: { id: "admin-a" }, platformRole: "platform_admin", memberships: [] };
+const auth = { audience: 'admin', user: { id: "admin-a" }, platformRole: "platform_admin", memberships: [] };
 const correlationId = "00000000-0000-4000-8000-000000000301";
 
 async function request(app, path, options = {}) {

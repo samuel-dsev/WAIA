@@ -1,4 +1,5 @@
 import { AdminForbiddenError, AdminUnauthorizedError } from "./errors.js";
+import { evaluateAccess } from '../auth/permissions.js';
 
 const ROLE_ALIASES = Object.freeze({
   administrador: "tenant_admin",
@@ -7,6 +8,7 @@ const ROLE_ALIASES = Object.freeze({
 
 export function normalizedAdminAuth(auth) {
   if (!auth?.user?.id) throw new AdminUnauthorizedError();
+  if (auth.audience !== 'admin') throw new AdminForbiddenError();
   const memberships = Array.isArray(auth.memberships) ? auth.memberships : [];
   return Object.freeze({
     actorId: String(auth.user.id),
@@ -16,8 +18,9 @@ export function normalizedAdminAuth(auth) {
       email: auth.user.email == null ? null : String(auth.user.email),
     }),
     platformRole: auth.platformRole === "platform_admin" ? "platform_admin" : null,
+    audience: 'admin',
     memberships: Object.freeze(memberships
-      .filter((membership) => membership?.empresaId && membership?.role)
+      .filter((membership) => membership?.empresaId && membership?.role && !['suspenso','suspended'].includes(membership.status))
       .map((membership) => Object.freeze({
         empresaId: String(membership.empresaId),
         role: ROLE_ALIASES[membership.role] || membership.role,
@@ -43,9 +46,6 @@ export function requireTenantAccess(auth, empresaId, { write = false, adminOnly 
   }
   const membership = normalized.memberships.find((item) => item.empresaId === String(empresaId));
   if (!membership) throw new AdminForbiddenError();
-  if ((adminOnly || write) && membership.role !== "tenant_admin") {
-    if (!permission || !membership.permissions.includes(permission)) throw new AdminForbiddenError();
-  }
+  if(!evaluateAccess(normalized,'legacy',String(empresaId),{legacy:{adminOnly,write,permission}})) throw new AdminForbiddenError();
   return { ...normalized, tenant: membership };
 }
-
