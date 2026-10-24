@@ -79,6 +79,7 @@ export class VersionedConfigurationService {
     compiler = compileTenantRuntimeConfigV2,
     idGenerator = randomUUID,
     clock = () => new Date(),
+    preserveDraftValues = false,
   } = {}) {
     if (!repository) throw new TypeError("configurationRepository é obrigatório.");
     for (const method of [
@@ -92,6 +93,8 @@ export class VersionedConfigurationService {
     this.compiler = compiler;
     this.idGenerator = idGenerator;
     this.clock = clock;
+    if (typeof preserveDraftValues !== 'boolean') throw new TypeError('preserveDraftValues deve ser booleano.');
+    this.preserveDraftValues = preserveDraftValues;
   }
 
   async readDraft({ empresaId }) {
@@ -108,7 +111,10 @@ export class VersionedConfigurationService {
     const tenantId = requiredText(empresaId, "/empresaId");
     const userId = requiredText(actorId, "/actorId");
     const expected = requiredDraftVersion(expectedDraftVersion);
-    const draft = safeDraft(configuration);
+    const validated = safeDraft(configuration);
+    // Customer patches validate through V2 while retaining the exact server-held
+    // source: canonicalization must not rewrite hidden administrative values.
+    const draft = this.preserveDraftValues ? structuredClone(configuration) : validated;
     const schemaVersion = schemaVersionForDraft(draft);
     const occurredAt = this.clock();
     if (!(occurredAt instanceof Date) || Number.isNaN(occurredAt.getTime())) {

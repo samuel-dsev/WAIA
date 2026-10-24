@@ -5,6 +5,7 @@ import { createSessionTokenCodec } from '../auth/token-codec.js';
 import { keyringFromSerialized } from '../../security/keyring-config.js';
 import { FakeEmailTransport, HttpEmailTransport } from '../../integrations/email/transport.js';
 import { IdentitySecurity } from '../auth/identity-security.js';
+import { AttendanceService } from '../attendance/attendance-service.js';
 
 export function createAccountsRuntime({ pool, redis, config, security: sharedSecurity }) {
   if (!config.accounts?.enabled) return null;
@@ -22,5 +23,6 @@ export function createAccountsRuntime({ pool, redis, config, security: sharedSec
     codec, keyring, limiter,
     origin: settings.origin, companyLimit: settings.companyLimit,
     sessionMs: settings.sessionMs, idleMs: settings.idleMs, verifyMs: settings.verifyMs, resetMs: settings.resetMs });
+  service.attendance = new AttendanceService({ pool, idleMs: settings.idleMs });
   return { service, transport };
 }

@@ -10,7 +10,7 @@ export function scriptSaveRequest({ base, draft, value }) {
   return { path: `${base}/ai-config/${base.split("/").at(-1)}`, method: "PATCH", body: { prompt: value || null } };
 }
 
-export function createAttendanceScriptEditor({ value = "", onInput = () => {} } = {}) {
+export function createAttendanceScriptEditor({ value = "", onInput = () => {}, readOnly = false } = {}) {
   const root = document.createElement("div");
   root.className = "attendance-script wizard-field";
   const id = `attendance-script-${crypto.randomUUID()}`;
@@ -19,6 +19,7 @@ export function createAttendanceScriptEditor({ value = "", onInput = () => {} } 
   label.textContent = "Roteiro completo da IA";
   const textarea = document.createElement("textarea");
   Object.assign(textarea, { id, name: "attendanceScript", rows: 12, maxLength: 20_000, value });
+  textarea.readOnly = readOnly;
   const help = document.createElement("small");
   help.className = "muted";
   help.id = `${id}-help`;
@@ -36,6 +37,7 @@ export function createAttendanceScriptEditor({ value = "", onInput = () => {} } 
   let dialog = null;
   expand.addEventListener("click", () => {
     dialog = document.createElement("dialog");
+    const openedDialog = dialog;
     dialog.className = "attendance-script-dialog";
     dialog.setAttribute("aria-labelledby", `${id}-title`);
     const title = document.createElement("h2");
@@ -43,6 +45,7 @@ export function createAttendanceScriptEditor({ value = "", onInput = () => {} } 
     title.textContent = "Roteiro completo da IA";
     const expanded = document.createElement("textarea");
     Object.assign(expanded, { value: textarea.value, maxLength: textarea.maxLength });
+    expanded.readOnly = textarea.readOnly;
     expanded.setAttribute("aria-label", title.textContent);
     const close = document.createElement("button");
     close.type = "button";
@@ -55,14 +58,17 @@ export function createAttendanceScriptEditor({ value = "", onInput = () => {} } 
     });
     dialog.append(title, expanded, close);
     dialog.addEventListener("close", () => {
-      dialog.remove();
-      dialog = null;
-      expand.focus();
+      openedDialog.remove();
+      if (dialog === openedDialog) dialog = null;
+      if (root.isConnected) expand.focus();
     }, { once: true });
     root.append(dialog);
     dialog.showModal();
     expanded.focus();
   });
   root.append(heading, textarea, help);
-  return { root, textarea };
+  return { root, textarea, dispose() {
+    if (dialog) { dialog.querySelector('textarea').value = ''; dialog.close(); dialog.remove(); dialog = null; }
+    textarea.value = '';
+  } };
 }

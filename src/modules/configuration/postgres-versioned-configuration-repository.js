@@ -54,6 +54,9 @@ export class PostgresVersionedConfigurationRepository {
     occurredAt,
   }) {
     return this.transactionRunner(this.pool, { empresaId, usuarioId: actorId }, async ({ client }) => {
+      // Match the customer lock order before taking the draft row lock. The
+      // audit foreign key would otherwise lock this identity after the draft.
+      await client.query('SELECT id FROM usuarios WHERE id=$1 FOR KEY SHARE', [actorId]);
       let result;
       if (expectedDraftVersion === 0) {
         result = await client.query(

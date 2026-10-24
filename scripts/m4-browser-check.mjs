@@ -1,0 +1,187 @@
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { totp } from '../src/modules/auth/totp.js';
+
+const origin = 'http://127.0.0.1:5035';
+const { chromium } = process.argv[2] ? await import(pathToFileURL(process.argv[2]).href) : await import('playwright');
+const inspected = spawnSync('docker', ['inspect', 'waia-test-v2-preview'], { encoding: 'utf8' });
+assert.equal(inspected.status, 0);
+const preview = JSON.parse(inspected.stdout)[0];
+assert.equal(preview.Config.Labels['waia.preview'], 'v2-local');
+assert.deepEqual(Object.keys(preview.NetworkSettings.Networks), ['waia-test_v2_internal']);
+assert.ok(preview.Config.Env.includes('ACCOUNT_EMAIL_MODE=fake'));
+assert.ok(preview.Config.Env.some((value) => value.startsWith('DATABASE_URL=') && new URL(value.slice(13)).pathname === '/waia_v2_app'));
+const credentials = JSON.parse(readFileSync('.secrets/v2-m3-users.json', 'utf8'));
+const code = (secret) => {
+  let bits = 0, value = 0; const bytes = [];
+  for (const c of secret) { value = (value << 5) | 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(c); bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((value >>> bits) & 255); } }
+  return totp(Buffer.from(bytes), Math.floor(Date.now() / 30000));
+};
+const hash = (data) => createHash('sha256').update(JSON.stringify(data)).digest('hex');
+const proof = [], errors = [];
+const browser = await chromium.launch({ headless: true, channel: 'msedge' });
+let stage = 'admin';
+try {
+  const state = '.secrets/v2-m3-admin-browser.json';
+  const admin = await browser.newContext(existsSync(state) ? { storageState: state } : {}), panel = await admin.newPage();
+  panel.on('pageerror', (e) => errors.push(e.message)); await panel.goto(`${origin}/panel/`);
+  if ((await panel.request.get(`${origin}/api/admin/session`)).status() !== 200) {
+    const password = readFileSync('.secrets/v2-preview-bootstrap.env', 'utf8').match(/V2_PREVIEW_ADMIN_PASSWORD=(.+)/)[1].trim();
+    const mfa = JSON.parse(readFileSync('.secrets/v2-preview-admin-mfa.json', 'utf8'));
+    await panel.locator('#loginEmail').fill('admin.local@waia.example'); await panel.locator('#loginPassword').fill(password);
+    await panel.locator('#loginForm button').click(); await panel.locator('#mfaLoginCode').fill(code(mfa.secret));
+    await panel.locator('#mfaLoginForm button[type=submit]').click();
+  }
+  await panel.locator('#appShell').waitFor({ state: 'visible' });
+  const choice = panel.locator('#tenantSelect option').filter({ hasText: 'Aurora Serviços Demo' });
+  await choice.waitFor({ state: 'attached' }); const id = await choice.getAttribute('value');
+  const horizonte = await panel.locator('#tenantSelect option').filter({ hasText: 'Horizonte Comércio Demo' }).getAttribute('value');
+  const vale = await panel.locator('#tenantSelect option').filter({ hasText: 'Vale Atendimento Demo' }).getAttribute('value');
+  await panel.locator('#tenantSelect').selectOption(id); await panel.locator('[data-view=onboarding]').click();
+  await panel.getByRole('button', { name: /^2\. Módulos/ }).click();
+  for (const key of ['ai_freeform', 'catalog', 'human_handoff']) await panel.locator(`.capability-card input[value=${key}]`).check();
+  await panel.getByRole('button', { name: /^7\. IA/ }).click();
+  await panel.locator('[name=enabled]').check();
+  await panel.locator('[name=provider]').selectOption('simulated'); await panel.locator('[name=model]').fill('modelo-sintetico-M4');
+  await panel.locator('[name=keyMode]').selectOption('simulated');
+  await panel.locator('[name=leadQualificationEnabled]').check();
+  await panel.locator('[name=leadQualificationCriteria]').fill('Nome e relato suficiente para análise humana.');
+  await panel.getByRole('button', { name: /^3\. Atendimento/ }).click();
+  await panel.locator('textarea[name=attendanceScript]').fill('Atenda de forma objetiva. Use somente informações da Aurora Demo.');
+  await panel.locator('[name=welcomeMessage]').fill('Olá! Atendimento da Aurora Demo.');
+  await panel.locator('[name=fallbackMessage]').fill('Como posso ajudar?');
+  await panel.locator('.autosave-status[data-status=saved]').waitFor();
+  // Leave through the UI so pending administrative autosaves are flushed first.
+  await panel.locator('[data-view=companies]').click(); await admin.storageState({ path: state });
+  await panel.locator('#tenantSelect').selectOption(horizonte); await panel.locator('[data-view=onboarding]').click();
+  await panel.locator('.onboarding-wizard').waitFor(); await panel.locator('[data-view=companies]').click();
+  const adminDraft = async (company = id) => {
+    const response = await panel.request.get(`${origin}/api/admin/tenants/${company}/configuration/draft`);
+    assert.equal(response.status(), 200); return response.json();
+  };
+  const before = await adminDraft(), neighbour = await adminDraft(horizonte);
+  const protectedProjection = (source) => {
+    const copy = structuredClone(source); for (const key of ['prompt', 'personality', 'fallbackMessage', 'followUpQuestion', 'leadQualificationCriteria', 'leadQualificationClosing']) delete copy.ai?.[key];
+    for (const key of ['welcomeMessage', 'fallbackMessage', 'timezone', 'schedules', 'publicRules', 'establishmentRules']) delete copy.identity?.[key];
+    for (const key of ['message', 'salesInterestMessage']) delete copy.humanHandoff?.[key]; return copy;
+  };
+  proof.push('Base técnica simulada preparada pelo painel; nenhum provider real ou publicação.');
+  async function customer(email, file) {
+    const context = await browser.newContext(existsSync(file) ? { storageState: file } : {}), page = await context.newPage();
+    page.on('pageerror', (e) => errors.push(e.message)); await page.goto(`${origin}/portal/`);
+    if ((await page.request.get(`${origin}/api/account/v1/session`)).status() !== 200) {
+      await page.locator('#login').waitFor({ state: 'visible' }); await page.locator('#login input[name=email]').fill(email);
+      await page.locator('#login input[name=password]').fill(credentials[email]);
+      const result = page.waitForResponse((r) => r.url().endsWith('/api/account/v1/login'));
+      await page.locator('#login button').first().click(); const response = await result;
+      assert.ok([200, 202].includes(response.status()), 'Aguarde a janela do limitador antes de repetir.');
+      if ((await response.json()).mfaRequired) {
+        const mfaFile = '.secrets/v2-m3-bia-mfa.json', mfa = JSON.parse(readFileSync(mfaFile, 'utf8'));
+        assert.equal(email, 'bia.demo@waia.example'); assert.ok(mfa.recoveryCodes.length);
+        await page.locator('#mfa input').fill(mfa.recoveryCodes.shift()); await page.locator('#mfa button').first().click();
+        writeFileSync(mfaFile, JSON.stringify(mfa), { mode: 0o600 });
+      }
+    }
+    await page.locator('#home').waitFor({ state: 'visible' }); await context.storageState({ path: file });
+    return { context, page };
+  }
+  stage = 'editor cliente'; const ana = await customer('ana.demo@waia.example', '.secrets/v2-m4-ana-browser.json');
+  await ana.page.getByRole('button', { name: 'Abrir atendimento · Aurora Serviços Demo', exact: true }).click();
+  const script = ana.page.locator('[data-field=script]'); await script.waitFor();
+  const dtoResponse = await ana.page.request.get(`${origin}/api/app/v1/companies/${id}/attendance`), dto = await dtoResponse.json();
+  assert.equal(dtoResponse.status(), 200); assert.equal(dto.canEdit, true);
+  for (const forbidden of ['modelo-sintetico-M4', 'maxOutputTokens', 'monthlyTokenLimit', 'credentialRef', 'keyMode', 'provider', 'cooldownSeconds']) assert.equal(JSON.stringify(dto).includes(forbidden), false);
+  await script.fill('Roteiro M4: acolha o cliente e faça uma pergunta útil por vez.');
+  await ana.page.locator('#attendance-schedules').fill('Segunda a sexta, das 9h às 18h');
+  await ana.page.getByRole('button', { name: 'Salvar rascunho', exact: true }).click();
+  await ana.page.locator('#notice').filter({ hasText: /Rascunho \d+ salvo/ }).waitFor();
+  const after = await adminDraft();
+  assert.equal(after.configuration.ai.prompt, 'Roteiro M4: acolha o cliente e faça uma pergunta útil por vez.');
+  assert.equal(hash(protectedProjection(after.configuration)), hash(protectedProjection(before.configuration)));
+  assert.equal(hash((await adminDraft(horizonte))?.configuration ?? null), hash(neighbour?.configuration ?? null));
+  assert.equal((await ana.page.request.get(`${origin}/api/app/v1/companies/${vale}/attendance`)).status(), 404);
+  const session = await (await ana.page.request.get(`${origin}/api/account/v1/session`)).json();
+  const write = (body) => ana.page.request.patch(`${origin}/api/app/v1/companies/${id}/attendance/draft`, { headers: { Origin: origin, 'x-csrf-token': session.csrfToken }, data: body });
+  assert.equal((await write({ draftVersion: after.draftVersion, changes: { ai: { model: 'forged' } } })).status(), 422);
+  assert.equal((await write({ draftVersion: after.draftVersion, changes: { qualificationCriteria: '' } })).status(), 422);
+  proof.push('Cliente salva roteiro/horários, sem técnico na rede; técnico e empresa vizinha preservados por hash; mass assignment recusado.');
+  stage = 'conflito entre editores'; const second = await ana.context.newPage();
+  await second.goto(`${origin}/portal/#/companies/${id}`); await second.locator('[data-field=script]').waitFor();
+  await ana.page.locator('[data-field=script]').fill('Versão vencedora do primeiro editor.');
+  await ana.page.getByRole('button', { name: 'Salvar rascunho', exact: true }).click(); await ana.page.locator('#notice').filter({ hasText: /Rascunho \d+ salvo/ }).waitFor();
+  await second.locator('[data-field=script]').fill('Texto local que deve sobreviver ao conflito.');
+  const conflicted = second.waitForResponse((r) => r.url().endsWith('/attendance/draft'));
+  await second.getByRole('button', { name: 'Salvar rascunho', exact: true }).click(); assert.equal((await conflicted).status(), 409);
+  assert.equal(await second.locator('[data-field=script]').inputValue(), 'Texto local que deve sobreviver ao conflito.');
+  second.once('dialog', (dialog) => dialog.accept()); await second.getByRole('button', { name: 'Recarregar versão atual' }).click();
+  await second.locator('[data-field=script]').waitFor({ state: 'visible' });
+  await second.waitForFunction(() => document.querySelector('[data-field=script]')?.value === 'Versão vencedora do primeiro editor.');
+  proof.push('Dois editores: um salva, outro recebe409 e mantém texto; recarga exige descarte explícito.');
+  stage = 'readonly e modal'; const bia = await customer('bia.demo@waia.example', '.secrets/v2-m4-bia-browser.json');
+  await bia.page.getByRole('button', { name: 'Abrir atendimento · Aurora Serviços Demo', exact: true }).click();
+  await bia.page.locator('[data-field=script]').waitFor(); assert.equal(await bia.page.locator('[data-field=script]').getAttribute('readonly'), '');
+  assert.equal(await bia.page.getByRole('button', { name: 'Salvar rascunho', exact: true }).isVisible(), false);
+  await bia.page.getByRole('button', { name: 'Tela cheia', exact: true }).click();
+  assert.equal(await bia.page.locator('dialog textarea').getAttribute('readonly'), ''); await bia.page.keyboard.press('Escape');
+  assert.equal((await bia.page.request.patch(`${origin}/api/app/v1/companies/${id}/attendance/draft`, { headers: { Origin: origin, 'x-csrf-token': (await (await bia.page.request.get(`${origin}/api/account/v1/session`)).json()).csrfToken }, data: { draftVersion: after.draftVersion, changes: { greeting: 'negado' } } })).status(), 403);
+  await second.setViewportSize({ width: 390, height: 844 }); assert.equal(await second.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  mkdirSync('.tmp/m4', { recursive: true }); await second.screenshot({ path: '.tmp/m4/editor-mobile.png', fullPage: true });
+  await second.getByRole('button', { name: 'Tela cheia', exact: true }).click(); await second.keyboard.press('Escape');
+  await second.setViewportSize({ width: 1366, height: 900 }); await second.screenshot({ path: '.tmp/m4/editor-desktop.png', fullPage: true });
+  proof.push('Somente leitura inclusive no modal/API, viewport390px sem overflow e editor reutilizado com teclado.');
+  stage = 'recarga lenta';
+  let resumeReload, sawReload;
+  const reloadHeld = new Promise((resolve) => { resumeReload = resolve; }), reloadStarted = new Promise((resolve) => { sawReload = resolve; });
+  const attendanceUrl = `**/api/app/v1/companies/${id}/attendance`;
+  await second.route(attendanceUrl, async (request) => { const response = await request.fetch(); sawReload(); await reloadHeld; await request.fulfill({ response }); });
+  await second.getByRole('button', { name: 'Recarregar versão atual' }).click(); await reloadStarted;
+  assert.equal(await second.locator('[data-field=script]').isDisabled(), true); resumeReload();
+  await second.waitForFunction(() => !document.querySelector('[data-field=script]')?.disabled); await second.unroute(attendanceUrl);
+  proof.push('Recarga lenta bloqueia edição até receber a versão atual, sem descartar texto digitado durante a espera.');
+  stage = 'cancelamento de gravação';
+  await second.locator('[data-field=script]').fill('Alteração local descartada na troca.');
+  second.once('dialog', (dialog) => dialog.dismiss()); await second.locator('#workspace-nav [data-home]').click();
+  assert.equal(await second.locator('[data-field=script]').inputValue(), 'Alteração local descartada na troca.');
+  second.once('dialog', (dialog) => dialog.accept()); await second.locator('#workspace-nav [data-home]').click();
+  await second.locator('#home').waitFor({ state: 'visible' }); assert.equal(await second.locator('#attendance-editor').textContent(), '');
+  assert.deepEqual(errors, []);
+  proof.push('Troca exige confirmação e remove o documento anterior do DOM.');
+  stage = 'troca durante gravação';
+  await second.getByRole('button', { name: 'Abrir atendimento · Aurora Serviços Demo', exact: true }).click(); await second.locator('[data-field=script]').waitFor();
+  const draftUrl = `**/api/app/v1/companies/${id}/attendance/draft`;
+  let releaseWrite, sawWrite;
+  const writeHeld = new Promise((resolve) => { releaseWrite = resolve; }), writeStarted = new Promise((resolve) => { sawWrite = resolve; });
+  await second.route(draftUrl, async (request) => { sawWrite(); await writeHeld; try { await request.abort(); } catch { /* navigation already aborted */ } });
+  const priorSwitch = await adminDraft(); await second.locator('[data-field=script]').fill('Este texto não deve ser enviado após trocar de empresa.');
+  await second.getByRole('button', { name: 'Salvar rascunho', exact: true }).click(); await writeStarted;
+  second.once('dialog', (dialog) => dialog.accept()); await second.evaluate((company) => { location.hash = `#/companies/${company}`; }, horizonte);
+  await second.locator('#company-name').filter({ hasText: 'Horizonte Comércio Demo' }).waitFor();
+  await second.locator('#attendance-form').waitFor(); releaseWrite(); await second.unroute(draftUrl);
+  assert.equal(await second.locator('#company-name').innerText(), 'Horizonte Comércio Demo');
+  assert.equal(await second.locator('[data-field=script]').count(), 0);
+  assert.equal(hash((await adminDraft()).configuration), hash(priorSwitch.configuration));
+  proof.push('Troca aborta gravação ainda não enviada; contexto novo não recebe dados/resposta da empresa anterior.');
+  stage = 'sessão revogada durante gravação';
+  await second.evaluate((company) => { location.hash = `#/companies/${company}`; }, id); await second.locator('[data-field=script]').waitFor();
+  let releaseRevoked, sawRevoked;
+  const revokedHeld = new Promise((resolve) => { releaseRevoked = resolve; }), revokedStarted = new Promise((resolve) => { sawRevoked = resolve; });
+  await second.route(draftUrl, async (request) => { sawRevoked(); await revokedHeld; await request.continue(); });
+  await second.locator('[data-field=script]').fill('A sessão revogada não pode salvar este texto.');
+  await second.getByRole('button', { name: 'Salvar rascunho', exact: true }).click(); await revokedStarted;
+  const sessions = await (await second.request.get(`${origin}/api/account/v1/sessions`)).json();
+  const current = sessions.sessions.find((entry) => entry.current);
+  const currentSession = await (await second.request.get(`${origin}/api/account/v1/session`)).json();
+  assert.equal((await second.request.delete(`${origin}/api/account/v1/sessions/${current.id}`, { headers: { Origin: origin, 'x-csrf-token': currentSession.csrfToken } })).status(), 204);
+  releaseRevoked(); await second.locator('#login').waitFor({ state: 'visible' });
+  assert.equal(await second.locator('#attendance-editor').textContent(), ''); assert.equal(hash((await adminDraft()).configuration), hash(priorSwitch.configuration));
+  proof.push('Revogação antes da confirmação bloqueia o PATCH, limpa o editor e preserva o rascunho.');
+  assert.deepEqual(errors, []);
+  writeFileSync('.tmp/m4/browser-proof.json', JSON.stringify({ status: 'passed', date: new Date().toISOString(), proof }, null, 2));
+  console.log(JSON.stringify({ status: 'passed', proof }));
+} catch (error) {
+  console.error(`M4 browser: ${stage}. ${String(error.message).replace(/[A-Za-z0-9_-]{30,}/g, '[redacted]')}`); process.exitCode = 1;
+} finally { await browser.close(); }

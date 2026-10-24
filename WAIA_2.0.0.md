@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 commitada em c59a905 / 1.25.0 e M3 concluída em 1.26.0 com commit local no fechamento**; M4–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md), [M2_ACESSOS.md](docs/M2_ACESSOS.md) e [M3_PORTAL.md](docs/M3_PORTAL.md).
+Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 commitada em c59a905 / 1.25.0 e M3 commitada em 2d28a8c / 1.26.0 e M4 concluída em 1.27.0 com commit local no fechamento**; M5–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md), [M2_ACESSOS.md](docs/M2_ACESSOS.md), [M3_PORTAL.md](docs/M3_PORTAL.md) e [M4_ATENDIMENTO.md](docs/M4_ATENDIMENTO.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0/M1/M2 têm commits locais e M3 tem gates locais concluídos; M4–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0/M1/M2/M3 têm commits locais e M4 tem gates locais concluídos; M5–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -303,6 +303,8 @@ Estado em 24/10/2026: autorizada e concluída em **1.26.0**, com commit local no
 **Gate:** Ana só abre Aurora/Horizonte; Caio só Vale; zero vínculo funciona; logout/troca não deixam dados antigos. Subagentes: UX/portal e E2E/isolamento.
 
 ### M4 — editor de atendimento
+
+Estado em 24/10/2026: autorizada e concluída em **1.27.0**, com commit local no fechamento. Contrato de 14 campos e textos de predefinições existentes, RLS 029, merge/CAS/auditoria e browser validados. 630 pass/24 skips e 70 integrações aprovadas. [M4_ATENDIMENTO.md](docs/M4_ATENDIMENTO.md) registra caminhos, comandos, revisões e limites. Sem push/deploy; M5 aguarda autorização.
 
 - Mapear caminhos V2 exatos permitidos e capacidade por campo; separar habilitação técnica de preferência de negócio.
 - Endpoints/DTOs estritos de leitura e patch, merge no servidor com draftVersion e auditoria.

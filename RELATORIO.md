@@ -3,6 +3,18 @@
 Atualizado em 24/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M4 — editor de atendimento, 24/10/2026
+
+Usuário autorizou prosseguir para M4. Checkout `new`, base **2d28a8c / v1.26.0**. M4 concluída em **1.27.0**, com commit local no fechamento conforme AGENTS. Sem push, promoção, deploy ou avanço para M5.
+
+Portal passa a editar somente campos de atendimento liberados: roteiro único em `configuration.ai.prompt`, mensagens, horários/fuso, regras, qualificação e texto de predefinições informativas existentes. DTO estrito e patch parcial não transportam documento integral, modelos, tokens, quotas, destinos, conectores ou IDs de autor. Script/tipos/limites/segredos e campos desconhecidos validados com mensagens de negócio. Componente de roteiro compartilhado com painel ganhou readonly e descarte seguro do modal; nenhuma chamada administrativa no cliente.
+
+Migração aditiva 029 abre somente draft e INSERT redigido de auditoria sob RLS; trigger protege técnico/metadados/versão. Serviço revalida sessão/vínculo/read+edit, trava e faz merge+CAS+auditoria na mesma transação. Valores técnicos preservados inclusive Unicode não normalizado. Escritor administrativo trava ator antes do draft para resolver disputa de FK com customer. Corridas cliente/cliente e cliente/admin retornam um sucesso/um 409. Auditoria falha reverte tudo; empresa suspensa continua suspensa. Rascunho sem base administrativa retorna 409 neutro.
+
+Node22: **654 casos, 630 aprovados/24 skips, zero falhas**; PostgreSQL/Redis: **70 aprovados, sem skips/falhas**, incluindo 11 casos M4. Contrato 13 casos e HTTP seguros, auditoria de dependências zerada. Browser Edge: base simulada preparada pelo painel, salvar roteiro/horários, hash técnico/vizinho, injeção recusada, readonly/modal, conflito com texto preservado, recarga lenta, 390px/teclado, troca com PATCH retido e sessão revogada antes da confirmação. Revisões independentes resolvidas sem bloqueador alto pendente. Evidências em `.tmp/m4/` e manual [M4_ATENDIMENTO.md](docs/M4_ATENDIMENTO.md).
+
+Preview em **http://127.0.0.1:5035/portal/**; painel **http://127.0.0.1:5035/panel/**. Schema 29 aplicado ao alvo v2 dedicado por helper que confere ledger/alvo e preserva dataset M3, sem SQL/seed de cliente; Aurora/Horizonte preparadas pelo painel. Rede/API/Redis/mídia isolados, egress bloqueado, e-mail fake e nenhum worker de atendimento. Produção/ambiente anterior e alterações locais alheias preservados. Não houve publicação de atendimento, fornecedor real ou comprovação de efeito runtime para horários/tom/regras. Compilação/simulação/publicação e habilitações operacionais seguintes permanecem em M5/M6. Próxima fase a autorizar: **M5**.
+
 ## M3 — login e navegação multiempresas, 24/10/2026
 
 Usuário autorizou iniciar M3 com leitura do plano e commits anteriores. Checkout principal `new`, base **c59a905 / 1.25.0**; M0/M1/M2 conferidas no Git. M3 entregue em **1.26.0**, com commit local no fechamento conforme AGENTS; sem push, promoção, deploy ou implementação da M4.

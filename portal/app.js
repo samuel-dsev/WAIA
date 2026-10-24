@@ -1,9 +1,10 @@
 import { installSecurity } from './security.js';
 import { portalRoute, actionLink, createRequestScope } from './navigation.js';
+import { createAttendanceEditor } from './attendance.js';
 
 const $ = (id) => document.getElementById(id);
 const scope = createRequestScope();
-let csrf = null, user = null, company = null, securityUI;
+let csrf = null, user = null, company = null, securityUI, attendanceUI;
 let route = portalRoute(location.hash) || portalRoute();
 let action = actionLink(location.hash);
 let dirty = false, visible = 'loading', resumeView = null;
@@ -27,6 +28,7 @@ function show(id) {
   focus?.focus();
 }
 function clearCompany() {
+  attendanceUI?.dispose(); attendanceUI = null;
   company = null; $('company-name').textContent = ''; $('workspace-name').textContent = '';
   $('workspace-state').textContent = ''; $('workspace-permissions').replaceChildren();
   $('workspace-nav').hidden = true; document.title = 'Meu atendimento · WAIA';
@@ -35,6 +37,7 @@ function clearForms() {
   for (const id of ['login', 'forgot', 'activate', 'reset', 'profile-form', 'password-form']) $(id).reset();
 }
 function begin() {
+  attendanceUI?.dispose(); attendanceUI = null;
   scope.reset(); securityUI?.clear(); dirty = false; action = null;
   clearForms(); notice(); show('loading');
 }
@@ -109,6 +112,12 @@ async function workspace(next) {
       const item = document.createElement('li'); item.textContent = label; $('workspace-permissions').append(item);
     }
     $('suspended-note').hidden = !['suspensa', 'suspenso', 'suspended'].includes(summary.status); show('workspace');
+    $('attendance-editor').textContent = 'Carregando atendimento…';
+    const attendance = await api(`/api/app/v1/companies/${next.companyId}/attendance`, null, 'GET');
+    attendanceUI = createAttendanceEditor({ root: $('attendance-editor'), initial: attendance, companyId: next.companyId,
+      api, notice, onDirty: (value) => { dirty = value; }, onAccessDenied: () => {
+        begin(); clearCompany(); show('denied'); notice('A permissão deste atendimento mudou. Volte às empresas para atualizar seu acesso.', true);
+      } });
   } catch (error) {
     if (cancelled(error)) return;
     clearCompany(); show([403, 404].includes(error.status) ? 'denied' : 'unavailable');
@@ -203,6 +212,10 @@ document.addEventListener('visibilitychange', () => {
         }
         user = session.user; csrf = session.csrfToken;
         if (company) await api(`/api/app/v1/companies/${company.id}`, null, 'GET');
+        if (resumeView === 'workspace' && attendanceUI && dirty) {
+          const latest = await api(`/api/app/v1/companies/${company.id}/attendance`, null, 'GET');
+          attendanceUI.revalidate(latest); show('workspace'); return;
+        }
         if (['profile', 'security', 'mfa', 'recovery'].includes(resumeView)) show(resumeView);
         else await home({ resume: true });
       } catch (error) {
