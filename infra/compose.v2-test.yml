@@ -1,0 +1,73 @@
+# Extensão independente do mesmo projeto waia-test. Não carrega o Compose legado.
+# Sem portas publicadas, egress, credenciais de fornecedores, API ou worker.
+name: waia-test
+services:
+  v2-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: waia_v2_bootstrap
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${V2_BOOTSTRAP_PASSWORD:?}
+      V2_OWNER_PASSWORD: ${V2_OWNER_PASSWORD:?}
+      V2_APP_PASSWORD: ${V2_APP_PASSWORD:?}
+    volumes:
+      - v2_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-v2-test.sh:/docker-entrypoint-initdb.d/10-v2.sh:ro
+    networks: [v2_internal]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U waia_v2_bootstrap -d waia_v2_app']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  v2-redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes', --save, '60', '1000']
+    volumes:
+      - v2_redis_data:/data
+    networks: [v2_internal]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  v2-media-init:
+    image: alpine:3.22
+    user: '0:0'
+    command: [sh, -c, 'chown 1000:1000 /media && chmod 700 /media']
+    volumes:
+      - v2_media_data:/media
+    network_mode: none
+  v2-check:
+    image: waia:v2-test-local
+    profiles: [tools]
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:mode=1777]
+    environment:
+      NODE_ENV: test
+      DATABASE_MIGRATOR_URL: postgres://waia_v2_owner:${V2_OWNER_PASSWORD:?}@v2-postgres:5432/waia_v2_empty
+      DATABASE_URL: postgres://waia_v2_app:${V2_APP_PASSWORD:?}@v2-postgres:5432/waia_v2_empty
+      REDIS_URL: redis://v2-redis:6379/0
+      REDIS_QUEUE_NAME: waia-v2-synthetic
+      RUN_POSTGRES_INTEGRATION: 'false'
+      RUN_REDIS_INTEGRATION: 'false'
+    volumes:
+      - v2_media_data:/app/.data/media
+    networks: [v2_internal]
+    depends_on:
+      v2-postgres:
+        condition: service_healthy
+      v2-redis:
+        condition: service_healthy
+      v2-media-init:
+        condition: service_completed_successfully
+    command: [node, scripts/m0-schema-check.mjs]
+volumes:
+  v2_postgres_data:
+  v2_redis_data:
+  v2_media_data:
+networks:
+  v2_internal:
+    internal: true

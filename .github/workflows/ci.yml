@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, new]
   pull_request:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
-      - run: find src scripts test -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | sort -z | xargs -0 -n1 node --check
+      - run: node scripts/check-syntax.mjs
       - name: Validate Compose
         env:
           POSTGRES_PASSWORD: synthetic-ci-owner-password
@@ -46,3 +46,56 @@ jobs:
             waia-image.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
+
+  schema-and-redis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: waia_v2_bootstrap
+          POSTGRES_PASSWORD: synthetic-ci-bootstrap
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U waia_v2_bootstrap -d postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      NODE_ENV: test
+      PGHOST: localhost
+      PGUSER: waia_v2_bootstrap
+      POSTGRES_USER: waia_v2_bootstrap
+      PGPASSWORD: synthetic-ci-bootstrap
+      V2_OWNER_PASSWORD: synthetic-ci-owner
+      V2_APP_PASSWORD: synthetic-ci-app
+      DATABASE_MIGRATOR_URL: postgres://waia_v2_owner:synthetic-ci-owner@localhost:5432/waia_v2_empty
+      DATABASE_URL: postgres://waia_v2_app:synthetic-ci-app@localhost:5432/waia_v2_empty
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Bootstrap synthetic cluster only
+        run: sh infra/postgres/init-v2-test.sh
+      - name: Empty schema and late 023 upgrade
+        run: node scripts/m0-schema-check.mjs
+      - name: Isolated Redis regressions
+        env:
+          RUN_REDIS_INTEGRATION: 'true'
+        run: node --test test/redis-integration.test.js test/accounts-redis.test.js test/ai-reply-delay-redis.test.js
+      - name: Account PostgreSQL baseline
+        env:
+          RUN_POSTGRES_INTEGRATION: 'true'
+          DATABASE_MIGRATOR_URL: postgres://waia_v2_owner:synthetic-ci-owner@localhost:5432/waia_v2_upgrade
+          DATABASE_URL: postgres://waia_v2_app:synthetic-ci-app@localhost:5432/waia_v2_upgrade
+        run: node --test test/accounts-postgres.test.js

@@ -17,3 +17,14 @@ USER node
 EXPOSE 3001
 
 CMD ["npm", "run", "start:api"]
+
+# Target opt-in para validar o mesmo runtime sem incluir testes na release.
+FROM runtime AS validation
+COPY test ./test
+COPY infra ./infra
+COPY .github ./.github
+COPY Dockerfile docker-compose.yml .env.example ./
+ENV NODE_ENV=test
+CMD ["npm", "test"]
+
+FROM runtime AS release

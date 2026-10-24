@@ -1,5 +1,7 @@
 # Contas de cliente — F1 / v1.11.0
 
+> Escopo histórico, revisado em 23/10/2026: cadastro público, criação de empresa e gestão de equipe pelo cliente não fazem parte do [plano multiusuário vigente](../WAIA_2.0.0.md). O administrador geral provisionará acessos e vínculos; a nova instalação não importará empresas anteriores. Ambiente isolado e comandos atuais: [M0_AMBIENTE.md](M0_AMBIENTE.md). Os parâmetros e evidências abaixo documentam a F1, não autorizam exposição ou cadastro no novo alvo. Os fluxos de acesso serão atualizados em M1–M2/M9; não habilitar a jornada antiga por esta referência.
+
 Implementação local em 18/09/2026. Portal em `/portal/`, API de identidade em `/api/account/v1`, empresas em `/api/app/v1/companies`. O painel administrativo mantém seu perímetro e cookie próprios. F2 entrega equipe/MFA; F3 entrega configuração do atendimento.
 
 ## Configuração única da plataforma

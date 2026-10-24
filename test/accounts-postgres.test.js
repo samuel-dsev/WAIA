@@ -164,8 +164,11 @@ test('F1 PostgreSQL real: contas, tokens, HTTP, concorrência e isolamento', { s
       await assert.rejects(service.reset({ token: expired, password: 'new-password-12345' }, 'rb2'), { code: 'TOKEN_INVALID' });
     });
     await t.test('revogação de vínculo é efetiva na próxima operação', async () => {
-      await owner.query("UPDATE usuarios_empresas SET status='suspenso' WHERE empresa_id=$1 AND usuario_id=$2",[tenantB,userIds[1]]);
-      assert.equal((await request(`/app/companies/${tenantB}`, { auth: authB })).status,404);
+      await owner.query("INSERT INTO usuarios_empresas(empresa_id,usuario_id,papel) VALUES($1,$2,'operador')",[tenantA,userIds[1]]);
+      assert.equal((await request(`/app/companies/${tenantA}`, { auth: authB })).status,200);
+      await owner.query("UPDATE usuarios_empresas SET status='suspenso' WHERE empresa_id=$1 AND usuario_id=$2",[tenantA,userIds[1]]);
+      assert.equal((await request(`/app/companies/${tenantA}`, { auth: authB })).status,404);
+      assert.equal((await request(`/app/companies/${tenantB}`, { auth: authB })).status,200);
     });
     await t.test('logout e inatividade invalidam sessão; MFA existente nunca é removido', async () => {
       await service.logout(await service.authenticate(authA.token));

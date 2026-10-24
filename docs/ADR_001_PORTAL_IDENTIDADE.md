@@ -1,5 +1,21 @@
 # ADR 001 — portal e migração de identidade
 
+> Revisão de escopo em 23/10/2026: as decisões vigentes M0 abaixo substituem o provisionamento da F0/F1. O histórico permanece ao final. Não executar autoprovisionamento seguindo as decisões históricas.
+
+## Decisões vigentes — M0, 23/10/2026
+
+1. Manter as identidades globais e vínculos N:N. Somente o administrador geral cria acessos/empresas e administra vínculos/capacidades; cliente não cria conta, empresa, equipe, convite ou transferência de propriedade. A identidade existente é reutilizada sem sobrescrever senha/MFA. Serviço transacional e auditoria na M1/M2 substituem os caminhos livres históricos.
+2. Audience `admin` exige administrador global e perímetro próprio. Audience `customer`, inclusive para administrador global, usa somente vínculos/capacidades ativos. Owner/tenant_admin não concedem poderes técnicos ao cliente. M1 fechará HTTP e serviço antes de exposição; a M0 não altera essas permissões.
+3. API cliente retorna DTO permitido pelo servidor. Reutilizar configuração V2 e `configuration.ai.prompt`, sem documento técnico completo no navegador. Patch com draftVersion e merge no servidor; publicação cliente não ativa empresa e bloqueia diff técnico oculto. Contratos finais serão implementados em M4/M5.
+4. Nova instalação começa com schema e sem dados de negócio da anterior. Homologação reutiliza projeto waia-test, com cluster PostgreSQL, Redis, volumes de mídia e rede interna v2 exclusivos. Não importar dados/credenciais nem executar seed histórico; fictícios serão cadastrados pelo painel em M3/M8. Produção nova e bootstrap admin têm gates próprios.
+5. Preservar migrações 001–026. A 023 local é dependência do runtime atual e inclui equipe/ownership além de MFA. O ensaio sintético vazio e o upgrade 001–022+024–026 → 023 terminaram em schema equivalente, sem editar SQL. Isso não aprova equipe cliente nem aplicação da 023 à instalação anterior. M1 selecionará segurança pessoal necessária e negará gestão de terceiros.
+6. Manter monólito/portal/painel e serviços existentes; sem reescrita de framework. Ativação/recuperação reutilizam tokens/outbox cifrada, com entrega real de e-mail ainda dependente de homologação. Redis exclusivo cobre filas, locks, rate limits, métricas e heartbeat; API/worker ficam desligados na M0.
+
+Evidências, alvos sanitizados, comandos e limites: [M0_AMBIENTE.md](M0_AMBIENTE.md).
+Especificação única de requisitos: [WAIA_2.0.0.md](../WAIA_2.0.0.md).
+
+## Histórico preservado — F0/F1
+
 Atualização F1, 18/09/2026: decisões 1, 2, 4, 5 e 6 implementadas localmente em v1.11.0; decisão 3 mantém unificação completa/MFA na F2. Migrações aditivas 021/022 e testes reais com duas identidades, isolamento RLS, rollback de auditoria e revogação passaram. Provedor de e-mail ainda não homologado. Estado operacional em [CONTAS_CLIENTE_F1.md](CONTAS_CLIENTE_F1.md) e evidências atuais em RELATORIO.md. O texto abaixo preserva o contexto da F0.
 
 Data: 16/09/2026. Decisão técnica registrada na F0; implementação na F1/F2 mediante seus gates. Especificação dos contratos: [WAIA_2.0.0.md](../WAIA_2.0.0.md), seções 3, 5–8. Esta ADR registra a escolha e suas consequências, sem substituir a especificação.

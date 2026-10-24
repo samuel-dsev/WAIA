@@ -3,6 +3,67 @@
 Atualizado em 23/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
+## Objetivo
+
+Entregar login multiusuário com empresas vinculadas por acesso, gestão de acessos/empresas exclusiva do administrador geral e portal cliente de roteiro/atendimento sem configurações técnicas. A instalação 2.0.0 terá banco novo, sem empresas da versão anterior, e homologação com dados fictícios.
+
+## Estado e autorização
+
+- Em 23/10/2026, checkout confirmado em `dev`, HEAD `3b8a295` / v1.23.1. Criada a branch **`new`**, conforme pedido, sem commit, push, mudança de produção ou perda das alterações locais preexistentes.
+- M0 autorizada e concluída tecnicamente em 23/10/2026, candidata local v1.23.3. Baseline Node 22, isolamento v2 e schema/upgrade sintéticos verificados; detalhes e comandos em [M0_AMBIENTE.md](docs/M0_AMBIENTE.md). A versão 2.0.0 permanece futura; commit/push e M1 aguardam autorização própria.
+- Novo escopo substitui o SaaS aberto previsto em setembro: sem signup público, criação de empresa/equipe pelo cliente, billing ou novos conectores nesta entrega.
+- Equipe/MFA e registros pós-deploy locais preservados. Dependências caracterizadas em M0; seleção funcional de incorporação em M1. Não considerá-los publicados ou aprovados por arrasto.
+- F0/F1 históricos e antigas F2–F9 não equivalem a estas novas etapas. Histórico/evidências em RELATORIO.md; detalhes únicos em WAIA_2.0.0.md.
+
+## Sequência de execução
+
+| Etapa | Entrega | Gate principal | Estado |
+|---|---|---|---|
+| M0 | Baseline, isolamento, inventário e CI new | Alvo sintético isolado; 023 e trabalho local caracterizados | Concluída localmente; sem commit |
+| M1 | Identidade e autorização | Sem audience admin para cliente; revogação e bloqueio de signup | Planejada |
+| M2 | Administração geral de acessos/vínculos | Cadastro N:N pelo painel, transacional e auditado | Planejada |
+| M3 | Login, lista e workspace | Zero/uma/várias empresas, troca segura e fictícios pelo painel | Planejada |
+| M4 | Edição do atendimento | DTO permitido, merge no servidor e conflito 409 | Planejada |
+| M5 | Simulação/publicação | Sem publicar técnico oculto ou reativar suspensa | Planejada |
+| M6 | Funcionalidades liberadas | Capacidades respeitam habilitação/limites da empresa | Planejada |
+| M7 | Acompanhamento/perfil | Recursos opcionais autorizados e isolamento de mídia/ações | Planejada |
+| M8 | Homologação e revisão | T01–T24, banco/Redis/navegador e subagentes | Planejada |
+| M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Planejada |
+| M10 | Aceite e entrega 2.0.0 | Definição de pronto, manuais e autorizações de publicação | Planejada |
+
+Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase de implementação a autorizar é **M1**.
+
+## Regras de continuidade
+
+- Checkout principal na branch **`new`** para este pedido; não promover/push de `dev` automaticamente. Preservar alterações preexistentes e operação anterior.
+- Reutilizar infraestrutura `waia-test`, sem apagar bases/volumes ou criar projeto permanente por fase. Banco, roles, filas/cache/locks, mídia e egress do novo alvo precisam ser isolados.
+- Não executar seed histórico nem importar empresas/dados/credenciais da versão anterior. Fictícios são cadastrados pelo painel na fase indicada.
+- Migrações aditivas; verificar 023 antes de incorporar. Não editar migração aplicada.
+- Clientes configurados pelo painel, sem `.env`, SQL, seed, restart ou deploy por tenant.
+- Cada fase usa subagentes com revisão independente e dono único por arquivo quando houver escrita paralela.
+- Antes de commit: arquivos, validações, versão e mensagem; aguardar confirmação. Commit/push autorizado é da branch `new`; fase seguinte, integração de branches e deploy têm autorização própria.
+- Testes em memória não comprovam PostgreSQL/Redis/serviços reais. Evidenciar skips e limites.
+
+## Decisões a fechar
+
+Domínio/origem, entrega de ativação/recuperação, política MFA cliente, capacidades opcionais, recursos isolados e janela de operação. Billing/QR/RAG não são gates deste escopo. Detalhes na seção 15 da especificação.
+
+## Registros operacionais anteriores — preservados
+
+As seções abaixo descrevem a versão anterior e foram preservadas. Não são fases ou autorizações do roteiro atual M0–M10.
+
+## Pausa ao responder pelo WhatsApp Business — 23/10/2026
+
+v1.23.0/b6af531 e complemento de segurança v1.23.1/3b8a295 autorizados e enviados a dev. v1.23.1 publicada na VPS: 580 testes aprovados/21 skips, sete verificações PostgreSQL reais e auditoria zerada; migração 026 aplicada (25 no total, sem 023/equipe/MFA), backup completo/cópia externa cifrada verificados, serviços saudáveis e controles administrativos preservados. Pelo painel, rascunho73 publicado como revisão34 da ALFATECH, somente a opção de pausa por mensagem do Business alterada; roteiro, grupo, demais empresas e status suspenso preservados por hashes. YCloud mantém os dois eventos anteriores e acrescenta somente whatsapp.smb.message.echoes. Desativação de saudações/ausência do aplicativo confirmada pelo usuário. Teste externo comprovou: mensagem enviada pelo aplicativo Business da ALFATECH pausou somente a conversa de teste, sem ficha/notificação nova; histórico e demais conversas preservados. Escopo/limites em [PAUSA_WHATSAPP_BUSINESS.md](docs/PAUSA_WHATSAPP_BUSINESS.md), evidência local em .tmp/DEPLOY_V1.23.1_20261023.md. Registro pós-deploy local, sem novo commit ou promoção de main.
+
+## Referência descritiva do anúncio — 20/10/2026
+
+Teste às 17h57 não gerou ficha nem pendência ao grupo: encerramento confirmado/lido com nonLeadHandoff concluído, conversa pausada e sem lead anterior nessa conversa. Remetente conectado, rota teste habilitada/revisão 1, sem erro de transporte. Cliente descreveu o produto do anúncio, forneceu nome/cidade e não soube o nome comercial; a regra confundiu isso com ausência de produto em mente. Pelo painel, alterados somente /ai/prompt e /ai/leadQualificationCriteria para aceitar referência literal descritiva, sem inventar marca/modelo e sem incluir pós-venda/manutenção. Rascunho 72 publicado como configuração 32; empresa já estava ativa/config31 ao iniciar e foi mantida ativa. Confirmação por hash e diff entre revisões: somente esses dois campos. Teste local com dados fictícios: descrição literal aceita e nome comercial inventado bloqueado pelo parser existente. Sem código, manifest, commit, push ou deploy novo; runtime v1.22.0/93900ea preservado. Somente a conversa de teste sem responsável foi devolvida ao bot pelo painel, mantendo histórico e sem reset/replay. Novo teste real às 18h09 gerou ficha válida/config32 com nome, cidade, descrição literal do produto e telefone real; encerramento lido e conversa pausada. Uma única ficha e uma única notificação, destinada à rota configurada. Conector aceitou às 18h09min17s, com ID confirmado, sem erro; não confundir accepted com confirmação de recepção/leitura no grupo. Usuário confirmou explicitamente que o resumo chegou ao grupo teste. Fluxo real comprovado: nome/cidade/descrição literal, ficha única, encerramento lido, pausa e uma única notificação, com recepção confirmada pelo usuário. Prova sanitizada em `.tmp/simple-intake-description-fix/live-lead-proof.json`. Evidências locais em `.tmp/simple-intake-description-fix/verified.json` e `criterios-config32.png`.
+
+## Publicação da triagem simples — 20/10/2026
+
+Commit 93900ea enviado a dev e v1.22.0 publicada com autorização, backup externo cifrado verificado, serviços saudáveis e rollback v1.21.4 preservado. Pelo painel, rascunho 70 publicado como configuração 30, triagem simples habilitada, catálogo/modo comercial e vínculo publicado Sheets desativados; sem espera. ALFATECH mantida suspensa, grupo teste/revisão 1 e demais empresas preservados. Cadastro/credencial/cache Google preservados: painel não expõe desligamento físico da sincronização existente; vínculo removido do contexto da IA e zero produtos no runtime. Sem teste real, reset ou novo disparo. Evidência final em `.tmp/DEPLOY_V1.22.0_20261020.md`; registro pós-deploy local, sem segundo commit.
+
 Pedido de 20/10/2026: simplificar ALFATECH para nome, cidade e modelo de interesse de novo comprador, aproveitando o nome no anúncio e desconectando planilha/catálogo do atendimento. Pós-venda/manutenção/outros assuntos devem seguir ao humano sem ficha/notificação. Candidata local v1.22.0 opt-in por empresa: 575 testes aprovados/20 skips em Node 22 e 15 verificações PostgreSQL reais aprovadas; roteiro/escopo/limites em [TRIAGEM_COMERCIAL.md](docs/TRIAGEM_COMERCIAL.md). Rascunho 69 preparado pelo painel, sem publicação; novo modo e desabilitação operacional do conector serão concluídos após deploy aprovado. Empresa observada suspensa, sem reativação. Equipe/MFA preservados; commit/push/deploy/publicação dependem de aprovação específica.
 
 Continuação de 20/10/2026: teste após v1.21.3 gerou ficha ALFATECH, encerramento lido e pausa às 16h45; notificação ficou pendente sem tentativa. Remetente conectado, mas descoberta/cache de grupos sem atualização desde inicialização e falhas genéricas repetidas. Candidata v1.21.4 isola descoberta da entrega: falha na listagem não bloqueia destino configurado, ainda revalidado individualmente; intervalo de consulta e logs por etapa/código sanitizados. Entradas de grupo inválidas/duplicadas são descartadas. Escopo em [NOTIFICACOES_GRUPOS.md](docs/NOTIFICACOES_GRUPOS.md). Commit 3520aa9 enviado a dev e v1.21.4 publicada com autorização; serviços saudáveis e configurações preservadas. O lead pendente já havia sido aceito pelo conector às 16h48, antes da publicação; mesma ficha/entrega preservada sem duplicação. Usuário confirmou recebimento do resumo no grupo teste; ficha, pausa, destino e registro único conferidos. Falha intermitente de descoberta GROUPS_UNAVAILABLE observada após deploy, agora isolada da fila. Evidência final local em `.tmp/DEPLOY_V1.21.4_20261020.md`. Equipe/MFA e configurações preservados.
@@ -46,52 +107,3 @@ Adendo de 08/10/2026: roteiro único da IA preparado localmente como v1.14.0, po
 Adendo de 07/10/2026: conector YCloud da Filaretti publicado em produção como v1.12.1 (`b780ae9`), com autorização explícita. Conexão validada pelo painel e webhook ativo na YCloud. A ativação do número encontrou validação administrativa ainda exclusiva da Meta; correção preparada como v1.12.2, aguardando aprovação de commit/push e publicação. Escopo e gates em [YCLOUD_FILARETTI.md](docs/YCLOUD_FILARETTI.md). Não conclui nem autoriza o restante da F5.
 
 Deploy de 07/10/2026: imagem v1.12.1 imutável validada em Node 22, com zero vulnerabilidades; migrações 021/022/024 aplicadas, sem F2/023. Serviços saudáveis e rollback preservado. Backup verificado e cópia cifrada na estação; renovação OAuth do backup Google Drive pendente. Evidência operacional em RELATORIO.md.
-
-## Pausa ao responder pelo WhatsApp Business — 23/10/2026
-
-Commit b6af531/v1.23.0 autorizado e enviado a dev, sem equipe/MFA. Deploy não realizado: auditoria passou a apontar dois avisos no lockfile anterior, bloqueando o gate de CI. Candidata pontual v1.23.1 atualiza somente Zod e ip-address, com 580 testes aprovados/21 skips, sete verificações PostgreSQL reais aprovadas e auditoria zerada; cinco arquivos descritos em [PAUSA_WHATSAPP_BUSINESS.md](docs/PAUSA_WHATSAPP_BUSINESS.md). Complemento ainda depende de confirmação para commit/push/deploy. Usuário confirmou saudações/ausência do aplicativo desativadas. ALFATECH atualmente suspensa/config33, preservada; rascunho72 possui divergência em integrations a alinhar pelo painel antes da publicação. Sessão YCloud expirada. Sem configuração externa nova, migração aplicada ou ativação da empresa nesta etapa.
-
-Pedido confirmado: ao responder pelo aplicativo WhatsApp Business, pausar somente a conversa daquele cliente, com retomada manual. Candidata local v1.23.0 opt-in por empresa, evento YCloud autenticado fora da fila de IA, nota interna/deduplicação atômicas e barreira contra eventos anteriores à retomada; sem ficha ou notificação por esse evento. 580 testes aprovados/21 skips em Node 22 e sete verificações PostgreSQL reais aprovadas em banco temporário exclusivo de waia-test, removido sem alterar o banco existente. Migração aditiva 026, sem 023/equipe/MFA. 17 arquivos e limites em [PAUSA_WHATSAPP_BUSINESS.md](docs/PAUSA_WHATSAPP_BUSINESS.md). Ainda sem commit/push/deploy, nova assinatura de evento YCloud ou publicação da ALFATECH; teste real pendente. Demais alterações locais preservadas e excluídas da candidata.
-
-## Objetivo
-
-Evoluir a base atual para SaaS de autoatendimento: conta individual, empresa própria, assinatura, configuração da IA, conexão WhatsApp guiada e inbox com controle humano/automático.
-
-## Estado e autorização
-
-- `main`: referência estável v1.10.6, merge `707a46d`, promovida com autorização em 16/09/2026.
-- `dev`: F0 versionada/publicada no commit `40eeb9c` (v1.10.9); F1 preparada como v1.11.0, com commit/push explicitamente autorizados pelo usuário.
-- Produto 2.0.0 permanece futuro; a F1 é uma entrega incremental compatível.
-- Pedido de início recebido em 16/09/2026: iniciada F0, preservando a revisão documental anterior.
-- F0 concluída e commit/push autorizados. F1 autorizada posteriormente e implementada; gate local validado em PostgreSQL/Redis reais. Commit/push da F1 autorizados após apresentação do conjunto; F2 aguarda autorização própria.
-
-## Sequência de execução
-
-| Fase | Entrega | Gate principal | Estado |
-|---|---|---|---|
-| F0 | Baseline, inventário e decisões | Ambiente/testes conhecidos; contratos definidos | Concluída; commit 40eeb9c |
-| F1 | Conta e empresa do cliente | Dois cadastros independentes com isolamento real | Gate local concluído; commit/push autorizados; e-mail real pendente |
-| F2 | Equipe, propriedade, MFA e permissões | Sem escalada de acesso; revogação efetiva | Planejada |
-| F3 | Questionário e IA simplificados | Configuração/publicação sem intervenção técnica | Planejada |
-| F4 | Planos, assinatura e quotas | Sandbox completo, idempotência e reconciliação | Planejada |
-| F5 | WhatsApp guiado | Conector/QR aprovado e duas conexões isoladas | Planejada |
-| F6 | Inbox e automação | Humano/IA/pausa seguros sob concorrência | Planejada |
-| F7 | Conhecimento por empresa | PDF/texto/URL isolados e removíveis | Planejada |
-| F8 | Site e prontidão comercial | Jornada completa, termos e operação aprovados | Planejada |
-| F9 | Candidata e piloto | Restore/rollback, sete dias e aceite de release | Planejada |
-
-Detalhes, dependências, arquivos, APIs, migrações, decisões e testes: seções 5–20 da especificação. Decisões técnicas F0: [ADR 001](docs/ADR_001_PORTAL_IDENTIDADE.md). Cada fase termina com relatório curto e evidência; não repetir aqui a especificação.
-
-## Regras de continuidade
-
-- Trabalhar no checkout principal e `dev`; preservar alterações do usuário e tenants existentes.
-- Usar `waia-test` nas validações Docker, sem apagar volumes nem criar ambiente permanente por fase.
-- Não editar migrações aplicadas; ampliar de modo aditivo e testar compatibilidade.
-- Não exigir `.env`, seed, SQL, reinício ou deploy para cadastrar cada cliente.
-- Antes de commit: arquivos, validações, versão e mensagem; confirmação explícita. Após confirmação, commit/push em `dev`; próxima fase exige novo aceite.
-- Produção, domínio, fornecedor, credenciais reais, restauração e testes externos seguem autorização específica.
-- `npm test` não comprova PostgreSQL/Redis opt-in nem capacidade da VPS.
-
-## Decisões a fechar
-
-E-mail/domínio, cobrança e preços, trial/limites, caminho Meta/QR, modelo e índice de conhecimento, proprietário/entitlement dos tenants legados, termos/retenção e metas de operação. Propostas e gates estão na seção 20 da especificação.

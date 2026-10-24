@@ -18,6 +18,7 @@ docs/*
 !docs/CONTATOS_PAINEL.md
 !docs/ESPERA_RESPOSTAS_IA.md
 !docs/NOTIFICACOES_GRUPOS.md
+!docs/M0_AMBIENTE.md
 RELATORIO.md
 AGENTS.md
 package-lock.json
