@@ -1,4 +1,5 @@
-FROM node:22-alpine AS runtime
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -12,6 +13,11 @@ COPY db ./db
 COPY panel ./panel
 COPY public ./public
 COPY portal ./portal
+
+ARG SOURCE_REVISION=unrecorded
+ARG RELEASE_VERSION=unrecorded
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION \
+      org.opencontainers.image.version=$RELEASE_VERSION
 
 USER node
 EXPOSE 3001

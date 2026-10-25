@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **25/10/2026**. Estado: **M0–M7 commitadas localmente até a2f0a56 / v1.30.0; M8 concluída localmente em v1.30.1 com commit no fechamento**. M9–M10 dependem de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Histórico e evidências por fase em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M8_HOMOLOGACAO.md](docs/M8_HOMOLOGACAO.md).
+Atualizado em **25/10/2026**. Estado: **M0–M8 commitadas localmente até be548d5 / v1.30.1; M9 autorizada com preparação local da candidata 2.0.0-rc.1**. Domínio/e-mail e perímetro efetivo permanecem pendentes por escolha do usuário; M10 depende de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 estável é entrega futura**. Histórico e evidências em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M9_CANDIDATA.md](docs/M9_CANDIDATA.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0–M7 têm commits locais; M8 tem gates locais concluídos e commit no fechamento. M9–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M8 têm commits locais. M9 autorizada para preparação local/ensaio tmpfs, com domínio/e-mail pendentes; M10 depende de autorização própria. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -366,6 +366,8 @@ Autorizada e concluída localmente em 25/10/2026, base `a2f0a56` / v1.30.0, entr
 **Gate:** matriz obrigatória reproduzível, sem bloqueador crítico/alto de acesso/perda de dados; limites externos explícitos. Subagentes: testes/E2E e segurança/operação independentes.
 
 ### M9 — candidata, infraestrutura e recuperação
+
+Preparação local autorizada em 25/10/2026, versão **2.0.0-rc.1**, base **be548d5**. Restore sintético em containers tmpfs autorizado expressamente; domínio/e-mail ficam pendentes por escolha do usuário. Artefato, ingress separado, 668 testes/30 skips, 132 integrações e ensaio de recuperação/retorno descritos em [M9_CANDIDATA.md](docs/M9_CANDIDATA.md). O gate externo completo continua aberto, sem push/deploy ou avanço à M10.
 
 - Preparar `2.0.0-rc.N` após M8, congelar contrato e gerar imagem única/checksum/digest com assets do mesmo commit.
 - Definir domínio/origem/cookies da nova instalação e ingress público estrito para portal/account/app; não liberar `/api/admin`, `/metrics` ou cofre.

@@ -34,12 +34,19 @@ docker compose -p "$PROJECT" exec -T postgres pg_restore --list < "$BUNDLE/postg
 tar -tzf "$BUNDLE/media.tar.gz" >/dev/null
 
 services_stopped=false
-restart_services() {
-  if [ "$services_stopped" = true ]; then docker compose -p "$PROJECT" start api worker >/dev/null; fi
+report_incomplete_restore() {
+  restore_status=$?
+  if [ "$services_stopped" = true ]; then
+    printf '%s\n' 'Restore interrompido. Reinicio automatico desabilitado; mantenha API e worker parados e confira banco, midia e migracoes antes de reiniciar manualmente.' >&2
+  fi
+  return "$restore_status"
 }
-trap restart_services EXIT HUP INT TERM
-docker compose -p "$PROJECT" stop api worker
+trap report_incomplete_restore EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 services_stopped=true
+docker compose -p "$PROJECT" stop api worker
 
 docker compose -p "$PROJECT" exec -T postgres psql \
   --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 \

@@ -188,12 +188,11 @@ test("imagem de produção contém somente os artefatos necessários ao runtime"
   ]);
 
   assert.doesNotMatch(dockerfile, /COPY \. \./u);
-  for (const directory of ["src", "scripts", "db", "panel", "public"]) {
+  for (const directory of ["src", "scripts", "db", "panel", "public", "portal"]) {
     assert.match(dockerfile, new RegExp(`COPY ${directory} \\.\\/${directory}`, "u"));
   }
-  assert.match(workflow, /docker save waia:\$\{GITHUB_SHA\} \| gzip -1 > waia-image\.tar\.gz/u);
-  assert.match(workflow, /sha256sum waia-image\.tar\.gz > waia-image\.tar\.gz\.sha256/u);
-  assert.match(workflow, /path: \|[^]*waia-image\.tar\.gz[^]*waia-image\.tar\.gz\.sha256/u);
+  assert.match(workflow, /node scripts\/release-candidate\.mjs HEAD --ci/u);
+  assert.match(workflow, /path: \|[^]*manifest\.json[^]*waia-image\.tar[^]*waia-image\.tar\.sha256/u);
 });
 
 test("retenção percorre tenants isoladamente e continua após falha", async () => {

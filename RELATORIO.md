@@ -3,6 +3,16 @@
 Atualizado em 25/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M9 — preparação local da candidata, 25/10/2026
+
+Usuário autorizou prosseguir da M8 **be548d5 / 1.30.1** e autorizou ensaio em containers temporários tmpfs, sem tocar bancos/volumes existentes. Escolheu preparação local com **domínio/e-mail pendentes**. Candidata **2.0.0-rc.1**, checkout principal `new`, contrato M1–M8 e opcionais fechados preservados. O gate externo completo da M9 permanece aberto; sem push, registry, deploy, DNS/VPS, promoção ou M10.
+
+Runner de release extrai somente commit, sem conversão CRLF, fixa base Node22 por digest, verifica SHA256 de todos os arquivos de runtime/assets dentro da imagem e exporta/checksuma/recarrega pelo Image ID. Manifesto em `.tmp/releases/<versão>-<commit>/manifest.json`; RepoDigest de registry não é inferido do Image ID. CI usa o mesmo runner, sem execução remota. Ingress v2 separado com superfícies pública/administrativa, Host/origem exatos, caminhos canônicos/allowlist, headers reescritos, cookies Secure/host-only e peers exatos. Encadeamento IP confiável é opt-in e validado; template exige dupla allowlist Traefik/operador. Legado/preview preservados.
+
+Ensaio novo/tmpfs com PostgreSQL/Redis reais: instalação30 sem seed, comando operacional `create-admin` por stdin sem eco, fixture técnica mínima, dump custom e mídia quiescentes com hashes, restauração transacional em destino vazio, comparação de linhas/hashes de66tabelas, ledger/reaplicação0, role/RLS, senha, cofre e mídia. Rollback limitado à M8 com258 arquivos de runtime/assets/package conferidos contra Git; API e protocolo outbox/jobs noop sem gateway, replay concluído negado, retorno RC e confirmação dos dois jobs concluídos. Tempos/identidades da rodada ficam no proof vinculado à imagem final. O ensaio não restaura a instalação anterior nem executa o shell legado completo em PostgreSQL real; sua correção de falha segura tem quatro testes com Docker simulado.
+
+Node22 **698 casos, 668 pass/30 skips opt-in, zero falhas**; **132 integrações PostgreSQL/Redis**, zero skips/falhas, mesmas exclusões históricas da M8. Sintaxe/Compose/build/auditoria e revisões independentes de release/dados/exposição. Corrigidos trap que reiniciava após restore incompleto, exportação Git/CRLF, tipo UUID da fixture, transferência binária de tmpfs no Desktop e vínculo exato do rollback. Sem novo código de atendimento ou alteração dos arquivos preexistentes alheios. Manual, comandos, fontes e limites em [M9_CANDIDATA.md](docs/M9_CANDIDATA.md). Domínios/TLS/perímetro real, cadeia de proxy/rate limit no alvo e recepção de e-mail autorizado continuam gates externos; estável2.0.0 não entregue.
+
 ## M8 — homologação local concluída, 25/10/2026
 
 Usuário autorizou prosseguir para a M8 e pediu retomada após interrupção. Base **a2f0a56 / v1.30.0**, checkout principal `new`, entrega **1.30.1**, commit local no fechamento conforme AGENTS. Matriz T01–T24 e quatro runners reproduzíveis de schema/browser/regressões/carga. Sem alteração de código do produto ou liberação dos opcionais da M7; alterações preexistentes preservadas. Sem push, promoção, deploy ou avanço à M9.

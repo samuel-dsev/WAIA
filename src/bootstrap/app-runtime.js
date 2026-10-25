@@ -576,7 +576,9 @@ export function createApiApp({
     ? createOperationalMetricsCollector({ metrics: runtime.metrics, pool: runtime.pool, queue: runtime.queue, redis: runtime.redis })
     : null;
   app.disable("x-powered-by");
-  app.set("trust proxy", 1);
+  // A V2 installation can constrain the root/admin surface to the same exact
+  // gateway peers as the customer subapp. Preserve the legacy default when unset.
+  app.set("trust proxy", config.security.trustProxy || 1);
   app.use(helmet({
     contentSecurityPolicy: false,
   }));

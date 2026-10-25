@@ -46,6 +46,12 @@ sh scripts/restore-postgres.sh ./backups/waia-backup-<timestamp>
 
 Validar checksums, migrações, RLS, contagens, integridade de mídia, cofre e readiness. Evitar envio externo no ambiente restaurado. Reconciliar outbox, IDs externos e efeitos financeiros antes de reabrir workers em recuperação real. Preservar evidência; limpeza de alvo/volumes exige autorização.
 
+## Candidata 2.0.0 e preparação local da M9
+
+[M9_CANDIDATA.md](M9_CANDIDATA.md) registra artefato por commit/Image ID/checksum, ingress v2 separado e ensaio autorizado em tmpfs. Domínio/e-mail/perímetro efetivo continuam pendentes; não instalar templates nem reutilizar o banco/filas legados por arrasto. A promoção deve carregar exatamente o archive homologado, conferir checksum/Image ID e usar esse mesmo ID em API, workers e gateways; sem rebuild.
+
+Backup coerente de banco/mídia exige interromper escritores e workers na janela autorizada. O shell de restore agora mantém serviços parados quando stop, restore ou migração falha; confirmar estado e integridade antes de qualquer reinício manual. A prova real da M9 usa destino temporário vazio e pg_restore transacional, enquanto a correção do shell tem testes de falha com Docker simulado. Nenhum desses testes autoriza restore em `waia-test` existente ou produção.
+
 ## Produção Hostinger — cuidados preservados
 
 - Layout registrado: `waia-prod`, `/opt/waia/releases/<versao>`, symlink `/opt/waia/current`; hostname histórico `srv1513113.hstgr.cloud`. Conferir ao vivo antes de operar.

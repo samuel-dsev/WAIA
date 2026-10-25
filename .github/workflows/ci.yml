@@ -28,23 +28,18 @@ jobs:
           DATABASE_APP_PASSWORD: synthetic-ci-app-password
         run: docker compose config --quiet
       - name: Build immutable candidate
-        run: docker build --no-cache --tag waia:${GITHUB_SHA} .
-      - name: Export immutable candidate
         run: |
-          echo "WAIA_IMAGE=waia:${GITHUB_SHA}" > image-metadata.txt
-          docker image inspect waia:${GITHUB_SHA} --format 'IMAGE_ID={{.Id}}' >> image-metadata.txt
-          docker image inspect waia:${GITHUB_SHA} --format 'REPO_DIGEST={{index .RepoDigests 0}}' >> image-metadata.txt || true
-          docker save waia:${GITHUB_SHA} | gzip -1 > waia-image.tar.gz
-          sha256sum waia-image.tar.gz > waia-image.tar.gz.sha256
-          cat image-metadata.txt
+          docker pull node:22-alpine
+          node scripts/release-candidate.mjs HEAD --ci
       - uses: actions/upload-artifact@v4
         with:
           name: waia-image-${{ github.sha }}
           path: |
-            image-metadata.txt
-            waia-image.tar.gz
-            waia-image.tar.gz.sha256
+            .tmp/releases/*/manifest.json
+            .tmp/releases/*/waia-image.tar
+            .tmp/releases/*/waia-image.tar.sha256
           if-no-files-found: error
+          include-hidden-files: true
           compression-level: 0
 
   schema-and-redis:

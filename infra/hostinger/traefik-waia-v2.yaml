@@ -1,0 +1,42 @@
+# TEMPLATE não instalável: substituir os marcadores após aprovar domínio e perímetro.
+# Não substituir traefik-waia.yaml nem apontar estes serviços para a instalação legada.
+# API V2: somente rede privada, sem porta publicada. Cada gateway usa a MESMA imagem RC.
+# O gateway privado aceita apenas o IP exato do Traefik em V2_INGRESS_ADMIN_PEER_ALLOWLIST.
+# A allowlist abaixo é do OPERADOR, não do Docker/Traefik. As duas são obrigatórias.
+# IP por cliente/rate limit: V2_INGRESS_TRUSTED_PROXY_PEERS é opcional e vazio por padrão.
+# Habilitar só com o IP EXATO do Traefik após comprovar que ele acrescenta o peer
+# real ao FINAL de X-Forwarded-For, mesmo quando o visitante forja uma cadeia.
+# Não habilitar forwardedHeaders.insecure nem confiar em headers do visitante.
+# O gateway usa somente o último IP válido de XFF de um socket confiável; sem XFF
+# válido nega a requisição. Admin continua exigindo a allowlist do socket acima.
+# A API deve confiar somente nos IPs EXATOS dos gateways em TRUST_PROXY; nunca
+# aceitar uma rede Docker ampla ou header como nova autorização administrativa.
+http:
+  routers:
+    waia-v2-public:
+      rule: Host(`__V2_PUBLIC_HOST__`)
+      entryPoints: [https]
+      service: waia-v2-public-gateway
+      tls:
+        certResolver: letsencrypt
+    waia-v2-admin:
+      rule: Host(`__V2_ADMIN_HOST__`)
+      entryPoints: [https]
+      middlewares: [waia-v2-admin-operator-allowlist]
+      service: waia-v2-admin-gateway
+      tls:
+        certResolver: letsencrypt
+  middlewares:
+    waia-v2-admin-operator-allowlist:
+      ipAllowList:
+        sourceRange:
+          - __V2_OPERATOR_SOURCE_RANGE__
+  services:
+    waia-v2-public-gateway:
+      loadBalancer:
+        servers:
+          - url: http://__V2_PUBLIC_GATEWAY_CONTAINER__:3001
+    waia-v2-admin-gateway:
+      loadBalancer:
+        servers:
+          - url: http://__V2_ADMIN_GATEWAY_CONTAINER__:3001

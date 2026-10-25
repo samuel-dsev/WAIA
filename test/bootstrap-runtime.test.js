@@ -8,6 +8,7 @@ import {
   probeWorkerHeartbeats,
 } from "../src/bootstrap/app-runtime.js";
 import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
+import { AuthenticationRequiredError } from '../src/modules/auth/errors.js';
 
 const tenantDefinition = Object.freeze({
   runtime: {
@@ -76,6 +77,21 @@ test('M3 raiz abre portal somente com contas habilitadas e assets não são cach
   }
   const html = await (await request(app, '/portal/')).text();
   assert.doesNotMatch(html, /id="(?:register|company-form|team|invite-form)"/);
+});
+
+test('origem do proxy configurada protege root/admin contra XFF de peer não confiável', async () => {
+  const config = { environment: 'test', whatsapp: { verifyToken: 'test', appSecret: '' },
+    security: { cookieSecure: false, sessionTtlHours: 12, adminNetworkAllowlist: '203.0.113.5/32', trustProxy: '192.0.2.12/32' } };
+  const runtime = fakeRuntime();
+  runtime.authService.authenticate = async () => { throw new AuthenticationRequiredError(); };
+  const untrusted = createApiApp({ runtime, config });
+  const spoofed = { headers: { 'x-forwarded-for': '203.0.113.5', cookie: 'waia_customer_session=synthetic' } };
+  assert.equal((await request(untrusted, '/api/admin/companies', spoofed)).status, 403);
+  const trusted = createApiApp({ runtime, config: { ...config,
+    security: { ...config.security, trustProxy: '127.0.0.1/32' } } });
+  // A known gateway may forward the validated operator IP; application auth is
+  // still mandatory and fails with401. A customer cookie never grants admin.
+  assert.equal((await request(trusted, '/api/admin/companies', spoofed)).status, 401);
 });
 
 test("API bootstrap expoe health e verificacao do webhook sem servicos externos", async () => {

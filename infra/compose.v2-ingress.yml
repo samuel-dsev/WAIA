@@ -1,0 +1,42 @@
+# Preparação apenas. Requer API V2 já isolada, sem porta direta publicada.
+# Não combinar com o Compose legado nem usar a rede/banco da instalação anterior.
+name: ${WAIA_COMPOSE_PROJECT:?Projeto V2 aprovado obrigatorio}
+services:
+  v2-public-gateway:
+    image: ${WAIA_IMAGE:?Image ID ou digest homologado obrigatorio}
+    command: [node, scripts/v2-ingress.mjs]
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    environment:
+      NODE_ENV: production
+      V2_INGRESS_SURFACE: public
+      V2_INGRESS_ORIGIN: ${V2_PUBLIC_ORIGIN:?Origem HTTPS aprovada obrigatoria}
+      V2_INGRESS_UPSTREAM: ${V2_API_UPSTREAM:?API V2 privada obrigatoria}
+      V2_INGRESS_TRUSTED_PROXY_PEERS: ${V2_TRAEFIK_EXACT_PEER:?IP exato do Traefik obrigatorio}
+    networks: [v2_api, perimeter]
+  v2-admin-gateway:
+    image: ${WAIA_IMAGE:?Image ID ou digest homologado obrigatorio}
+    command: [node, scripts/v2-ingress.mjs]
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    environment:
+      NODE_ENV: production
+      V2_INGRESS_SURFACE: admin
+      V2_INGRESS_ORIGIN: ${V2_ADMIN_ORIGIN:?Origem HTTPS administrativa obrigatoria}
+      V2_INGRESS_UPSTREAM: ${V2_API_UPSTREAM:?API V2 privada obrigatoria}
+      V2_INGRESS_ADMIN_PEER_ALLOWLIST: ${V2_TRAEFIK_EXACT_PEER:?IP exato do Traefik obrigatorio}
+      V2_INGRESS_TRUSTED_PROXY_PEERS: ${V2_TRAEFIK_EXACT_PEER:?IP exato do Traefik obrigatorio}
+    networks: [v2_api, perimeter]
+networks:
+  v2_api:
+    external: true
+    name: ${V2_API_NETWORK:?Rede privada V2 aprovada obrigatoria}
+  perimeter:
+    external: true
+    name: ${V2_TRAEFIK_NETWORK:?Rede do proxy aprovada obrigatoria}
