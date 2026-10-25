@@ -24,7 +24,7 @@ test("PostgreSQL publica revisão atomicamente e mantém draft fora do runtime",
   assert.ok(process.env.DATABASE_URL, "DATABASE_URL é obrigatória");
   assert.ok(process.env.DATABASE_MIGRATOR_URL, "DATABASE_MIGRATOR_URL é obrigatória");
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
   let actorId;

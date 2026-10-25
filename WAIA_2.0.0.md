@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **25/10/2026**. Estado: **M0–M6 commitadas localmente até 6e07e3e / v1.29.0; M7 concluída em v1.30.0 com commit local no fechamento**. M8–M10 dependem de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Histórico e evidências por fase em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md).
+Atualizado em **25/10/2026**. Estado: **M0–M7 commitadas localmente até a2f0a56 / v1.30.0; M8 concluída localmente em v1.30.1 com commit no fechamento**. M9–M10 dependem de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Histórico e evidências por fase em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M8_HOMOLOGACAO.md](docs/M8_HOMOLOGACAO.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0–M6 têm commits locais; M7 tem gates locais concluídos e commit no fechamento. M8–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M7 têm commits locais; M8 tem gates locais concluídos e commit no fechamento. M9–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -353,6 +353,8 @@ Estado em 25/10/2026: autorizada e concluída localmente em **v1.30.0**, base `6
 **Gate:** opcionais inacessíveis sem capacidade; habilitados mantêm isolamento/pausa/revogação. Se não liberados, comprovar negação e concluir visão geral/perfil. Subagentes: atendimento e autorização/mídia.
 
 ### M8 — homologação e revisão independente
+
+Autorizada e concluída localmente em 25/10/2026, base `a2f0a56` / v1.30.0, entrega **1.30.1**. Matriz local aplicável aprovada: 652 testes/30 skips, 132 integrações PostgreSQL/Redis, schema30 limpo/upgrade, browser desktop390/360 e carga3.000req/600s com p95 **136,35ms**, sem vazamentos/erros inesperados. Revisões independentes aprovadas. Limites de fixtures históricas e de e-mail/ingress/recuperação operacional da M9 explícitos em [M8_HOMOLOGACAO.md](docs/M8_HOMOLOGACAO.md). Sem push/deploy ou autorização da M9.
 
 - Executar T01–T24: domínio/HTTP, PostgreSQL/Redis reais, E2E e regressões aplicáveis.
 - Validar schema vazio sem seed, upgrade sintético e 023 ausente/presente com runtime compatível.

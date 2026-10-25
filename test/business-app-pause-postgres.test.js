@@ -11,17 +11,42 @@ import { PostgresJobHandlerRepository } from "../src/modules/jobs/handlers.js";
 test("PostgreSQL real: resposta pelo aplicativo pausa apenas a conversa, com isolamento e retomada manual", {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
 }, async (t) => {
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  t.after(async () => { await pool.end(); await owner.end(); });
+  const companyIds = [];
+  let actor;
+  t.after(async () => {
+    try {
+      // This suite also runs in the reusable M8 synthetic database. Remove only
+      // this invocation's generated IDs, never reset a database or other fixture.
+      if (companyIds.length) {
+        await owner.query('UPDATE empresas SET configuracao_ativa_versao=NULL WHERE id=ANY($1::uuid[])', [companyIds]);
+        for (const table of ['logs_auditoria', 'estados_conversa', 'mensagens', 'conversas', 'contatos', 'numeros_whatsapp', 'aplicativos_meta', 'credenciais_empresa', 'usuarios_empresas']) {
+          await owner.query(`DELETE FROM ${table} WHERE empresa_id=ANY($1::uuid[])`, [companyIds]);
+        }
+        await owner.query('DELETE FROM empresas WHERE id=ANY($1::uuid[])', [companyIds]);
+      }
+      if (actor) await owner.query('DELETE FROM usuarios WHERE id=$1', [actor]);
+    } finally { await pool.end(); await owner.end(); }
+  });
+  assert.equal(process.env.NODE_ENV, 'test');
   const db = (await owner.query("SELECT current_database() AS name")).rows[0].name;
-  assert.match(db, /^waia_gn_test_[0-9a-f]{12}$/u, "Exige banco temporário exclusivo.");
+  if (db === 'waia_v2_upgrade') {
+    const ownerUrl = new URL(process.env.DATABASE_MIGRATOR_URL), appUrl = new URL(process.env.DATABASE_URL);
+    assert.equal(ownerUrl.host, appUrl.host);
+    assert.ok(['v2-postgres', 'localhost', '127.0.0.1'].includes(ownerUrl.hostname));
+    for (const url of [ownerUrl, appUrl]) {
+      assert.equal(url.pathname, '/waia_v2_upgrade'); assert.equal(url.search, ''); assert.equal(url.hash, '');
+    }
+    assert.equal(ownerUrl.username, 'waia_v2_owner'); assert.equal(appUrl.username, 'waia_v2_app');
+  } else assert.match(db, /^waia_gn_test_[0-9a-f]{12}$/u, "Exige banco temporário exclusivo ou alvo M8 isolado.");
   const role = (await pool.query("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")).rows[0];
   assert.deepEqual(role, { rolsuper: false, rolbypassrls: false });
-  const actor = (await owner.query("INSERT INTO usuarios(email,nome,password_hash,papel_plataforma) VALUES($1,'Teste','synthetic','administrador') RETURNING id", [`${randomUUID()}@example.test`])).rows[0].id;
+  actor = (await owner.query("INSERT INTO usuarios(email,nome,password_hash,papel_plataforma) VALUES($1,'Teste','synthetic','administrador') RETURNING id", [`${randomUUID()}@example.test`])).rows[0].id;
   const fixtures = [];
   for (const enabled of [true, false]) {
     const empresaId = (await owner.query("INSERT INTO empresas(slug,nome,nome_exibicao,status) VALUES($1,'Teste','Teste','ativa') RETURNING id", [`app-pause-${randomUUID()}`])).rows[0].id;
+    companyIds.push(empresaId);
     const compiled = compileTenantRuntimeConfigV2({ schemaVersion: 2, identity: { name: "Teste" }, modules: ["human_handoff"],
       menu: { text: "Olá", options: [{ id: "human", label: "Atendente", action: "human_handoff.request", params: {} }] },
       humanHandoff: { pauseOnBusinessAppMessage: enabled } }, { empresaId, configVersion: 1, draftVersion: 1 });

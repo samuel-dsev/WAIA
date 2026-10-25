@@ -9,7 +9,7 @@ import { PostgresAdminRepository } from "../src/modules/admin/postgres-admin-rep
 test("PostgreSQL YCloud preserva isolamento, finalidades e readiness com os vínculos existentes", {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
 }, async () => {
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   const tenants = [], suffix = randomUUID();
   try {

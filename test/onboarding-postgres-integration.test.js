@@ -62,7 +62,7 @@ test("PostgreSQL bloqueia tenant incompleto e ativa publicação pronta atomicam
   assert.ok(process.env.DATABASE_URL, "DATABASE_URL é obrigatória");
   assert.ok(process.env.DATABASE_MIGRATOR_URL, "DATABASE_MIGRATOR_URL é obrigatória");
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
   let actorId;
@@ -222,8 +222,19 @@ test("PostgreSQL bloqueia tenant incompleto e ativa publicação pronta atomicam
     assert.equal(Number(unchanged.configuracao_ativa_versao), activated.configVersion);
     assert.equal(unchanged.revisions, 1);
   } finally {
-    owner.release();
-    await appPool.end();
-    await ownerPool.end();
+    try {
+      if (tenantId) {
+        await owner.query('UPDATE empresas SET configuracao_ativa_versao=NULL WHERE id=$1', [tenantId]);
+        for (const table of ['logs_auditoria', 'numeros_whatsapp', 'aplicativos_meta', 'credenciais_empresa', 'integracoes', 'usuarios_empresas']) {
+          await owner.query(`DELETE FROM ${table} WHERE empresa_id=$1`, [tenantId]);
+        }
+        await owner.query('DELETE FROM empresas WHERE id=$1', [tenantId]);
+      }
+      if (actorId) await owner.query('DELETE FROM usuarios WHERE id=$1', [actorId]);
+    } finally {
+      owner.release();
+      await appPool.end();
+      await ownerPool.end();
+    }
   }
 });

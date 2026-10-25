@@ -55,20 +55,21 @@ test("PostgreSQL publica, pina, continua e anonimiza fluxo sem cruzar tenants", 
   assert.ok(process.env.DATABASE_URL, "DATABASE_URL é obrigatória");
   assert.ok(process.env.DATABASE_MIGRATOR_URL, "DATABASE_MIGRATOR_URL é obrigatória");
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
+  let actorId, tenantId, otherTenantId;
 
   try {
-    const actorId = (await owner.query(
+    actorId = (await owner.query(
       "INSERT INTO usuarios (email, nome, password_hash) VALUES ($1,'Autor de fluxos','hash-sintetico') RETURNING id",
       [`flows-${suffix}@example.invalid`],
     )).rows[0].id;
-    const tenantId = (await owner.query(
+    tenantId = (await owner.query(
       "INSERT INTO empresas (slug,nome,nome_exibicao,status) VALUES ($1,'Empresa Fluxos','Empresa Fluxos','rascunho') RETURNING id",
       [`flows-${suffix}`],
     )).rows[0].id;
-    const otherTenantId = (await owner.query(
+    otherTenantId = (await owner.query(
       "INSERT INTO empresas (slug,nome,nome_exibicao,status) VALUES ($1,'Outro Tenant','Outro Tenant','rascunho') RETURNING id",
       [`flows-other-${suffix}`],
     )).rows[0].id;
@@ -198,8 +199,23 @@ test("PostgreSQL publica, pina, continua e anonimiza fluxo sem cruzar tenants", 
     assert.deepEqual(persisted.dados_coletados, {});
     assert.ok(persisted.audits >= 2);
   } finally {
-    owner.release();
-    await appPool.end();
-    await ownerPool.end();
+    try {
+      const ids = [tenantId, otherTenantId].filter(Boolean);
+      if (ids.length) {
+        await owner.query('UPDATE empresas SET configuracao_ativa_versao=NULL WHERE id=ANY($1::uuid[])', [ids]);
+        await owner.query("UPDATE fluxos SET ativa_versao_id=NULL,status='inativo' WHERE empresa_id=ANY($1::uuid[])", [ids]);
+        // Flow executions are append-only. They may be removed only by the
+        // company cascade, after their references were anonymized by this test.
+        for (const table of ['mensagens', 'estados_conversa', 'conversas', 'contatos', 'numeros_whatsapp', 'logs_auditoria']) {
+          await owner.query(`DELETE FROM ${table} WHERE empresa_id=ANY($1::uuid[])`, [ids]);
+        }
+        await owner.query('DELETE FROM empresas WHERE id=ANY($1::uuid[])', [ids]);
+      }
+      if (actorId) await owner.query('DELETE FROM usuarios WHERE id=$1', [actorId]);
+    } finally {
+      owner.release();
+      await appPool.end();
+      await ownerPool.end();
+    }
   }
 });

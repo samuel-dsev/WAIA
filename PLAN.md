@@ -16,7 +16,8 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 - M4 autorizada e concluída em **v1.27.0**, com editor por campos, merge transacional, RLS 029, auditoria e conflito 409. 630 testes aprovados/24 skips, 70 integrações e browser aprovados; sem push/deploy. Manual e limites em [M4_ATENDIMENTO.md](docs/M4_ATENDIMENTO.md).
 - M5 autorizada e concluída em **v1.28.0**, com simulação isolada, revisão/diff de negócio, preflight e publicação idempotente sem ativação. Base em `d671141`, commit local **31730d6**. Gates, evidências e limites em [M5_PUBLICACAO.md](docs/M5_PUBLICACAO.md). Sem push/deploy.
 - M6 autorizada e concluída em **v1.29.0**, base `31730d6`: catálogo funcional sanitizado, horários/regras no contexto existente da IA, guarda em todos os envios bot e confirmação de handoff com CAS/checkpoint. 652 aprovados/28 skips, 97 integrações e browser real aprovados. Commit local **6e07e3e**; sem push/deploy. [M6_FUNCIONALIDADES.md](docs/M6_FUNCIONALIDADES.md) registra arquivos, comandos e limites.
-- M7 autorizada e concluída em **v1.30.0**, base `6e07e3e`: visão geral sanitizada e segurança pessoal; por escolha explícita do usuário, conversas/fichas/mídia/ações humanas permanecem fechadas. 652 aprovados/30 skips, 113 integrações e browser com APIs reais aprovados; commit local no fechamento, sem push/deploy. Evidências e limites em [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md). M8 aguarda autorização.
+- M7 autorizada e concluída em **v1.30.0**, base `6e07e3e`: visão geral sanitizada e segurança pessoal; por escolha explícita do usuário, conversas/fichas/mídia/ações humanas permanecem fechadas. 652 aprovados/30 skips, 113 integrações e browser com APIs reais aprovados; commit local **a2f0a56**, sem push/deploy. Evidências e limites em [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md).
+- M8 autorizada e concluída localmente em **v1.30.1**, base **a2f0a56 / v1.30.0**: matriz T01–T24 aplicável, 652 testes/30 skips, 132 integrações aprovadas, schema limpo/upgrade30, browser360/390/desktop e carga3.000req/600s com p95 **136,35ms** e zero vazamentos/erros. Commit local no fechamento; sem push/deploy. Exclusões históricas e gates externos da M9 explícitos em [M8_HOMOLOGACAO.md](docs/M8_HOMOLOGACAO.md). M9 aguarda autorização.
 - Novo escopo substitui o SaaS aberto previsto em setembro: sem signup público, criação de empresa/equipe pelo cliente, billing ou novos conectores nesta entrega.
 - Equipe/MFA e registros pós-deploy locais preservados. M0 caracterizou o schema 023; M1 incorporou segurança pessoal/MFA necessária e bloqueou equipe cliente. Portal/equipe e demais registros anteriores não são aprovados por arrasto.
 - F0/F1 históricos e antigas F2–F9 não equivalem a estas novas etapas. Histórico/evidências em RELATORIO.md; detalhes únicos em WAIA_2.0.0.md.
@@ -33,11 +34,11 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 | M5 | Simulação/publicação | Sem publicar técnico oculto ou reativar suspensa | Concluída 1.28.0; commit local no fechamento |
 | M6 | Funcionalidades liberadas | Capacidades respeitam habilitação/limites da empresa | Concluída 1.29.0; commit local no fechamento |
 | M7 | Acompanhamento/perfil | Opcionais fechados; visão geral e segurança pessoal isoladas | Concluída 1.30.0; commit local no fechamento |
-| M8 | Homologação e revisão | T01–T24, banco/Redis/navegador e subagentes | Planejada |
+| M8 | Homologação e revisão | T01–T24 locais, banco/Redis/navegador/carga e revisão independente | Concluída 1.30.1; commit local no fechamento |
 | M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Planejada |
 | M10 | Aceite e entrega 2.0.0 | Definição de pronto, manuais e autorizações de publicação | Planejada |
 
-Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). A próxima fase a autorizar é **M8**.
+Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). Próxima fase a autorizar: **M9**.
 
 ## Regras de continuidade
 

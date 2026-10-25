@@ -10,7 +10,7 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
 }, async () => {
   assert.ok(process.env.DATABASE_URL); assert.ok(process.env.DATABASE_MIGRATOR_URL);
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   let empresaId;
   try {
     empresaId = (await owner.query("INSERT INTO empresas (slug,nome,nome_exibicao,status) VALUES ($1,'Espera IA','Espera IA','ativa') RETURNING id", ["ai-delay-" + randomUUID()])).rows[0].id;

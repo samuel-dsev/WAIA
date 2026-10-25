@@ -9,7 +9,7 @@ import { PostgresConversationRepository } from "../src/modules/conversations/pos
 test("PostgreSQL real: anúncio persiste isolado; confirmação registra interesse/pausa uma vez e respeita humano/privacidade", {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
 }, async () => {
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   let empresaId;
   try {

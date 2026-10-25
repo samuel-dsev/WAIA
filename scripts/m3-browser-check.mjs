@@ -37,11 +37,18 @@ const passwordFor = (email) => {
   return credentials[email];
 };
 const browser = await chromium.launch({ headless: true, channel: 'msedge' });
-let stage = 'admin';
+let stage = 'admin', diagnosticPage;
 try {
   const state = '.secrets/v2-m3-admin-browser.json';
-  const admin = await browser.newContext(existsSync(state) ? { storageState: state } : {});
-  const panel = await admin.newPage(); panel.on('pageerror', (error) => errors.push(error.message));
+  const admin = await browser.newContext(existsSync(state) && !process.argv.includes('--fresh-admin-session') ? { storageState: state } : {});
+  const panel = await admin.newPage(); diagnosticPage = panel; panel.on('pageerror', (error) => errors.push(error.message));
+  panel.on('response', async (response) => {
+    if (response.status() < 400 || !response.url().includes('/api/admin/')) return;
+    const body = await response.json().catch(() => ({}));
+    const code = body.code || body.error?.code;
+    console.log(JSON.stringify({ stage: 'admin-response', status: response.status(), code: /^[A-Z_]+$/.test(code || '') ? code : 'UNKNOWN',
+      path: new URL(response.url()).pathname.replace(/[0-9a-f-]{36}/gi, ':id') }));
+  });
   await panel.goto(`${origin}/panel/`);
   const session = await panel.request.get(`${origin}/api/admin/session`);
   if (session.status() !== 200) {
@@ -81,8 +88,15 @@ try {
   for (const [name, email, companies] of dataset) {
     stage = `acesso ${name}`; console.log(stage); passwordFor(email);
     await panel.locator('[data-view=accessUsers]').click();
-    await panel.getByRole('button', { name: 'Novo acesso', exact: true }).click();
+    await panel.getByRole('button', { name: 'Novo acesso', exact: true }).waitFor({ state: 'visible' });
+    const existing = panel.getByRole('button', { name: `Gerenciar acesso de ${name}`, exact: true });
     const dialog = panel.locator('.access-dialog');
+    if (await existing.count()) {
+      // Later phases may have changed capabilities deliberately. Reuse the
+      // existing access through the panel instead of overwriting its grants.
+      await existing.click();
+    } else {
+    await panel.getByRole('button', { name: 'Novo acesso', exact: true }).click();
     await dialog.locator('input[name=name]').fill(name); await dialog.locator('input[name=email]').fill(email);
     for (const company of companies) {
       const choice = dialog.locator('.access-company-choice').filter({ hasText: company });
@@ -98,6 +112,7 @@ try {
       const mfa = JSON.parse(readFileSync('.secrets/v2-preview-admin-mfa.json', 'utf8'));
       await reauth.locator('input[name=password]').fill(password); await reauth.locator('input[name=code]').fill(code(mfa.secret));
       await reauth.getByRole('button', { name: 'Confirmar identidade', exact: true }).click();
+    }
     }
     await dialog.locator('.access-email').waitFor();
     if (await dialog.locator('select[name=identityStatus]').inputValue() !== 'ativo') {
@@ -291,6 +306,11 @@ try {
   writeFileSync('.tmp/m3/browser-proof.json', JSON.stringify({ status: 'passed', date: new Date().toISOString(), proof }, null, 2));
   console.log(JSON.stringify({ status: 'passed', checks: proof }));
 } catch (error) {
+  mkdirSync('.tmp/m3', { recursive: true });
+  if (diagnosticPage) {
+    await diagnosticPage.screenshot({ path: '.tmp/m3/failure.png', fullPage: true }).catch(() => {});
+    writeFileSync('.tmp/m3/failure.txt', await diagnosticPage.locator('.access-dialog,.access-reauth-dialog').allTextContents().then((rows) => rows.join('\n')).catch(() => ''));
+  }
   console.error(`M3 browser falhou: ${stage}. ${String(error.message).replace(/[A-Za-z0-9_-]{43,}/g, '[redacted]')}`);
   process.exitCode = 1;
 } finally { await browser.close(); }

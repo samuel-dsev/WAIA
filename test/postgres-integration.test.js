@@ -16,7 +16,7 @@ test("papel da aplicação não possui DDL e respeita o tenant definido na trans
   assert.notEqual(process.env.DATABASE_URL, process.env.DATABASE_MIGRATOR_URL);
 
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const migratorPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const migratorPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await migratorPool.connect();
   const suffix = randomUUID();
   let tenantA;
@@ -84,7 +84,9 @@ test("papel da aplicação não possui DDL e respeita o tenant definido na trans
   } finally {
     await owner.query("ROLLBACK").catch(() => {});
     if (tenantA || tenantB) {
-      await owner.query("DELETE FROM empresas WHERE id = ANY($1::uuid[])", [[tenantA, tenantB].filter(Boolean)]).catch(() => {});
+      const ids = [tenantA, tenantB].filter(Boolean);
+      await owner.query("DELETE FROM contatos WHERE empresa_id = ANY($1::uuid[])", [ids]);
+      await owner.query("DELETE FROM empresas WHERE id = ANY($1::uuid[])", [ids]);
     }
     owner.release();
     await appPool.end();
@@ -185,7 +187,7 @@ test("PostgreSQL reserva e libera a capacidade real de um horário", { skip: !en
 test("PostgreSQL persiste metadados verificáveis da mídia privada", { skip: !enabled }, async () => {
   assert.ok(process.env.MEDIA_STORAGE_ROOT, "MEDIA_STORAGE_ROOT é obrigatória no teste de mídia");
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
   const correlationId = randomUUID();
@@ -261,7 +263,7 @@ test("PostgreSQL persiste metadados verificáveis da mídia privada", { skip: !e
 
 test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { skip: !enabled }, async () => {
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
   const idempotencyKey = randomUUID();
@@ -533,7 +535,7 @@ test("PostgreSQL enfileira e conclui resposta humana idempotente e auditada", { 
 
 test("PostgreSQL sincroniza agenda Google Sheets com RLS e desativa evento removido", { skip: !enabled }, async () => {
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: '-c app.is_platform_admin=true' });
   const owner = await ownerPool.connect();
   const suffix = randomUUID();
   let empresaId;
