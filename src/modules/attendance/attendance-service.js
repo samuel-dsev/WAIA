@@ -11,6 +11,9 @@ import { stableJson } from '../configuration/stable-json.js';
 import { PostgresOnboardingRepository } from '../onboarding/postgres-onboarding-repository.js';
 import { OnboardingService } from '../onboarding/onboarding-service.js';
 import { PreviewService } from '../onboarding/preview-service.js';
+import { verifyCompiledTenantRuntimeConfigV2 } from '../configuration/compiler.js';
+import { projectAttendanceResources } from './feature-catalog.js';
+import { loadGoogleSheetsProducts } from '../../tenants/postgres-config-loader.js';
 
 const missing = () => new AccountError('COMPANY_NOT_FOUND', 404, 'Empresa não encontrada.');
 const conflict = () => new AccountError('DRAFT_VERSION_CONFLICT', 409, 'O atendimento mudou em outra sessão. Recarregue e revise suas alterações antes de salvar.');
@@ -34,7 +37,7 @@ export class AttendanceService {
         empresaId, permission, now: this.clock(), idleMs: this.idleMs, lockCompany: permission === 'attendance.publish' }, async (tx) => {
         await tx.client.query("SELECT set_config('app.attendance_session_id',$1,true)", [auth.sessionId]);
         const tenant = (await tx.client.query(`SELECT e.id,e.nome AS name,e.status,e.configuracao_ativa_versao AS active_version,
-          e.publicada_at,m.status membership_status,m.permissoes
+          e.publicada_at,e.configuracao_runtime_modo AS runtime_mode,e.versao_configuracao AS configuration_version,m.status membership_status,m.permissoes
           FROM empresas e JOIN usuarios_empresas m ON m.empresa_id=e.id AND m.usuario_id=$2
           WHERE e.id=$1 AND e.deleted_at IS NULL`, [empresaId, auth.user.id])).rows[0];
         if (!tenant) throw missing();
@@ -66,7 +69,37 @@ export class AttendanceService {
       savedAt: draft.updated_at || null, savedBy: draft.updated_by ? draft.updated_by === auth.user.id ? ownName : 'Outro acesso autorizado' : null,
       canEdit, canSimulate: capabilities.includes('attendance.simulate'), canPublish: capabilities.includes('attendance.publish'),
       publication, ...projectAttendance(draft.configuracao),
+      resources: await this.#resources(state),
     };
+  }
+  async #resources(state) {
+    await state.tx.client.query("SELECT set_config('app.is_platform_admin','true',true),set_config('app.audience','',true)");
+    try {
+      const row = (await state.tx.client.query(`SELECT configuracao_compilada,checksum FROM configuracoes_revisoes
+        WHERE empresa_id=$1 AND config_version=$2`, [state.tenant.id, state.tenant.active_version])).rows[0];
+      const active = row?.configuracao_compilada;
+      const activeConfiguration = active?.empresaId === state.tenant.id && Number(active.configVersion) === Number(state.tenant.active_version)
+        && row.checksum === active.checksum && verifyCompiledTenantRuntimeConfigV2(active) ? active.configuration : null;
+      const repository = new PostgresOnboardingRepository(this.pool, { environment: this.environment,
+        platformAiCredentialConfigured: this.platformAiCredentialConfigured });
+      let snapshot = await repository.readReadinessSnapshot({ empresaId: state.tenant.id, transaction: state.tx });
+      snapshot = { ...snapshot, customerRuntimeReady: state.tenant.runtime_mode === 'versionado'
+        && Number(state.tenant.configuration_version) === Number(state.tenant.active_version) && activeConfiguration != null };
+      if (snapshot && activeConfiguration?.ai?.catalogSalesEnabled === true) {
+        const catalog = await loadGoogleSheetsProducts(state.tx.client, state.tenant.id, activeConfiguration.integrations);
+        // Reuse the runtime's published binding, profile, cache version and
+        // freshness checks; only a boolean becomes customer business status.
+        snapshot = { ...snapshot, customerCatalogReady: catalog?.source?.status === 'healthy' };
+      }
+      return projectAttendanceResources(state.draft.configuracao, { capabilities: state.capabilities,
+        companyStatus: state.tenant.status, activeConfiguration, snapshot: snapshot || {} });
+    } finally {
+      await state.tx.client.query("SELECT set_config('app.is_platform_admin','false',true),set_config('app.audience','customer',true)");
+    }
+  }
+  capabilities(auth, empresaId) {
+    return this.#run(auth, empresaId, 'attendance.read', async (state) => ({ companyId: state.tenant.id,
+      effectiveCapabilities: state.capabilities, ...await this.#resources(state) }));
   }
   // Fixed internal read: customer RLS continues denying full revisions and all
   // technical resources. No request controls SQL, context flags or repository.
@@ -78,6 +111,10 @@ export class AttendanceService {
       const review = publicationReview({ configuration: state.draft.configuracao, activeRevision: revision,
         empresaId: state.tenant.id, draftVersion: Number(state.draft.draft_version), activeVersion: Number(state.tenant.active_version) });
       if (state.tenant.status !== 'ativa') return { ready: false, reason: 'Este atendimento precisa de liberação administrativa.', changes: [], reviewToken: null };
+      if (state.tenant.active_version != null && (state.tenant.runtime_mode !== 'versionado'
+        || Number(state.tenant.configuration_version) !== Number(state.tenant.active_version))) {
+        return { ready: false, reason: 'Existe uma atualização administrativa pendente. Solicite orientação à administração WAIA.', changes: [], reviewToken: null };
+      }
       return review;
     } finally {
       await state.tx.client.query("SELECT set_config('app.is_platform_admin','false',true),set_config('app.audience','customer',true)");

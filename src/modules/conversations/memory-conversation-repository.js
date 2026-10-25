@@ -222,6 +222,7 @@ export class MemoryConversationRepository {
     const key = scoped(empresaId, input.conversationId);
     const conversation = this.conversations.get(key);
     if (!conversation) return null;
+    if (input.expectedVersion != null && (conversation.version !== input.expectedVersion || conversation.mode !== 'bot')) return null;
     const previous = clone(conversation);
     input.transaction?.registerRollback?.(() => this.conversations.set(key, previous));
     conversation.mode = input.mode;

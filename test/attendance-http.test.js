@@ -10,6 +10,7 @@ test('M4 HTTP mantém sessão, origem, CSRF, no-store e erros sanitizados no edi
   const service = { origin: 'http://portal.example', codec: { verifyCsrf: (_token, value) => value === 'csrf-synthetic' },
     authenticate: async (token) => { if (token !== 'session-synthetic') throw new AccountError('SESSION_REQUIRED', 401, 'Entre novamente.'); return auth; },
     attendance: {
+      capabilities: async (principal, id) => { calls.push({ principal, id }); return { features: [], effectiveCapabilities: ['attendance.read'] }; },
       read: async (principal, id) => { calls.push({ principal, id }); return { draftVersion: 3, fields: { greeting: 'Olá' } }; },
       save: async (principal, id, body) => { calls.push({ principal, id, body });
         if (body?.draftVersion === 1) throw new AccountError('DRAFT_VERSION_CONFLICT', 409, 'Recarregue e revise.');
@@ -44,5 +45,8 @@ test('M4 HTTP mantém sessão, origem, CSRF, no-store e erros sanitizados no edi
       assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal(calls.at(-1).principal, auth);
     }
+    const capabilities = await fetch(base.replace(/attendance$/u, 'capabilities'), { headers });
+    assert.equal(capabilities.status, 200); assert.equal(capabilities.headers.get('cache-control'), 'no-store');
+    assert.equal(calls.at(-1).principal, auth);
   } finally { server.close(); await once(server, 'close'); }
 });

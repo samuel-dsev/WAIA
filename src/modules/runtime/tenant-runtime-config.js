@@ -16,6 +16,22 @@ function optionalText(value, path, options) {
   return requiredText(value, path, options);
 }
 
+function optionalTimezone(value) {
+  const timezone = optionalText(value, 'identity.timezone', { max: 80 });
+  if (timezone !== undefined) {
+    try { new Intl.DateTimeFormat('pt-BR', { timeZone: timezone }).format(); }
+    catch { throw new TypeError('identity.timezone deve ser um fuso horário IANA válido.'); }
+  }
+  return timezone;
+}
+
+function publicInformationLines(value, path, maxItems, maxText) {
+  return list(value, path, (entry, entryPath) => {
+    if (typeof entry !== 'string') throw new TypeError(`${entryPath} deve ser texto.`);
+    return requiredText(entry, entryPath, { max: maxText });
+  }, { max: maxItems });
+}
+
 function cooldownSeconds(value) {
   if (value == null) return 0;
   if (!Number.isSafeInteger(value) || value < 0 || value > 604800) {
@@ -191,6 +207,11 @@ export function parseTenantRuntimeConfig(input) {
       welcomeMessage: optionalText(input.identity?.welcomeMessage, "identity.welcomeMessage", { max: 1000 }),
       fallbackMessage: optionalText(input.identity?.fallbackMessage, "identity.fallbackMessage", { max: 1000 }),
       establishmentRules: optionalText(input.identity?.establishmentRules, "identity.establishmentRules", { max: 10_000 }),
+      // Optional additions preserve the shape of older V1 definitions. These
+      // fields inform the existing AI identity context; they do not schedule work.
+      ...(input.identity?.timezone == null ? {} : { timezone: optionalTimezone(input.identity.timezone) }),
+      ...(input.identity?.schedules == null ? {} : { schedules: publicInformationLines(input.identity.schedules, 'identity.schedules', 50, 300) }),
+      ...(input.identity?.publicRules == null ? {} : { publicRules: publicInformationLines(input.identity.publicRules, 'identity.publicRules', 100, 1000) }),
     },
     enabledModules,
     menu: {

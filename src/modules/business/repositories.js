@@ -199,10 +199,10 @@ export class PostgresAppointmentRepository {
 
 export class ConversationHandoffRepository {
   constructor(conversationService) { this.conversationService = conversationService; }
-  request({ empresaId, conversationId, cooldownSeconds = 0 }) {
+  request({ empresaId, conversationId, cooldownSeconds = 0, expectedVersion = null }) {
     // A espera temporizada pertence ao runtime. Pausas manuais continuam soberanas.
     if (cooldownSeconds > 0) return { requested: true };
-    return this.conversationService.pauseBot({ empresaId, conversationId });
+    return this.conversationService.pauseBot({ empresaId, conversationId, ...(expectedVersion == null ? {} : { expectedVersion }) });
   }
 }
 

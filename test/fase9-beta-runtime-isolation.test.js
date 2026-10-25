@@ -306,7 +306,8 @@ function workerHarness() {
     async inboundMessage({ empresaId, messageId }) {
       return structuredClone(messages.get(`${empresaId}:${messageId}`) || null);
     },
-    async statusEvent() {
+    async canSendBotReply() { return true; },
+      async statusEvent() {
       return null;
     },
   };

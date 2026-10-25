@@ -98,4 +98,4 @@ jobs:
           RUN_POSTGRES_INTEGRATION: 'true'
           DATABASE_MIGRATOR_URL: postgres://waia_v2_owner:synthetic-ci-owner@localhost:5432/waia_v2_upgrade
           DATABASE_URL: postgres://waia_v2_app:synthetic-ci-app@localhost:5432/waia_v2_upgrade
-        run: node --test test/accounts-postgres.test.js test/team-postgres.test.js test/access-admin-postgres.test.js test/attendance-postgres.test.js test/attendance-publication-postgres.test.js
+        run: node --test test/accounts-postgres.test.js test/team-postgres.test.js test/access-admin-postgres.test.js test/attendance-postgres.test.js test/attendance-publication-postgres.test.js test/attendance-features-postgres.test.js test/m6-worker-postgres.test.js

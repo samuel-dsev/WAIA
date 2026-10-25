@@ -374,8 +374,9 @@ export class PostgresConversationRepository {
                 business_app_resumed_at = CASE WHEN $3 = 'bot' THEN $5::timestamptz ELSE business_app_resumed_at END,
                 lock_version = lock_version + 1, updated_at = $5
           WHERE empresa_id = $1 AND id = $2
+            AND ($6::bigint IS NULL OR (lock_version=$6 AND modo_atendimento='bot'))
           RETURNING *`,
-        [input.empresaId, input.conversationId, toDatabase(input.mode), input.operatorId, input.updatedAt],
+        [input.empresaId, input.conversationId, toDatabase(input.mode), input.operatorId, input.updatedAt, input.expectedVersion ?? null],
       );
       return mapConversation(result.rows[0]);
     });

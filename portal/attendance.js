@@ -10,15 +10,17 @@ const definitions = [
   ['handoffMessage', 'Mensagem de encaminhamento humano', 1000], ['salesInterestMessage', 'Mensagem de interesse comercial', 1000],
 ];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const featureStates = { disabled: 'Não liberado', draft: 'Preparado no rascunho', needs_admin: 'Precisa de liberação administrativa', suspended: 'Empresa suspensa', ready: 'Disponível no atendimento' };
 const element = (tag, text, className = '') => {
   const result = document.createElement(tag); result.textContent = text; result.className = className; return result;
 };
 export function createAttendanceEditor({ root, initial, companyId, api, onDirty, notice, onAccessDenied }) {
-  let model = initial, epoch = 0, scriptEditor, disposed = false, busy = false, publicationBlocked = false;
+  let model = initial, epoch = 0, scriptEditor, disposed = false, busy = false, publicationBlocked = false, catalogChanged = false;
   const controls = new Map(), replies = new Map();
   let form, status, conflict, save, reload, localDirty = false;
   let simulate, simulationMessage, simulationReply, publicationNote, review, confirmation, publish, accepted;
   let publicationAttempt = null;
+  let resourcesSection;
   const path = `/api/app/v1/companies/${companyId}/attendance`;
   const values = () => {
     const changes = {};
@@ -56,6 +58,7 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
     if (simulate) simulate.disabled = busy || !saved || !model.canSimulate;
     if (review) review.disabled = busy || !saved || !model.canPublish || !model.publication?.ready;
     if (publish) publish.disabled = busy || !saved || !model.canPublish || !model.publication?.ready || !accepted.checked;
+    if (save) save.disabled = busy || !model.canEdit || catalogChanged;
     if (publicationNote) publicationNote.textContent = localDirty
       ? 'Salve as alterações antes de simular ou revisar a publicação.'
       : publicationBlocked ? 'Recarregue a versão atual antes de simular ou publicar.'
@@ -76,7 +79,7 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
   function render(data) {
     scriptEditor?.dispose(); model = data; controls.clear(); replies.clear(); root.replaceChildren();
     simulate = simulationMessage = simulationReply = publicationNote = review = confirmation = publish = accepted = null;
-    busy = false; publicationBlocked = false; publicationAttempt = null;
+    busy = false; publicationBlocked = false; catalogChanged = false; publicationAttempt = null;
     localDirty = false; onDirty(false);
     const title = element('h3', 'Atendimento');
     status = element('p', `Rascunho ${data.draftVersion} · ${data.activeVersion ? `Publicado: versão ${data.activeVersion}` : 'Ainda não publicado'}`, 'attendance-state');
@@ -85,23 +88,33 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
     if (data.publishedAt) root.append(element('p', `Publicado em ${new Date(data.publishedAt).toLocaleString('pt-BR')}${data.publishedBy ? ` · ${data.publishedBy}` : ''}`, 'help'));
     root.append(element('p', 'Salvar prepara um rascunho. A versão publicada e o atendimento em uso permanecem como estão.', 'help'));
     if (!data.canEdit) root.append(element('p', 'Seu acesso permite somente consulta. Solicite permissão de edição à administração WAIA.', 'attendance-info'));
+    resourcesSection = element('section', ''); resourcesSection.id = 'attendance-resources';
+    resourcesSection.setAttribute('aria-label', 'Recursos do atendimento'); root.append(resourcesSection); renderResources(data.resources);
     form = document.createElement('form'); form.id = 'attendance-form';
     for (const [key, label, maxLength, kind = 'text'] of definitions) {
       if (!Object.hasOwn(data.fields, key)) continue;
+      const limits = data.resources?.fieldLimits?.[key];
+      const characters = Number.isSafeInteger(limits?.maxCharacters) ? limits.maxCharacters : maxLength;
+      const maxItems = Number.isSafeInteger(limits?.maxItems) ? limits.maxItems : key === 'schedules' ? 50 : 100;
+      const fieldEditable = data.canEdit && data.resources?.features?.find((feature) => feature.fields?.includes(key))?.canEdit !== false;
       let input;
       if (key === 'script') {
-        scriptEditor = createAttendanceScriptEditor({ value: data.fields[key], readOnly: !data.canEdit, onInput: changed });
+        scriptEditor = createAttendanceScriptEditor({ value: data.fields[key], readOnly: !fieldEditable, onInput: changed });
         input = scriptEditor.textarea; input.dataset.field = 'script'; form.append(scriptEditor.root);
       } else {
         const wrapper = element('label', label); input = document.createElement(kind === 'timezone' ? 'input' : 'textarea');
         input.id = `attendance-${key}`; input.name = key;
         input.value = kind === 'lines' ? data.fields[key].join('\n') : data.fields[key];
-        input.maxLength = kind === 'lines' ? (maxLength + 1) * (key === 'schedules' ? 50 : 100) : maxLength;
+        input.maxLength = kind === 'lines' ? (characters + 1) * maxItems : characters;
         if (input.tagName === 'TEXTAREA') input.rows = key === 'establishmentRules' ? 5 : 3;
-        input.readOnly = !data.canEdit; input.addEventListener('input', changed); wrapper.append(input);
-        if (kind === 'lines') wrapper.append(element('small', `Uma informação por linha. Até ${key === 'schedules' ? 50 : 100} linhas de ${maxLength} caracteres.`));
+        input.readOnly = !fieldEditable; input.addEventListener('input', changed); wrapper.append(input);
         form.append(wrapper);
       }
+      const help = element('small', kind === 'lines' ? `Uma informação por linha. Até ${maxItems} linhas de ${characters} caracteres.` : `Até ${characters.toLocaleString('pt-BR')} caracteres.`);
+      help.id = `attendance-${key}-guidance`;
+      if (data.resources?.guidance?.[key]) help.append(document.createTextNode(` ${data.resources.guidance[key]}`));
+      input.setAttribute('aria-describedby', [input.getAttribute('aria-describedby'), help.id].filter(Boolean).join(' '));
+      if (key === 'script') scriptEditor.root.append(help); else input.parentElement.append(help);
       input.required = ['script', 'qualificationCriteria', 'timezone'].includes(key);
       controls.set(key, { input, kind });
     }
@@ -141,6 +154,33 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
     });
     renderRelease();
     refreshActions();
+  }
+  function renderResources(resources) {
+    resourcesSection.replaceChildren();
+    if (!resources || !Array.isArray(resources.features)) { resourcesSection.hidden = true; return; }
+    resourcesSection.hidden = false;
+    resourcesSection.append(element('h3', 'Recursos do atendimento'), element('p', 'Veja o que está liberado para preparar e o que já está disponível no atendimento publicado.', 'help'));
+    const list = element('div', '');
+    for (const feature of resources.features) {
+      const card = document.createElement('details'); card.dataset.feature = feature.id;
+      card.append(element('summary', `${feature.label} · ${featureStates[feature.state] || 'Não liberado'}`),
+        element('p', feature.description, 'help'));
+      if (feature.message) card.append(element('p', feature.message, 'help'));
+      if (feature.enabled && !feature.canEdit) card.append(element('p', 'Disponível para consulta neste acesso.', 'help'));
+      list.append(card);
+    }
+    resourcesSection.append(list);
+    if (Array.isArray(resources.behaviors) && resources.behaviors.length) {
+      const behaviorDetails = document.createElement('details'); behaviorDetails.id = 'attendance-behaviors';
+      behaviorDetails.append(element('summary', 'Comportamentos liberados pela administração'));
+      const behaviors = document.createElement('ul');
+      for (const behavior of resources.behaviors) {
+        const item = element('li', `${behavior.label}: rascunho ${behavior.draftEnabled ? 'habilitado' : 'desabilitado'}; atendimento publicado ${behavior.activeEnabled ? 'habilitado' : 'desabilitado'}.`);
+        item.dataset.behavior = behavior.id; behaviors.append(item);
+      }
+      behaviorDetails.append(element('p', 'A administração WAIA controla essas habilitações. Os textos liberados podem ser editados nos campos abaixo.', 'help'), behaviors);
+      resourcesSection.append(behaviorDetails);
+    }
   }
   function renderRelease() {
     if (!model.canSimulate && !model.canPublish) return;
@@ -229,21 +269,30 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
   render(initial);
   return {
     revalidate(latest) {
-      if (!latest.canEdit || !same(Object.keys(latest.fields), Object.keys(model.fields))
-        || !same(latest.replies.map((reply) => reply.key), model.replies.map((reply) => reply.key))) {
-        render(latest); notice('As permissões do atendimento foram atualizadas.'); return;
+      if (disposed) return;
+      if (!localDirty) { render(latest); return; }
+      const accessChanged = latest.canEdit !== model.canEdit || !same(Object.keys(latest.fields), Object.keys(model.fields))
+        || !same(latest.replies.map((reply) => reply.key), model.replies.map((reply) => reply.key));
+      const resourcesChanged = !same(latest.resources, model.resources);
+      if (latest.draftVersion !== model.draftVersion || accessChanged || resourcesChanged) {
+        showConflict(); catalogChanged ||= accessChanged || resourcesChanged;
       }
-      if (latest.draftVersion !== model.draftVersion) showConflict();
-      else {
-        if (latest.activeVersion !== model.activeVersion || latest.publication?.reviewToken !== model.publication?.reviewToken) {
-          publicationBlocked = true;
-        }
-        model = { ...model, canSimulate: latest.canSimulate, canPublish: latest.canPublish,
-          activeVersion: latest.activeVersion, publication: latest.publication };
-        // A background permission/revision refresh invalidates any previous confirmation.
-        if (confirmation) { confirmation.hidden = true; accepted.checked = false; }
-        publicationAttempt = null; refreshActions();
+      if (latest.activeVersion !== model.activeVersion || latest.publication?.reviewToken !== model.publication?.reviewToken) publicationBlocked = true;
+      // Keep the editor's original baseline and local text until explicit reload;
+      // the catalog and current permissions still update immediately.
+      model = { ...model, canEdit: latest.canEdit, canSimulate: latest.canSimulate, canPublish: latest.canPublish,
+        activeVersion: latest.activeVersion, publication: latest.publication, resources: latest.resources };
+      renderResources(latest.resources);
+      for (const [key, { input }] of controls) {
+        const readOnly = !latest.canEdit || !Object.hasOwn(latest.fields, key)
+          || latest.resources?.features?.find((feature) => feature.fields?.includes(key))?.canEdit === false;
+        input.readOnly = readOnly;
+        if (key === 'script') scriptEditor?.root.querySelectorAll('textarea').forEach((textarea) => { textarea.readOnly = readOnly; });
       }
+      for (const [key, input] of replies) input.readOnly = !latest.canEdit || !latest.replies.some((reply) => reply.key === key);
+      if (confirmation) { confirmation.hidden = true; accepted.checked = false; }
+      publicationAttempt = null; refreshActions();
+      if (accessChanged || resourcesChanged) notice('Os recursos do atendimento foram atualizados. Seus textos locais continuam nesta tela; recarregue para revisar antes de salvar.');
     },
     dispose() { disposed = true; epoch++; scriptEditor?.dispose(); controls.forEach(({ input }) => { input.value = ''; }); replies.forEach((input) => { input.value = ''; }); root.replaceChildren(); model = null; },
   };

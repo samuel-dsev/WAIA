@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0–M4 têm commits locais e M5 tem gates locais concluídos; M6–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M5 têm commits locais e M6 tem gates locais concluídos; M7–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -329,6 +329,8 @@ Estado em 24/10/2026: autorizada e concluída em **1.28.0**, base **d671141**, c
 **Gate:** só empresa correta usa roteiro publicado; salvar não ativa; cliente não publica técnico nem reativa suspensa. Subagentes: pipeline/runtime e concorrência/segurança.
 
 ### M6 — funcionalidades de atendimento
+
+Estado em 25/10/2026: autorizada e concluída em **1.29.0**, base **31730d6**, com commit local no fechamento. Catálogo sanitizado, limites/orientações, contexto público de horários/regras e guarda de todo envio bot com confirmação de pausa própria CAS/checkpoint. 652 testes aprovados/28 skips, 97 integrações PostgreSQL/Redis e browser com APIs reais aprovados; schema30 preservado, sem fornecedor externo comprovado. Revisões e limites em [M6_FUNCIONALIDADES.md](docs/M6_FUNCIONALIDADES.md). Sem push/deploy; M7 aguarda autorização.
 
 - Fechar catálogo inicial de mensagens, horários, handoff, qualificação e comportamentos existentes.
 - UI e API seguem habilitação administrativa/capacidade; futuros módulos começam negados.

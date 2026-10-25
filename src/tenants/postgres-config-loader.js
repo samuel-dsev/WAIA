@@ -58,7 +58,7 @@ async function loadGoogleSheetsEvents(client, company, empresaId) {
   }));
 }
 
-async function loadGoogleSheetsProducts(client, empresaId, publishedIntegrations) {
+export async function loadGoogleSheetsProducts(client, empresaId, publishedIntegrations) {
   const googleIntegrations = publishedIntegrations?.filter((item) => item.enabled && item.type === "google_sheets");
   if (googleIntegrations && !googleIntegrations.length) return null;
   const references = googleIntegrations

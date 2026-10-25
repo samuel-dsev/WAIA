@@ -145,6 +145,8 @@ export class ConversationService {
       conversationId: requiredText(input.conversationId, "conversationId"),
       mode,
       operatorId,
+      // Internal handoff may pause only the bot version it just observed.
+      expectedVersion: input.expectedVersion == null ? null : positiveInteger(input.expectedVersion, "expectedVersion"),
       updatedAt: this.clock(),
       transaction: input.transaction,
     });

@@ -1,7 +1,21 @@
 # Continuidade — WAIA
 
-Atualizado em 24/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 25/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## M6 — funcionalidades de atendimento, 25/10/2026
+
+Usuário autorizou M6 da mesma forma que M5 e pediu retomada do checkout. Base **31730d6 / v1.28.0**, branch principal `new`; entrega **1.29.0**, com commit local no fechamento conforme AGENTS. Sem push, promoção, deploy ou implementação da M7.
+
+Catálogo fechado de sete recursos de negócio no DTO e novo GET capabilities: campos/limites/orientações e comportamento somente leitura, distintos entre rascunho e publicado. UI/API respeitam read/edit e módulos existentes; PATCH mantém a allowlist M4 sem flags técnicas. Snapshot administrativo interno vira estado funcional neutro, sem modelos/quotas/credenciais/números/grupos/conexões ou payloads de planilha. Prontidão confere ponte de revisão, dependência obrigatória de pagamento e catálogo comercial pelo resolvedor exato de binding/cache do runtime. Futuro começa negado. Revalidação durante edição mantém texto, limita campos removidos e exige recarga antes de gravar.
+
+Horários/fuso/regras públicas V2 agora alcançam o contexto existente da IA, como informação e sem fechamento automático/agendamento. Preservados roteiro único, tom subordinado, guardrails, precedência determinística e contratos de handoff/qualificação. Worker revalida todo envio automático, inclusive respostas imediatas e partes de lote, negando pausa/humano/suspensão/bloqueio/anonimização/exclusão/número indisponível. Confirmação da própria pausa de handoff usa CAS e prova persistida vinculada ao inbound; nova transição invalida, sem exceção genérica para pausa humana. Envio humano preservado.
+
+Snapshot **32 arquivos**, Node22 **680 casos, 652 aprovados/28 skips opt-in, zero falhas**; **97 integrações PostgreSQL/Redis aprovadas, zero skips/falhas**; sintaxe de **326 arquivos JavaScript**. Schema30 sem migração nova, ledger/isolamento preservados. Dois roteiros fictícios atravessam runtime/serviço IA com provedor fake; PostgreSQL cobre permissões, módulo desabilitado, isolamento/hashes, dependências/cache, ponte de revisão, pausa/opt-out persistido, CAS/checkpoint e GUCs. Testes novos incluídos na CI, sem execução remota. Ajustes das revisões independentes incorporados, sem bloqueador alto/crítico conhecido.
+
+Browser Edge com APIs reais e sem fixtures de publicação: catálogo/limites, comportamentos readonly, desabilitação administrativa durante edição, texto preservado, PATCH403, recarga remove campos, horários salvam apenas draft e 390px sem overflow. Configuração inicial de Aurora restaurada e Horizonte intacta; apenas versões/auditoria fictícias avançaram. Capturas desktop/móvel inspecionadas, sem pageerrors. Evidências `.tmp/m6/` ignoradas. Primeiro ensaio PG corrigiu fixtures (correlação obrigatória/captura síncrona); rodada final integralmente aprovada.
+
+Limites: nenhuma entrega WhatsApp/OpenAI/e-mail real; metadados de disponibilidade não são probe externo em tempo real. Janela entre última guarda e gateway permanece; pausa/checkpoint são transações separadas (crash pode perder confirmação mantendo pausa). Checkpoint mantém revisão/prazo anteriores; nenhum comando textual novo de opt-out ou bloqueio automático por horário. Preview **http://127.0.0.1:5035/portal/** e painel **http://127.0.0.1:5035/panel/** mantidos em waia-test/v2 isolado, sem egress da API/worker de atendimento, reset/seed/importação ou alteração de produção. Trabalho anterior alheio preservado. Manual [M6_FUNCIONALIDADES.md](docs/M6_FUNCIONALIDADES.md). Próxima fase a autorizar: **M7**; 2.0.0 permanece futura.
 
 ## M5 — simulação e publicação, 24/10/2026
 

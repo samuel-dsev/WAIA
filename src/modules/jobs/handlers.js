@@ -150,7 +150,8 @@ export class PostgresJobHandlerRepository {
           LIMIT 1`,
         [empresaId, messageId],
       )).rows[0];
-      return hydrateReply(client, empresaId, row);
+      const hydrated = await hydrateReply(client, empresaId, row);
+      return hydrated && { ...hydrated, ...(row.outbound_payload?.handoffPauseVersion == null ? {} : { handoffPauseVersion: row.outbound_payload.handoffPauseVersion }) };
     });
   }
 
@@ -208,33 +209,45 @@ export class PostgresJobHandlerRepository {
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
+            ...(reply.handoffPauseVersion == null ? {} : { handoffPauseVersion: reply.handoffPauseVersion }),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
-      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
+      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status,
+        ...(row.outbound_payload?.handoffPauseVersion == null ? {} : { handoffPauseVersion: row.outbound_payload.handoffPauseVersion }) };
       const existing = (await client.query(
         `SELECT id, corpo, outbound_payload, external_message_id, status
            FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
         [empresaId, message.id],
       )).rows[0];
-      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, externalMessageId: existing.external_message_id, status: existing.status };
+      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, externalMessageId: existing.external_message_id, status: existing.status,
+        ...(existing.outbound_payload?.handoffPauseVersion == null ? {} : { handoffPauseVersion: existing.outbound_payload.handoffPauseVersion }) };
     });
   }
 
-  canSendBotReply({ empresaId, messageId }) {
+  canSendBotReply({ empresaId, messageId, handoffPauseVersion = null }) {
+    const proof = Number.isSafeInteger(handoffPauseVersion) && handoffPauseVersion > 0 ? handoffPauseVersion : null;
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (await client.query(
       `SELECT 1 FROM mensagens m
-         JOIN empresas e ON e.id = m.empresa_id AND e.status = 'ativa'
+         JOIN empresas e ON e.id = m.empresa_id AND e.status = 'ativa' AND e.deleted_at IS NULL
          JOIN conversas c ON c.empresa_id = m.empresa_id AND c.id = m.conversa_id
          JOIN contatos ct ON ct.empresa_id = m.empresa_id AND ct.id = m.contato_id
          JOIN numeros_whatsapp n ON n.empresa_id = m.empresa_id AND n.id = m.numero_whatsapp_id
         WHERE m.empresa_id = $1 AND m.id = $2 AND m.redacted_at IS NULL
-          AND c.status = 'aberta' AND c.modo_atendimento = 'bot'
-          AND ct.deleted_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
+          AND c.status = 'aberta'
+          AND (($3::bigint IS NULL AND c.modo_atendimento = 'bot') OR (c.modo_atendimento='pausado' AND c.operador_usuario_id IS NULL
+            AND $3::bigint IS NOT NULL AND c.lock_version=$3
+            AND EXISTS(SELECT 1 FROM mensagens checkpoint
+              WHERE checkpoint.empresa_id=m.empresa_id AND checkpoint.conversa_id=m.conversa_id
+                AND checkpoint.source_message_id=m.id AND checkpoint.direcao='saida'
+                AND checkpoint.redacted_at IS NULL AND checkpoint.external_message_id IS NULL
+                AND checkpoint.status IN ('processando','enfileirada')
+                AND checkpoint.outbound_payload->>'handoffPauseVersion'=$3::text)))
+          AND ct.deleted_at IS NULL AND ct.anonimizado_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
           AND n.deleted_at IS NULL AND n.status = 'ativo'`,
-      [empresaId, messageId],
+      [empresaId, messageId, proof],
     )).rowCount > 0);
   }
 
@@ -333,6 +346,24 @@ export function createWorkerHandlers({
   if (typeof tenantDefinitionRepository?.load !== "function") throw new TypeError("tenantDefinitionRepository.load e obrigatorio.");
   if (typeof metaGateway?.sendReply !== "function") throw new TypeError("metaGateway.sendReply e obrigatorio.");
 
+  async function canSendCurrentBotReply(reference, message, prepared) {
+    // All automated outputs, including immediate deterministic replies, need a
+    // fresh operational decision. Missing checks never grant sending authority.
+    if (typeof repository.canSendBotReply !== "function") {
+      throw permanent("Permissão de envio automático não configurada.", "BOT_REPLY_SEND_GUARD_REQUIRED");
+    }
+    const current = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
+    const proof = prepared?.handoffPauseVersion;
+    const ownPause = current.mode === 'paused' && current.operatorId == null
+      && Number.isSafeInteger(proof) && proof > 0 && current.version === proof;
+    if ((proof != null ? !ownPause : current.mode !== "bot")
+      || await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id, ...(ownPause ? { handoffPauseVersion: proof } : {}) }) !== true) {
+      await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+      return false;
+    }
+    return true;
+  }
+
   async function processInboundMessage(reference, _record, execution = {}) {
     const message = await repository.inboundMessage(reference);
     if (!message) throw permanent("Mensagem de entrada nao encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
@@ -385,7 +416,8 @@ export function createWorkerHandlers({
         });
       }
     }
-    if (conversation.mode !== "bot") {
+    let prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+    if (conversation.mode !== "bot" && !(conversation.mode === 'paused' && Number.isSafeInteger(prepared?.handoffPauseVersion))) {
       await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
       logger.info?.("conversation_automation_skipped", {
         empresaId: reference.empresaId,
@@ -394,7 +426,6 @@ export function createWorkerHandlers({
       });
       return { skipped: true, reason: "conversation_not_in_bot_mode" };
     }
-    let prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
     if (!prepared?.messages && prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
       return { replied: true, resumed: true };
     }
@@ -402,6 +433,7 @@ export function createWorkerHandlers({
     if (!prepared) {
       let generatedByAi = false;
       let responseDelayEnabled = true;
+      let ownHandoffPauseVersion = null;
       try {
         await metaGateway.markRead?.({
           empresaId: reference.empresaId,
@@ -426,7 +458,23 @@ export function createWorkerHandlers({
           stateRepository: createRuntimeStateRepository(conversationService),
           orderRepository,
           appointmentRepository,
-          handoffRepository,
+          handoffRepository: handoffRepository && {
+            async request(input) {
+              if (input.cooldownSeconds > 0) return handoffRepository.request(input);
+              const before = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
+              if (before.mode !== 'bot' || !Number.isSafeInteger(before.version) || before.version < 1) {
+                throw permanent('A conversa mudou antes do encaminhamento.', 'BOT_HANDOFF_STATE_CHANGED');
+              }
+              const expectedVersion = before.version;
+              const paused = await handoffRepository.request({ ...input, expectedVersion });
+              // Only the trusted pause operation can mint this proof. Runtime,
+              // model output and inbound message data never supply it.
+              if (paused?.mode === 'paused' && paused.operatorId == null && paused.version === expectedVersion + 1) {
+                ownHandoffPauseVersion = paused.version;
+              }
+              return paused;
+            },
+          },
           flowRepository,
           aiHandler: aiService
             ? async ({ config, input }) => {
@@ -488,6 +536,11 @@ export function createWorkerHandlers({
           mediaSha256: message.mediaSha256,
         });
       }
+      delete reply.handoffPauseVersion;
+      if (ownHandoffPauseVersion != null) {
+        if (typeof repository.prepareReply !== 'function') throw permanent('Persistência do encaminhamento não configurada.', 'BOT_REPLY_CHECKPOINT_REQUIRED');
+        reply = { ...reply, handoffPauseVersion: ownHandoffPauseVersion };
+      }
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };
       }
@@ -524,13 +577,6 @@ export function createWorkerHandlers({
     if (sendNotBefore && Date.parse(sendNotBefore) > clock().getTime()) {
       return { deferUntil: sendNotBefore };
     }
-    if (sendNotBefore) {
-      const currentConversation = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
-      if (currentConversation.mode !== "bot" || (repository.canSendBotReply && !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id }))) {
-        await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
-        return { skipped: true, reason: "bot_reply_cancelled" };
-      }
-    }
     if (execution.canContinue && !execution.canContinue()) {
       throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
     }
@@ -540,11 +586,7 @@ export function createWorkerHandlers({
       }
       for (const part of prepared.messages) {
         if (part.externalMessageId) continue;
-        const current = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
-        if (current.mode !== "bot" || !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id })) {
-          await repository.cancelPreparedReply({ empresaId: reference.empresaId, messageId: message.id });
-          return { skipped: true, reason: "bot_reply_cancelled" };
-        }
+        if (!await canSendCurrentBotReply(reference, message, prepared)) return { skipped: true, reason: "bot_reply_cancelled" };
         if (execution.canContinue && !execution.canContinue()) throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
         const sent = await metaGateway.sendReply({ empresaId: reference.empresaId, numeroWhatsappId: message.numeroWhatsappId }, {
           to: message.senderPhone, text: part.text, buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
@@ -555,6 +597,8 @@ export function createWorkerHandlers({
       }
       return { replied: true };
     }
+    if (!await canSendCurrentBotReply(reference, message, prepared)) return { skipped: true, reason: "bot_reply_cancelled" };
+    if (execution.canContinue && !execution.canContinue()) throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
     const sent = await metaGateway.sendReply({
       empresaId: reference.empresaId,
       numeroWhatsappId: message.numeroWhatsappId,

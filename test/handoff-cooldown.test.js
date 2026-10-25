@@ -18,21 +18,27 @@ function configuration(seconds = 60) {
 function fixture(seconds = 60) {
   let now = Date.parse("2026-10-07T12:00:00Z");
   let state = { flowKey: "idle", stage: "idle", data: {}, version: 1 };
-  const conversation = { mode: "bot" };
+  const conversation = { mode: "bot", version: 1, operatorId: null };
   const sent = [], prepared = [], aiCalls = [];
   let message;
   const service = {
     async getConversation() { return conversation; },
     async getState() { return structuredClone(state); },
     async saveState(input) { state = { ...input, version: state.version + 1, updatedAt: new Date(now) }; return state; },
-    async pauseBot() { conversation.mode = "paused"; },
+    async pauseBot({ expectedVersion } = {}) {
+      assert.equal(expectedVersion, conversation.version);
+      conversation.mode = "paused"; conversation.version++;
+      return structuredClone(conversation);
+    },
     async recordMessage() {}, async applyMetaStatus() {},
   };
   const definition = materializeLegacyTenantDefinition(compileTenantRuntimeConfigV2(configuration(seconds), { empresaId: "tenant-test", configVersion: 1, draftVersion: 1 }));
   const handlers = createWorkerHandlers({
     repository: {
-      async inboundMessage() { return message; }, async statusEvent() {},
-      async prepareReply(input) { prepared.push(input); return { id: `out-${prepared.length}`, text: input.reply.text, buttons: input.reply.buttons }; },
+      async inboundMessage() { return message; }, async canSendBotReply() { return true; },
+      async statusEvent() {},
+      async prepareReply(input) { prepared.push(input); return { id: `out-${prepared.length}`, text: input.reply.text, buttons: input.reply.buttons,
+        ...(input.reply.handoffPauseVersion == null ? {} : { handoffPauseVersion: input.reply.handoffPauseVersion }) }; },
       async markReplySent() {},
     },
     conversationService: service,
@@ -88,6 +94,8 @@ test("zero preserva pausa indefinida dos clientes existentes", async () => {
   const f = fixture(0);
   await f.send("falar com equipe");
   assert.equal(f.conversation.mode, "paused");
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].text, 'Aguarde a equipe');
   f.advance(86400000);
   assert.equal((await f.send("oi")).reason, "conversation_not_in_bot_mode");
 });

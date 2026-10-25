@@ -163,6 +163,7 @@ test("worker handler processa mensagem persistida por referencia e registra resp
           senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
     },
     conversationService: {
@@ -224,6 +225,7 @@ test("worker preserva o ID do botão interativo e não o encaminha à IA", async
           senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
     },
     conversationService: {
@@ -273,6 +275,7 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
           senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async preparedReply() { return prepared; },
       async prepareReply({ reply }) { prepared = { id: "prepared-ai", ...reply }; return prepared; },
@@ -314,6 +317,7 @@ test("worker ignora recibo Meta de mensagem que não pertence ao banco", async (
   const handlers = createWorkerHandlers({
     repository: {
       async inboundMessage() { return null; },
+      async canSendBotReply() { return true; },
       async statusEvent() {
         return {
           id: "status-external",
@@ -359,6 +363,7 @@ test("worker preserva todas as opções interativas ao preparar e enviar a respo
           senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async preparedReply() { return null; },
       async prepareReply({ reply }) {
@@ -401,6 +406,7 @@ test("worker armazena comprovante privado antes de continuar uma resposta prepar
           externalMessageId: "wamid.media", correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async markMediaStored(input) { events.push("mark"); assert.deepEqual(input.stored, stored); },
       async preparedReply() { events.push("prepared"); return { id: "reply-1", text: "Recebido", buttons: [], status: "processando" }; },
@@ -439,6 +445,7 @@ test("worker preserva mídia privada mesmo quando a conversa está em atendiment
           correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async markMediaStored(input) { events.push("mark"); assert.deepEqual(input.stored, stored); },
     },
@@ -479,6 +486,7 @@ test("worker rejeita comprovante fora da política sem chamar runtime ou IA", as
           correlationId: "00000000-0000-4000-8000-000000000099", senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async preparedReply() { return null; },
       async prepareReply({ reply }) { preparedText = reply.text; return { id: "reply-1", text: reply.text, buttons: [], status: "processando" }; },
@@ -505,6 +513,7 @@ test("worker envia resposta humana pelo número do tenant e registra o ID Meta",
   const handlers = createWorkerHandlers({
     repository: {
       async inboundMessage() { return null; },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async outboundHumanMessage() {
         return {

@@ -235,6 +235,7 @@ test("worker retoma resposta preparada sem reexecutar runtime ou IA", async () =
   const handlers = createWorkerHandlers({
     repository: {
       async inboundMessage() { return { id: "in-1", conversationId: "conv-1", numeroWhatsappId: "num-1", senderPhone: "5511999999999" }; },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async preparedReply() { return { id: "out-1", text: "Resposta preparada", buttons: [], status: "processando" }; },
       async markReplySent(input) { marked.push(input); },

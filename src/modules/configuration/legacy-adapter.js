@@ -139,6 +139,11 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
         welcomeMessage: config.identity.welcomeMessage,
         fallbackMessage: config.identity.fallbackMessage,
         establishmentRules: config.identity.establishmentRules,
+        // Public operating information is context, never an automatic schedule
+        // or permission to bypass the administrator's operational state.
+        timezone: config.identity.timezone,
+        schedules: [...config.identity.schedules],
+        publicRules: [...config.identity.publicRules],
       },
       enabledModules: [...config.modules],
       menu: {

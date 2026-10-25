@@ -161,6 +161,7 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
           senderPhone: "5511999999999",
         };
       },
+      async canSendBotReply() { return true; },
       async statusEvent() { return null; },
       async preparedReply({ empresaId }) { return prepared.get(empresaId); },
       async prepareReply({ empresaId, reply }) { const record = { id: "prepared-shared", ...reply }; prepared.set(empresaId, record); return record; },
