@@ -28,7 +28,7 @@ export class AttendanceService {
     Object.assign(this, { pool, clock, idleMs, readinessService, flowPublisher, limiter, preflight, environment, platformAiCredentialConfigured });
     this.preview = new PreviewService({ maxSessions: 5, maxTotalSessions: 100 });
   }
-  async #run(auth, empresaId, permission, work) {
+  async #run(auth, empresaId, permission, work, { requireDraft = true } = {}) {
     if (auth?.audience !== 'customer' || !auth.user?.id || !auth.sessionId) throw denied();
     // Keep the same UUID versions accepted by transactional tenant contexts.
     if (!z.string().uuid().refine((id) => /^[1-5]$/.test(id[14])).safeParse(empresaId).success) throw missing();
@@ -45,7 +45,7 @@ export class AttendanceService {
         if (!capabilities.includes('attendance.read') || !capabilities.includes(permission)) throw denied();
         const draft = (await tx.client.query(`SELECT empresa_id,draft_version,schema_version,configuracao,updated_by,updated_at
           FROM configuracoes_rascunho WHERE empresa_id=$1${permission === 'attendance.read' ? '' : ' FOR UPDATE'}`, [empresaId])).rows[0];
-        if (!draft) throw baseRequired();
+        if (!draft && requireDraft) throw baseRequired();
         const ownName = (await tx.client.query('SELECT nome FROM usuarios WHERE id=$1', [auth.user.id])).rows[0]?.nome || auth.user.name;
         const result = await work({ tx, tenant, draft, ownName, capabilities, canEdit: capabilities.includes('attendance.edit') });
         await tx.client.query("SELECT set_config('app.is_platform_admin','false',true),set_config('app.audience','customer',true)");
@@ -58,6 +58,22 @@ export class AttendanceService {
       // Accounts HTTP masks this generic operational failure, never raw PG/config errors.
       throw new Error('Attendance operation unavailable.');
     }
+  }
+  overview(auth, empresaId) {
+    return this.#run(auth, empresaId, 'attendance.read', async (state) => {
+      const { tenant, draft } = state;
+      const review = draft ? await this.#review(state) : null;
+      const publicationState = !draft ? 'preparing' : tenant.active_version == null ? 'unpublished'
+        : !review.ready ? 'administrative_pending' : review.changes.length ? 'changes_pending' : 'published';
+      return {
+        company: { id: tenant.id, name: tenant.name, status: tenant.status },
+        hasDraft: Boolean(draft), draftVersion: draft ? Number(draft.draft_version) : null,
+        activeVersion: tenant.active_version == null ? null : Number(tenant.active_version),
+        savedAt: draft?.updated_at || null, publishedAt: tenant.publicada_at || null,
+        publication: { state: publicationState, changeCount: review?.ready ? review.changes.length : null },
+        optionalResources: { conversations: false, leads: false, media: false, humanActions: false },
+      };
+    }, { requireDraft: false });
   }
   async #dto(state, auth) {
     const { tenant, draft, ownName, canEdit, capabilities } = state;

@@ -81,6 +81,7 @@ export function createCustomerRouter({ service }) {
   });
   router.get('/companies', route(async (req, res) => res.json({ companies: await service.companies(req.customer) })));
   router.get('/companies/:empresaId', route(async (req, res) => res.json(await service.company(req.customer, req.params.empresaId))));
+  router.get('/companies/:empresaId/overview', route(async (req, res) => res.json(await service.attendance.overview(req.customer, req.params.empresaId))));
   router.get('/companies/:empresaId/attendance', route(async (req, res) => res.json(await service.attendance.read(req.customer, req.params.empresaId))));
   router.get('/companies/:empresaId/capabilities', route(async (req, res) => res.json(await service.attendance.capabilities(req.customer, req.params.empresaId))));
   router.patch('/companies/:empresaId/attendance/draft', route(async (req, res) => res.json(await service.attendance.save(req.customer, req.params.empresaId, req.body, req.context?.correlationId))));

@@ -14,7 +14,7 @@ const featureStates = { disabled: 'Não liberado', draft: 'Preparado no rascunho
 const element = (tag, text, className = '') => {
   const result = document.createElement(tag); result.textContent = text; result.className = className; return result;
 };
-export function createAttendanceEditor({ root, initial, companyId, api, onDirty, notice, onAccessDenied }) {
+export function createAttendanceEditor({ root, initial, companyId, api, onDirty, notice, onAccessDenied, onChange = () => {} }) {
   let model = initial, epoch = 0, scriptEditor, disposed = false, busy = false, publicationBlocked = false, catalogChanged = false;
   const controls = new Map(), replies = new Map();
   let form, status, conflict, save, reload, localDirty = false;
@@ -77,6 +77,7 @@ export function createAttendanceEditor({ root, initial, companyId, api, onDirty,
     refreshActions();
   }
   function render(data) {
+    onChange(data);
     scriptEditor?.dispose(); model = data; controls.clear(); replies.clear(); root.replaceChildren();
     simulate = simulationMessage = simulationReply = publicationNote = review = confirmation = publish = accepted = null;
     busy = false; publicationBlocked = false; catalogChanged = false; publicationAttempt = null;

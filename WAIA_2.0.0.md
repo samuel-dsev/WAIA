@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **24/10/2026**. Estado: **M0/M1 commitadas localmente, M2 commitada em c59a905 / 1.25.0 e M3 commitada em 2d28a8c / 1.26.0 e M4 concluída em 1.27.0 com commit local no fechamento**; M5–M10 planejadas. Branch **`new`**, base M1 **88f7b21 / v1.24.0**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Evidências: [M0_AMBIENTE.md](docs/M0_AMBIENTE.md), [M1_IDENTIDADE.md](docs/M1_IDENTIDADE.md), [M2_ACESSOS.md](docs/M2_ACESSOS.md), [M3_PORTAL.md](docs/M3_PORTAL.md) e [M4_ATENDIMENTO.md](docs/M4_ATENDIMENTO.md).
+Atualizado em **25/10/2026**. Estado: **M0–M6 commitadas localmente até 6e07e3e / v1.29.0; M7 concluída em v1.30.0 com commit local no fechamento**. M8–M10 dependem de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 é a entrega futura**. Histórico e evidências por fase em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0–M5 têm commits locais e M6 tem gates locais concluídos; M7–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M6 têm commits locais; M7 tem gates locais concluídos e commit no fechamento. M8–M10 permanecem planejadas e dependem de autorização por etapa. Separar execução técnica da espera por domínio/e-mail/aceites.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -341,6 +341,8 @@ Estado em 25/10/2026: autorizada e concluída em **1.29.0**, base **31730d6**, c
 **Gate:** atendimento configurável sem superar habilitação/limites/suspensão ou afetar empresa vizinha. Subagentes: domínio e regressão runtime.
 
 ### M7 — acompanhamento e perfil
+
+Estado em 25/10/2026: autorizada e concluída localmente em **v1.30.0**, base `6e07e3e` / v1.29.0. Usuário escolheu expressamente manter conversas, fichas, mídia e ações humanas fechadas nesta fase. Visão geral sanitizada, perfil e sessões próprias validados: 652 testes aprovados/30 skips opt-in, 113 integrações PostgreSQL/Redis sem skips e browser com APIs reais. Sem migração, push/deploy ou avanço à M8. Contratos, arquivos e limites em [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md).
 
 - Visão geral do atendimento com resumos necessários e sanitizados.
 - Se aprovadas/liberadas, projetar conversas/fichas/mídia e ações humanas existentes com capacidades próprias; sem reimplementar inbox nem ampliar exportações.

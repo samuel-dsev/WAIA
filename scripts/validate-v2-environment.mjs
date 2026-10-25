@@ -78,6 +78,7 @@ try {
   run(['scripts/m0-schema-check.mjs']);
   run(['--test', 'test/accounts-postgres.test.js', 'test/team-postgres.test.js', 'test/access-admin-postgres.test.js', 'test/attendance-postgres.test.js',
     'test/attendance-publication-postgres.test.js', 'test/attendance-features-postgres.test.js', 'test/m6-worker-postgres.test.js',
+    'test/m7-overview-postgres.test.js', 'test/m7-personal-security-postgres.test.js',
     'test/attendance-budget-redis.test.js', 'test/accounts-redis.test.js', 'test/redis-integration.test.js', 'test/ai-reply-delay-redis.test.js'], {
     ...process.env, DATABASE_URL: upgradeApp, DATABASE_MIGRATOR_URL: upgradeOwner,
     RUN_POSTGRES_INTEGRATION: 'true', RUN_REDIS_INTEGRATION: 'true',

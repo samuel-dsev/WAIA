@@ -31,6 +31,7 @@ function clearCompany() {
   attendanceUI?.dispose(); attendanceUI = null;
   company = null; $('company-name').textContent = ''; $('workspace-name').textContent = '';
   $('workspace-state').textContent = ''; $('workspace-permissions').replaceChildren();
+  $('attendance-overview').replaceChildren(); $('attendance-editor').replaceChildren();
   $('workspace-nav').hidden = true; document.title = 'Meu atendimento · WAIA';
 }
 function clearForms() {
@@ -44,6 +45,7 @@ function begin() {
 function clearAccount() {
   scope.reset(); securityUI?.clear(); user = null; csrf = null; dirty = false; action = null;
   clearCompany(); $('companies').replaceChildren(); $('greeting').textContent = '';
+  $('profile-email').textContent = ''; $('profile-verification').textContent = '';
   clearForms(); show('login');
 }
 function setRoute(next) {
@@ -61,6 +63,15 @@ async function api(path, body, method = 'POST') {
   const data = response.status === 204 ? {} : await response.json().catch((error) => { request.check(); throw error; });
   request.check();
   if (!response.ok) {
+    // Invalid factors remain retryable; a revoked session must clear the view
+    // even when it expires between authentication and the security transaction.
+    if (response.status === 401 && data.code === 'MFA_INVALID' && user) {
+      const session = await account('session', null, 'GET');
+      if (session.user.id !== user?.id || session.csrfToken !== csrf) {
+        clearAccount(); throw new DOMException('Sessão alterada.', 'AbortError');
+      }
+      user = session.user; csrf = session.csrfToken;
+    }
     if (response.status === 401 && data.code !== 'MFA_INVALID' && user) {
       clearAccount(); notice('Sua sessão terminou. Entre novamente para continuar.', true);
       throw new DOMException('Sessão encerrada.', 'AbortError');
@@ -72,11 +83,19 @@ async function api(path, body, method = 'POST') {
 }
 const account = (path, body, method) => api(`/api/account/v1/${path}`, body, method);
 const report = (error) => { if (!cancelled(error)) notice(error.message || 'Serviço indisponível. Tente novamente.', true); };
+async function acceptSession(session) {
+  if (user && (session.user.id !== user.id || session.csrfToken !== csrf)) {
+    clearAccount(); user = session.user; csrf = session.csrfToken;
+    setRoute(portalRoute()); await home(); return false;
+  }
+  user = session.user; csrf = session.csrfToken; return true;
+}
 
 async function home({ resume = false } = {}) {
   begin(); clearCompany(); $('companies').replaceChildren();
   try {
-    const session = await account('session', null, 'GET'); user = session.user; csrf = session.csrfToken;
+    const session = await account('session', null, 'GET');
+    if (!await acceptSession(session)) return;
     const { companies } = await api('/api/app/v1/companies', null, 'GET');
     $('greeting').textContent = `Olá, ${user.name}`;
     if (!companies.length) {
@@ -112,10 +131,18 @@ async function workspace(next) {
       const item = document.createElement('li'); item.textContent = label; $('workspace-permissions').append(item);
     }
     $('suspended-note').hidden = !['suspensa', 'suspenso', 'suspended'].includes(summary.status); show('workspace');
+    const overview = await api(`/api/app/v1/companies/${next.companyId}/overview`, null, 'GET');
+    renderOverview(overview);
+    if (!overview.hasDraft) {
+      $('attendance-editor').textContent = 'A administração WAIA precisa preparar este atendimento antes da edição.';
+      return;
+    }
     $('attendance-editor').textContent = 'Carregando atendimento…';
     const attendance = await api(`/api/app/v1/companies/${next.companyId}/attendance`, null, 'GET');
     attendanceUI = createAttendanceEditor({ root: $('attendance-editor'), initial: attendance, companyId: next.companyId,
-      api, notice, onDirty: (value) => { dirty = value; }, onAccessDenied: () => {
+      api, notice, onDirty: (value) => { dirty = value; }, onChange: (data) => renderOverview({ ...data,
+        publication: { state: data.activeVersion == null ? 'unpublished' : !data.publication.ready ? 'administrative_pending'
+          : data.publication.changes.length ? 'changes_pending' : 'published', changeCount: data.publication.ready ? data.publication.changes.length : null } }), onAccessDenied: () => {
         begin(); clearCompany(); show('denied'); notice('A permissão deste atendimento mudou. Volte às empresas para atualizar seu acesso.', true);
       } });
   } catch (error) {
@@ -124,6 +151,28 @@ async function workspace(next) {
     notice([403, 404].includes(error.status) ? 'Este atendimento não está disponível para o seu acesso. Solicite orientação à administração WAIA.' : 'Não foi possível carregar o atendimento. Tente novamente.', true);
   }
 }
+function renderOverview(model) {
+  $('workspace-state').textContent = statusText(model.company.status);
+  $('suspended-note').hidden = !['suspensa', 'suspenso', 'suspended'].includes(model.company.status);
+  const labels = { preparing: 'Atendimento em preparação pela administração.', unpublished: 'Nenhuma publicação disponível.',
+    published: 'Conteúdo salvo igual ao publicado.', changes_pending: 'Há alterações de negócio salvas para revisar e publicar.',
+    administrative_pending: 'É necessária uma revisão administrativa antes da publicação.' };
+  const date = (value) => value ? new Date(value).toLocaleString('pt-BR') : 'Ainda não disponível';
+  const lines = [labels[model.publication.state] || labels.preparing,
+    `Rascunho: ${model.draftVersion ?? 'Não preparado'} · Salvo em: ${date(model.savedAt)}`,
+    `Versão publicada: ${model.activeVersion ?? 'Nenhuma'} · Publicada em: ${date(model.publishedAt)}`];
+  if (model.publication.changeCount != null) lines.push(`Campos de negócio com alteração: ${model.publication.changeCount}`);
+  $('attendance-overview').replaceChildren(...lines.map((text) => { const line = document.createElement('p'); line.textContent = text; return line; }));
+}
+$('overview-refresh').addEventListener('click', async () => {
+  const id = company?.id; if (!id) return;
+  const button = $('overview-refresh'); button.disabled = true;
+  try { renderOverview(await api(`/api/app/v1/companies/${id}/overview`, null, 'GET')); }
+  catch (error) {
+    if ([403, 404].includes(error.status)) { begin(); clearCompany(); show('denied'); }
+    report(error);
+  } finally { button.disabled = false; }
+});
 async function navigate(next) {
   if (!canLeave()) { setRoute(route); return; }
   if (!user) { setRoute(next); clearAccount(); return; }
@@ -158,8 +207,16 @@ for (const id of ['activate', 'reset']) form(id, async ({ password, confirmation
   action = null; $(id).reset(); clearAccount();
   notice(id === 'activate' ? 'Acesso ativado. Entre com seu e-mail e a senha que acabou de definir.' : 'Senha alterada. Entre novamente.');
 });
-$('profile-open').addEventListener('click', () => {
-  if (!canLeave()) return; begin(); $('profile-form').elements.name.value = user.name; show('profile');
+$('profile-open').addEventListener('click', async () => {
+  if (!canLeave()) return; begin();
+  try {
+    const session = await account('session', null, 'GET');
+    if (!await acceptSession(session)) return;
+    $('profile-form').elements.name.value = user.name;
+    $('profile-email').textContent = user.email;
+    $('profile-verification').textContent = user.verified ? 'E-mail verificado.' : 'E-mail aguardando verificação. Solicite orientação à administração WAIA.';
+    show('profile');
+  } catch (error) { if (!cancelled(error)) { show('unavailable'); report(error); } }
 });
 form('profile-form', async (data) => {
   const result = await account('profile', data, 'PATCH'); user = result.user;
@@ -180,6 +237,7 @@ $('logout').addEventListener('click', async () => {
 });
 securityUI = installSecurity({ $, account, home: () => home({ resume: true }), show, notice, form,
   getUser: () => user, onLogin: (result) => { csrf = result.csrfToken; user = result.user; },
+  onSession: acceptSession,
   isCurrent: () => Boolean(user) || visible === 'mfa',
   beforeOpen: canLeave, onOpen: begin,
 });
@@ -216,7 +274,8 @@ document.addEventListener('visibilitychange', () => {
           const latest = await api(`/api/app/v1/companies/${company.id}/attendance`, null, 'GET');
           attendanceUI.revalidate(latest); show('workspace'); return;
         }
-        if (['profile', 'security', 'mfa', 'recovery'].includes(resumeView)) show(resumeView);
+        if (resumeView === 'security') await securityUI.refresh();
+        else if (['profile', 'mfa', 'recovery'].includes(resumeView)) show(resumeView);
         else await home({ resume: true });
       } catch (error) {
         if (cancelled(error)) return;

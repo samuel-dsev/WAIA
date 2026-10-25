@@ -3,6 +3,18 @@
 Atualizado em 25/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 
+## M7 — acompanhamento e perfil, 25/10/2026
+
+Usuário autorizou iniciar a M7 pelo plano e histórico de commits. Base **6e07e3e / v1.29.0**, checkout principal `new`, M0–M6 conferidas no Git. Escolha explícita: manter conversas, fichas, mídia e ações humanas fechadas. Entrega **v1.30.0**, com commit local no fechamento conforme AGENTS; sem push, promoção, deploy ou avanço à M8.
+
+GET overview exige sessão customer/vínculo/attendance.read na transação existente e retorna somente empresa, versões/datas, estado da publicação e quantidade de mudanças de negócio quando a revisão é segura. Não devolve textos/diff, autores, tokens de revisão, metadados técnicos ou contagens de conversas/fichas. Sem draft, mostra preparação administrativa sem bloquear o resumo. Opcionais permanecem sem rotas e sem capacidade efetiva mesmo com permissões/roles legados. Suspensão não reativa empresa nem libera operação.
+
+Portal sincroniza resumo após salvar/publicar/recarregar, mostra e-mail somente leitura/orientação administrativa e atualiza MFA/sessões antes de abrir Segurança. Troca de identidade/CSRF limpa empresa/editor e volta à lista; sessão revogada/expirada limpa conta, perfil e conteúdo. MFA inválido confirma se a sessão ainda existe antes de permitir retry. Navegação cancela respostas antigas; saída remove o editor do DOM. Reutilizados perfil/senha/MFA/sessões existentes, sem gestão de terceiros ou exportação.
+
+Node22 **682 casos, 652 aprovados/30 skips opt-in, zero falhas**; **113 integrações PostgreSQL/Redis aprovadas, zero skips/falhas**; sintaxe **329 arquivos JavaScript**. Schema30 sem migração nova; ledger/checksums, role sem bypass, pool limpo, Redis/mídia/egress isolados. Dois testes PG novos incluídos no validador e CI, sem execução remota. Revisões independentes de autorização/mídia e jornada incorporadas, sem bloqueador alto/crítico conhecido. Primeiro build foi iniciado antes do snapshot terminar e descartado; fixture nova precisou de menu/routing completos para compilar. Rodadas finais passaram sem alterar código de produto para contornar testes.
+
+Browser Edge com APIs reais: overview/opcionais/admin negado, salvar sincroniza resumo sem publicar, restauração da saudação e nome fictícios, perfil XSS literal/mass assignment, sessões próprias/expiração, resposta lenta entre empresas, revogação atual, troca de identidade fora da página, teclado e 390px sem overflow/pageerrors. Capturas inspecionadas; `.tmp/m7/` não versionada. Fixtures PG comprovam troca de senha revogando todas as sessões e matrícula MFA pendente, isolamento e redução/revogação. Sem WhatsApp/OpenAI/e-mail real, restore/seed/importação ou mídia/ações humanas liberadas. Preview mantido em **http://127.0.0.1:5035/portal/** e **http://127.0.0.1:5035/panel/** no ambiente v2 existente, sem worker de atendimento. Trabalho preexistente alheio preservado. Manual [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md). M8 aguarda autorização; 2.0.0 permanece futura.
+
 ## M6 — funcionalidades de atendimento, 25/10/2026
 
 Usuário autorizou M6 da mesma forma que M5 e pediu retomada do checkout. Base **31730d6 / v1.28.0**, branch principal `new`; entrega **1.29.0**, com commit local no fechamento conforme AGENTS. Sem push, promoção, deploy ou implementação da M7.

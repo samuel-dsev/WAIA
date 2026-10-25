@@ -1,5 +1,5 @@
 export function installSecurity({ $, account, home, show, notice, form, getUser, onLogin,
-  isCurrent = () => true, beforeOpen = () => true, onOpen = () => {} }) {
+  isCurrent = () => true, beforeOpen = () => true, onOpen = () => {}, onSession = () => {} }) {
   let epoch = 0;
   let challenge = null;
   let mode = 'login';
@@ -73,13 +73,16 @@ export function installSecurity({ $, account, home, show, notice, form, getUser,
     const valid = current();
     $('session-list').replaceChildren();
     try {
+      const session = await account('session', null, 'GET');
+      if (!valid()) return;
+      if (await onSession(session) === false || !valid()) return;
       const { sessions } = await account('sessions', null, 'GET');
       if (!valid()) return;
       for (const session of sessions) {
         const item = document.createElement('div');
         item.className = 'company';
         const info = document.createElement('p');
-        info.textContent = `${session.current ? 'Esta sessão' : 'Outra sessão'} · ${session.audience === 'admin' ? 'Painel' : 'Portal'} · acesso ${new Date(session.lastSeenAt).toLocaleString('pt-BR')}`;
+        info.textContent = `${session.current ? 'Esta sessão' : 'Outra sessão'} · ${session.audience === 'admin' ? 'Painel' : 'Portal'} · acesso ${new Date(session.lastSeenAt).toLocaleString('pt-BR')} · expira ${new Date(session.expiresAt).toLocaleString('pt-BR')}`;
         const revoke = document.createElement('button');
         revoke.type = 'button';
         revoke.textContent = 'Encerrar sessão';
@@ -101,7 +104,7 @@ export function installSecurity({ $, account, home, show, notice, form, getUser,
       $('mfa-setup').hidden = getUser()?.mfaEnabled === true;
       $('mfa-controls').hidden = !getUser()?.mfaEnabled;
       show('security');
-    } catch (error) { if (valid()) notice(error.message, true); }
+    } catch (error) { if (valid()) { show('unavailable'); notice(error.message, true); } }
   }
 
   click('security-open', async () => {
@@ -137,5 +140,5 @@ export function installSecurity({ $, account, home, show, notice, form, getUser,
     clearSecrets();
     $('session-list').replaceChildren();
   }
-  return { showChallenge, clear };
+  return { showChallenge, clear, refresh: security };
 }
