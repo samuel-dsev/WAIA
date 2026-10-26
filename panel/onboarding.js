@@ -128,7 +128,7 @@ function setPath(object, path, value) {
   target[last] = value;
 }
 
-function field({ name, label, value = "", type = "text", required = false, disabled = false, options = [], help = "", min, max, rows = 3 }) {
+function field({ name, label, value = "", type = "text", required = false, disabled = false, options = [], help = "", min, max, step, rows = 3 }) {
   const wrap = element("div", "wizard-field");
   const id = `onboarding-${name.replace(/[^a-z0-9]/giu, "-")}-${crypto.randomUUID().slice(0, 5)}`;
   const labelNode = element("label", "", label);
@@ -153,6 +153,7 @@ function field({ name, label, value = "", type = "text", required = false, disab
     else input.min = String(min);
   }
   if (max != null) input.max = String(max);
+  if (step != null) input.step = String(step);
   if (["text", "email", "tel", "url", "password", "textarea"].includes(type)) input.maxLength = type === "textarea" ? 20000 : 500;
   if (type === "checkbox") input.checked = bool(value); else input.value = value ?? "";
   if (type === "password") input.autocomplete = "new-password";
@@ -676,7 +677,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     const definitions = {
       product: {
         title: "produto ou serviço", target: state.configuration.catalog.items,
-        schema: [{ name: "name", label: "Nome", required: true }, { name: "description", label: "Descrição", type: "textarea" }, { name: "price", label: "Preço", type: "number", valueType: "number", min: 0 }, { name: "active", label: "Ativo", type: "checkbox" }],
+        schema: [{ name: "name", label: "Nome", required: true }, { name: "description", label: "Descrição", type: "textarea" }, { name: "price", label: "Preço", type: "number", valueType: "number", min: 0, step: '0.01' }, { name: "active", label: "Ativo", type: "checkbox" }],
         make: (v) => ({ id: current?.id || slug(v.name, "produto"), ...v }),
       },
       event: {

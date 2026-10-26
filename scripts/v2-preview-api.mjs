@@ -21,5 +21,5 @@ runtime.accounts.transport.send = async (message) => {
 const stopMail=startAccountEmailWorker(runtime.accounts.service,runtime.accounts.transport);
 const server=createServer(createApiApp({runtime,config}));
 server.listen(3001,'0.0.0.0',()=>console.log('Preview v2 disponível apenas pela publicação loopback configurada; e-mail fake, sem worker de atendimento.'));
-const stop=async()=>{await stopMail.close();await new Promise(resolve=>server.close(resolve));await runtime.redis.quit();await runtime.pool.end();process.exit(0);};
+const stop=async()=>{await stopMail.close();await new Promise(resolve=>server.close(resolve));await runtime.queue.close();await runtime.redis.quit();await runtime.pool.end();process.exit(0);};
 process.on('SIGTERM',stop);process.on('SIGINT',stop);

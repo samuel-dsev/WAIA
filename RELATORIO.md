@@ -1,7 +1,19 @@
 # Continuidade — WAIA
 
-Atualizado em 25/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
+Atualizado em 26/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
+
+## M10 — entrega técnica local para aceite, 26/10/2026
+
+Usuário autorizou concluir M10/planejamento, somente testes e execução local, sem interferir na versão em deploy na VPS. Base **8361597 / 2.0.0-rc.1**, checkout principal `new`, entrega **2.0.0-rc.2**, preservando alterações alheias. **Implementação local M0–M10 encerrada para teste manual do titular**; esse aceite não foi presumido. Domínio/e-mail real/perímetro externo/fornecedores/observação operacional ficam adiados pelo escopo expresso. Estável2.0.0 não antecipada; sem push, promoção, deploy, DNS ou comando direcionado à VPS.
+
+Servidor disponível na raiz **http://127.0.0.1:5035/** e painel **http://127.0.0.1:5035/panel/**, reutilizando PostgreSQL/Redis/mídia v2 do mesmo waia-test. Preparo aceita Image ID imutável, valida propriedade dos dois containers e mídia antes de interromper qualquer superfície, usa scripts da mesma imagem para API/proxy/bootstrap e confirma health. Proxy loopback substitui XFF/headers forjados e API confia somente no peer exato. Novo launcher retoma somente infraestrutura/volumes v2 existentes e a imagem entregue, sem build/seed/reset. Filaretti e todos os volumes anteriores preservados.
+
+Browser com APIs/persistência reais preenche Aurora/Horizonte/Vale/Jardim com identidade/endereço fictícios, roteiro/mensagens/horários/regras/menu/catálogo por UI. Novo acesso Teste Local M10 vinculado à Jardim, ativação fake, senha+TOTP admin, login inicial/cliente, salvar rascunho, alheio404/admin401/403, revogação, desktop1366/390/360 e simulador administrativo200. Publicação/ativação e simulação customer sem base/conexões continuam bloqueadas; não foram cadastradas chaves ou conexões fictícias para contornar readiness. O teste visual encontrou e corrigiu preço com centavos rejeitado pelo step inteiro e modal maior que a largura disponível. A confirmação/seleção do e-mail novo foi corrigida no runner; tokens antigos continuam recusados pelo produto.
+
+Helper local exporta somente acessos sintéticos/MFA e links da caixa fake para arquivos privados em .secrets, com ACL Windows antes da gravação, sem rota HTTP ou valores no stdout. Senhas/MFA existentes não foram redefinidos. Seis testes negativos/vetorTOTP. Node22 **704 casos, 674 pass/30 skips opt-in, zero falhas**; regressões **132 integrações PostgreSQL/Redis**, zero falhas/skips, mesmas três exclusões históricas. Sintaxe345, audit0, build/Compose e revisão independente de produto/operação. Evidências preparatórias/finais em `.tmp/m10/`; artefato final do commit em `.tmp/releases/2.0.0-rc.2-<commit>/`, com hashes/manifesto/exportação/load e smoke do mesmo ID em execução. Recuperação sintética reaproveita o runner guardado da M9, sem tocar bases persistentes.
+
+Manual admin/cliente, credenciais privadas, e-mail fake, retomada, limites e roteiro de aceite em [M10_ENTREGA_LOCAL.md](docs/M10_ENTREGA_LOCAL.md). Pedido de finalizar planejamento foi atendido no escopo local; o próximo passo é o titular testar e registrar aceite/ajustes, sem abertura de outra fase por arrasto. O registro abaixo da M9 é histórico do seu fechamento anterior, não revoga a autorização local atual da M10.
 
 ## M9 — preparação local da candidata, 25/10/2026
 

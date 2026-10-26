@@ -1,6 +1,6 @@
 # WAIA 2.0.0 — planejamento do acesso multiusuário por empresa
 
-Atualizado em **25/10/2026**. Estado: **M0–M8 commitadas localmente até be548d5 / v1.30.1; M9 autorizada com preparação local da candidata 2.0.0-rc.1**. Domínio/e-mail e perímetro efetivo permanecem pendentes por escolha do usuário; M10 depende de autorização própria. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. **2.0.0 estável é entrega futura**. Histórico e evidências em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M9_CANDIDATA.md](docs/M9_CANDIDATA.md).
+Atualizado em **26/10/2026**. Estado: **implementação técnica local M0–M10 encerrada, entrega 2.0.0-rc.2 para teste do titular**, base M9 **8361597 / 2.0.0-rc.1**. M10 autorizada exclusivamente local, com dados fictícios e sem API keys/conexões externas; VPS em deploy preservada. **Aceite manual do titular e estável2.0.0 pendentes**; domínio/e-mail/operação externa adiados por escolha do usuário. Branch **`new`**, origem `3b8a295` / v1.23.1, com alterações anteriores alheias preservadas. Sem push/deploy. Histórico, URLs e manual em [PLAN.md](PLAN.md), [RELATORIO.md](RELATORIO.md) e [M10_ENTREGA_LOCAL.md](docs/M10_ENTREGA_LOCAL.md).
 
 Este roteiro substitui o escopo SaaS de setembro/2026. F0–F9 permanecem como história no Git e no [RELATORIO.md](RELATORIO.md), sem equivalência automática com as novas etapas M0–M10. [PLAN.md](PLAN.md) contém somente índice e gates; este documento concentra os requisitos. Operação: [OPERACAO_RELEASE.md](docs/OPERACAO_RELEASE.md).
 
@@ -248,7 +248,7 @@ Padrão autorizado em 24/10/2026: ao encerrar cada fase autorizada com gates val
 
 ## 11. Etapas detalhadas M0–M10
 
-M0–M8 têm commits locais. M9 autorizada para preparação local/ensaio tmpfs, com domínio/e-mail pendentes; M10 depende de autorização própria. Separar execução técnica da espera por domínio/e-mail/aceites.
+M0–M9 têm commits locais. M10 autorizada para encerrar a entrega técnica local RC2 e abrir o servidor para testes do titular. Domínio/e-mail/operação externa ficam fora desse escopo; aceite manual e promoção estável permanecem separados. Não há nova fase de implementação autorizada automaticamente.
 
 ### M0 — baseline, isolamento e triagem
 
@@ -380,6 +380,8 @@ Preparação local autorizada em 25/10/2026, versão **2.0.0-rc.1**, base **be54
 
 ### M10 — aceite e entrega 2.0.0
 
+**Escopo atualizado pelo titular em25/10:** concluir planejamento/implementação e executar **somente localmente**, sem interferir na VPS. Entrega técnica **2.0.0-rc.2**, servidor5035 com quatro empresas/configurações fictícias e acessos reais locais, sem chaves/conexões externas. 674 testes/30 skips e 132 integrações; manual/artefato/evidências em [M10_ENTREGA_LOCAL.md](docs/M10_ENTREGA_LOCAL.md). O titular ainda fará o aceite; versão estável2.0.0 não foi presumida. Requisitos de rollout abaixo permanecem condicionais a uma futura autorização específica.
+
 - Titular testa cadastro fictício/login/vínculos no painel, entra no portal, escolhe empresas, salva/simula/publica e revoga acesso.
 - Conferir definição de pronto, achados, riscos e manuais; apresentar arquivos/validações/versão/mensagem antes de pedir commit/push em `new`.
 - Após gates M0–M9 e aceite funcional, preparar manifests **2.0.0**, gerar o artefato final e verificar versão/package/lock, instalação, assets, regressões proporcionais e smoke sobre essa imagem. Registrar novo checksum/digest e aceite do artefato final: mudar manifests cria outro artefato, não transforma a imagem RC anterior. RCs ficam como histórico.
@@ -441,20 +443,24 @@ Evidência por gate: branch/commit, versão/imagem, ambiente sanitizado, data/ho
 
 Não criar placeholders. Confirmar serviços/nomes antes de novos módulos. Atualizar ADR 001 e aviso histórico do runbook F1; preservar aceites/evidências. Nas fases, entregar manual de acessos pelo admin, uso do portal e operação, sem duplicar especificação.
 
-## 14. Definição de pronto da 2.0.0
+## 14. Definição de pronto — estado técnico local da M10
 
-- [ ] Login inicial e lista de empresas vinculadas funcionando.
-- [ ] Admin global mantém todas as empresas do novo alvo e cria/gerencia acessos/vínculos/capacidades pelo painel.
-- [ ] N:N, zero vínculos, suspensão/revogação sem SQL ou configuração por cliente.
-- [ ] Cliente sem signup/criação de empresa/equipe, audience admin ou dados de outra empresa.
-- [ ] Roteiro/atendimento permitido com salvar/simular/publicar versionados e sem efeito técnico oculto.
-- [ ] Segredos/modelos/conectores/números/grupos/quotas/infra restritos à administração.
-- [ ] MFA admin, ativação/recuperação e revogação homologados; entrega real de e-mail comprovada quando exigida.
-- [ ] Novo banco sem dados/empresas/credenciais antigos; fictícios criados pelo painel; filas/mídia isolados.
-- [ ] Matriz obrigatória e regressões aplicáveis aprovadas em PostgreSQL/Redis/navegador; sem crítico/alto de acesso ou perda de dados.
-- [ ] Responsividade/acessibilidade/proxy/CI new/imagem única verificados.
-- [ ] Instalação vazia e backup/restore sintético autorizado/rollback ensaiados; legado preservado.
-- [ ] Revisões dos subagentes, manuais, limites e aceite registrados. Deploy exige autorização específica.
+O escopo vigente é a entrega local RC2. As marcações abaixo comprovam execução técnica, sem substituir o aceite do titular nem aprovar a operação externa.
+
+- [x] Login inicial e lista de empresas vinculadas funcionando localmente.
+- [x] Admin global mantém empresas do novo alvo e cria/gerencia acessos/vínculos/capacidades pelo painel.
+- [x] N:N, zero vínculos, suspensão/revogação sem SQL ou configuração por cliente.
+- [x] Cliente sem signup/criação de empresa/equipe, audience admin ou dados de outra empresa.
+- [x] Salvar/simular/publicar versionados verificados por integrações controladas; preview sem conexão preserva bloqueios e oferece simulador administrativo isolado.
+- [x] Segredos/modelos/conectores/números/grupos/quotas/infra restritos à administração.
+- [x] MFA admin, ativação/recuperação/revogação locais; e-mail fake, sem alegar recepção externa.
+- [x] Banco v2 sem dados antigos; fictícios pelo painel; Redis/mídia isolados e legado preservado.
+- [x] Matriz/regressões PostgreSQL/Redis/navegador locais aprovadas; revisões sem crítico/alto aberto conhecido.
+- [x] Responsividade/acessibilidade funcional/proxy local/build/imagem única; CI preparada para new, sem execução remota alegada.
+- [x] Instalação vazia e backup/restore sintético/rollback ensaiados em alvo autorizado.
+- [x] Revisões, manuais, limites, servidor e roteiro de aceite entregues.
+- [ ] Aceite funcional do titular e geração/homologação do novo artefato estável2.0.0 após esse aceite.
+- [ ] Gates externos, se/quando autorizados: domínio/TLS/perímetro real, e-mail/fornecedores, CI remota, rollout/observação e suporte operacional. Deploy exige autorização própria.
 
 ## 15. Decisões pendentes e riscos
 

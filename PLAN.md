@@ -1,6 +1,6 @@
 # Plano ativo — WAIA 2.0.0
 
-Atualizado em 25/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
+Atualizado em 26/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).
 
 ## Objetivo
@@ -18,7 +18,8 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 - M6 autorizada e concluída em **v1.29.0**, base `31730d6`: catálogo funcional sanitizado, horários/regras no contexto existente da IA, guarda em todos os envios bot e confirmação de handoff com CAS/checkpoint. 652 aprovados/28 skips, 97 integrações e browser real aprovados. Commit local **6e07e3e**; sem push/deploy. [M6_FUNCIONALIDADES.md](docs/M6_FUNCIONALIDADES.md) registra arquivos, comandos e limites.
 - M7 autorizada e concluída em **v1.30.0**, base `6e07e3e`: visão geral sanitizada e segurança pessoal; por escolha explícita do usuário, conversas/fichas/mídia/ações humanas permanecem fechadas. 652 aprovados/30 skips, 113 integrações e browser com APIs reais aprovados; commit local **a2f0a56**, sem push/deploy. Evidências e limites em [M7_ACOMPANHAMENTO.md](docs/M7_ACOMPANHAMENTO.md).
 - M8 autorizada e concluída localmente em **be548d5 / v1.30.1**, base **a2f0a56 / v1.30.0**: matriz T01–T24 aplicável, 652 testes/30 skips, 132 integrações aprovadas, schema limpo/upgrade30, browser360/390/desktop e carga3.000req/600s com p95 **136,35ms** e zero vazamentos/erros. Sem push/deploy. Exclusões históricas em [M8_HOMOLOGACAO.md](docs/M8_HOMOLOGACAO.md).
-- M9 autorizada para **preparação local**, candidata **2.0.0-rc.1**: artefato do commit com hashes/exportação/reload, ingress separado e restore/rollback sintéticos autorizados em tmpfs. Por escolha do usuário, domínio e e-mail ficam pendentes; o gate externo da fase permanece aberto, sem publicação. 668 testes/30 skips e 132 integrações aprovados; comandos, evidências e limites em [M9_CANDIDATA.md](docs/M9_CANDIDATA.md). Estável2.0.0 e M10 não autorizadas.
+- M9 autorizada para **preparação local**, candidata **2.0.0-rc.1**: artefato do commit com hashes/exportação/reload, ingress separado e restore/rollback sintéticos autorizados em tmpfs. Por escolha do usuário, domínio e e-mail ficam pendentes; o gate externo da fase permanece aberto, sem publicação. 668 testes/30 skips e 132 integrações aprovados; comandos, evidências e limites em [M9_CANDIDATA.md](docs/M9_CANDIDATA.md). Estável2.0.0 não antecipada; a autorização posterior da M10 está registrada abaixo.
+- M10 autorizada em25/10 para **conclusão exclusivamente local**, preservando a VPS em deploy. Entrega **2.0.0-rc.2**, base **8361597**, com servidor5035, quatro empresas/configurações fictícias pelo painel, acesso/MFA e caixa fake em arquivos privados, retomada do artefato imutável e correções pequenas de preço decimal/modal. 674 testes/30 skips e 132 integrações aprovados. **Planejamento de implementação local M0–M10 encerrado; aceite manual do titular pendente.** Estável2.0.0, gates externos e qualquer publicação não foram presumidos. [M10_ENTREGA_LOCAL.md](docs/M10_ENTREGA_LOCAL.md) contém URLs, roteiro e comandos.
 - Novo escopo substitui o SaaS aberto previsto em setembro: sem signup público, criação de empresa/equipe pelo cliente, billing ou novos conectores nesta entrega.
 - Equipe/MFA e registros pós-deploy locais preservados. M0 caracterizou o schema 023; M1 incorporou segurança pessoal/MFA necessária e bloqueou equipe cliente. Portal/equipe e demais registros anteriores não são aprovados por arrasto.
 - F0/F1 históricos e antigas F2–F9 não equivalem a estas novas etapas. Histórico/evidências em RELATORIO.md; detalhes únicos em WAIA_2.0.0.md.
@@ -36,10 +37,10 @@ Entregar login multiusuário com empresas vinculadas por acesso, gestão de aces
 | M6 | Funcionalidades liberadas | Capacidades respeitam habilitação/limites da empresa | Concluída 1.29.0; commit local no fechamento |
 | M7 | Acompanhamento/perfil | Opcionais fechados; visão geral e segurança pessoal isoladas | Concluída 1.30.0; commit local no fechamento |
 | M8 | Homologação e revisão | T01–T24 locais, banco/Redis/navegador/carga e revisão independente | Concluída 1.30.1; commit local no fechamento |
-| M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Preparação local RC1; domínio/e-mail/perímetro efetivo pendentes |
-| M10 | Aceite e entrega 2.0.0 | Definição de pronto, manuais e autorizações de publicação | Planejada |
+| M9 | Candidata/infra/recuperação | Imagem única, ingress privado/público e rollback compatível | Local RC1/8361597 validada; gates externos adiados pelo escopo M10 |
+| M10 | Entrega técnica local e aceite | Servidor/artefato/manuais e roteiro para titular | RC2 local entregue; aceite manual/estável pendentes |
 
-Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). Próximo gate: **concluir dependências externas da M9** quando definidas/autorizadas; M10 aguarda autorização própria.
+Dependências, tarefas, APIs, campos, ferramentas, testes e revisão por subagentes estão nas seções 3–15 da [especificação](WAIA_2.0.0.md). Próximo gate: **aceite manual do titular no servidor local**. Não há fase adicional de implementação autorizada automaticamente. Domínio/e-mail/produção ficam fora da entrega local e dependem de decisão futura.
 
 ## Regras de continuidade
 

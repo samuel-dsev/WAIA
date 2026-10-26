@@ -419,6 +419,7 @@ body:has(dialog.attendance-script-dialog[open]) { overflow: hidden; }
 .wizard-conflict { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .wizard-footer { position: sticky; bottom: 10px; z-index: 5; padding: 12px 16px; background: rgba(255, 255, 255, 0.96); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 30px rgba(19, 42, 47, 0.11); }
 .wizard-dialog { width: min(94vw, 760px); }
+.wizard-dialog > .dialog-wide { width: 100%; min-width: 0; }
 .simulator-dialog { width: min(96vw, 900px); }
 .simulator-shell { display: grid; gap: 14px; max-height: 88vh; }
 .simulator-shell .alert { margin: 0; }

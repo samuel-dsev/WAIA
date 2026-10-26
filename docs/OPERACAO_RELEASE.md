@@ -48,6 +48,8 @@ Validar checksums, migrações, RLS, contagens, integridade de mídia, cofre e r
 
 ## Candidata 2.0.0 e preparação local da M9
 
+M10 encerrou a entrega técnica **local RC2** conforme escopo posterior do titular, preservando a VPS. Servidor/retomada/credenciais privadas e roteiro de aceite em [M10_ENTREGA_LOCAL.md](M10_ENTREGA_LOCAL.md). Não confundir esse servidor com publicação; estável e aceite humano permanecem separados. Para retomar o mesmo artefato local, usar `scripts/start-local-preview.mjs`, que exige imagem e volumes v2 existentes.
+
 [M9_CANDIDATA.md](M9_CANDIDATA.md) registra artefato por commit/Image ID/checksum, ingress v2 separado e ensaio autorizado em tmpfs. Domínio/e-mail/perímetro efetivo continuam pendentes; não instalar templates nem reutilizar o banco/filas legados por arrasto. A promoção deve carregar exatamente o archive homologado, conferir checksum/Image ID e usar esse mesmo ID em API, workers e gateways; sem rebuild.
 
 Backup coerente de banco/mídia exige interromper escritores e workers na janela autorizada. O shell de restore agora mantém serviços parados quando stop, restore ou migração falha; confirmar estado e integridade antes de qualquer reinício manual. A prova real da M9 usa destino temporário vazio e pg_restore transacional, enquanto a correção do shell tem testes de falha com Docker simulado. Nenhum desses testes autoriza restore em `waia-test` existente ou produção.
