@@ -174,6 +174,21 @@ test("simulador e runtime existente tomam decisões conversacionais equivalentes
   assert.equal(revision, inputs.length);
 });
 
+test("simulador compila saudação em texto sem botões e conserva os aliases", async () => {
+  const configuration = baseConfiguration();
+  configuration.menu = { text: "Olá! Você já tem algum modelo em mente?", options: [] };
+  const preview = new PreviewService();
+  const greeting = await preview.simulate(request({ configuration }));
+  assert.equal(greeting.reply.text, configuration.menu.text);
+  assert.deepEqual(greeting.reply.buttons, []);
+  const products = await preview.simulate(request({
+    configuration,
+    expectedSessionRevision: greeting.sessionRevision,
+    message: { type: "text", text: "produtos" },
+  }));
+  assert.equal(products.reply.module, "catalog");
+});
+
 test("sessões são isoladas por ator e tenant e rejeitam revisão stale ou configuração trocada", async () => {
   const preview = new PreviewService();
   const firstA = await preview.simulate(request());

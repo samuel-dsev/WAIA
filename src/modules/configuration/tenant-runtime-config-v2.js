@@ -361,7 +361,7 @@ function parseMenu(value, path, enabled) {
       params,
       transportId: `cfg:${configurationChecksum({ action, params, position: Number(entryPath.split("/").at(-1)) }).slice(0, 24)}`,
     };
-  }, { min: 1, max: 30 });
+  }, { max: 30 });
   unique(options, (option) => option.id, pointer(path, "options"));
   return {
     text: text(object.text, pointer(path, "text"), { max: 1_000, optional: true }),

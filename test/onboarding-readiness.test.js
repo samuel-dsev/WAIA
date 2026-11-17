@@ -89,10 +89,19 @@ test("backend produz matriz estável completa e pronta sem depender do painel", 
   assert.equal(Object.isFrozen(result.checks[0]), true);
 });
 
+test("saudação em texto com lista vazia passa na prontidão e na compilação", () => {
+  const configuration = validConfiguration();
+  configuration.menu = { text: "Olá! Você já tem algum modelo em mente?", options: [] };
+  const result = readiness().evaluate({ empresaId: TENANT_ID, configuration, snapshot: validSnapshot() });
+  assert.equal(byCode(result, "MENU_ACTIONS_VALID").state, "passed");
+  assert.equal(byCode(result, "RUNTIME_CONFIGURATION_COMPILES").state, "passed");
+  assert.equal(result.ready, true);
+});
+
 test("identidade, retenção, módulos, menu, administrador, WhatsApp e compilação geram bloqueadores corrigíveis", () => {
   const result = readiness(() => { throw new Error("erro interno que não pode vazar"); }).evaluate({
     empresaId: TENANT_ID,
-    configuration: { schemaVersion: 2, identity: {}, retention: {}, modules: [], menu: { options: [] } },
+    configuration: { schemaVersion: 2, identity: {}, retention: {}, modules: [], menu: {} },
     snapshot: { tenant: { status: "rascunho", runtimeMode: "versionado", configurationVersion: 1 } },
   });
   for (const [code, step] of [

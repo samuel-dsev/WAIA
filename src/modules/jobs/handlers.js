@@ -431,8 +431,13 @@ export function createWorkerHandlers({
           aiHandler: aiService
             ? async ({ config, input }) => {
               const intakeOnly = definition.ai?.leadIntakeOnlyEnabled === true;
+              const qualifiesLeads = definition.ai?.leadQualificationEnabled === true;
               const salesMode = !intakeOnly && definition.ai?.catalogSalesEnabled === true && config.catalog?.source?.type === "google_sheets" && config.catalog.source.status === "healthy";
-              const intakeReferral = intakeOnly ? normalizeAdReferral(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id })) : null;
+              const referral = qualifiesLeads || salesMode
+                ? message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id })
+                : null;
+              const leadReferral = qualifiesLeads ? normalizeAdReferral(referral) : null;
+              const currentReferral = Boolean(message.adReferral);
               let browseState;
               if (salesMode) {
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
@@ -440,10 +445,10 @@ export function createWorkerHandlers({
               }
               const catalogContext = { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
-                adContext: catalogAdContext(message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }), config.catalog, { current: Boolean(message.adReferral) }),
+                adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
                 interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
               } : {}) };
-              const direct = salesMode && definition.ai?.leadQualificationEnabled !== true && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
+              const direct = salesMode && !qualifiesLeads && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
               if (direct) return { reply: direct };
               const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
@@ -457,13 +462,14 @@ export function createWorkerHandlers({
                     text: config.menu.text,
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
-                  ...(intakeOnly ? { adContext: intakeReferral ? { referral: intakeReferral, current: Boolean(message.adReferral) } : null } : {
-                  events: config.events,
-                  catalog: catalogContext,
-                  services: config.appointments?.services || [],
-                  knowledgeBase: (definition.publicReplies || [])
-                    .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
-                    .map(({ module, action, text }) => ({ module, action, text })),
+                  ...(qualifiesLeads ? { adContext: leadReferral ? { referral: leadReferral, current: currentReferral } : null } : {}),
+                  ...(intakeOnly ? {} : {
+                    events: config.events,
+                    catalog: catalogContext,
+                    services: config.appointments?.services || [],
+                    knowledgeBase: (definition.publicReplies || [])
+                      .filter((item) => item?.module !== "payments" && !/(?:pix|payment|pagamento)/iu.test(String(item?.action || "")))
+                      .map(({ module, action, text }) => ({ module, action, text })),
                   }),
                 },
               });

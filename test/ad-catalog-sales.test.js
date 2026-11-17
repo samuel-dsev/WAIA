@@ -98,6 +98,7 @@ test("worker consulta contexto do anúncio também no follow-up e encaminha some
     assert.equal(f.state().acknowledged, 1);
     assert.equal(f.contexts[0].catalog.adContext?.productId || null, origin === "organic" ? null : "harley");
     assert.equal(f.contexts[0].catalog.adContext?.current || false, origin === "ad");
+    assert.equal(Object.hasOwn(f.contexts[0], "adContext"), false);
     await f.run(); assert.equal(f.state().providerCalls, 1); assert.equal(f.state().aiCalls, 1);
   }
 });
@@ -162,6 +163,40 @@ test("triagem simples leva anúncio atual e histórico à IA sem planilha, curso
     assert.deepEqual(f.contexts[0].adContext, { referral: { headline: "Harley X15", body: "Moto elétrica" }, current });
     assert.equal(f.contexts[0].catalog, undefined); assert.equal(f.contexts[0].knowledgeBase, undefined);
     assert.equal(f.state().prepared.salesInterest, undefined); assert.equal(f.conversation.mode, "bot");
+  }
+});
+
+test("qualificação geral recebe o anúncio atual ou anterior mesmo sem catálogo conectado", async () => {
+  const currentReferral = { source_type: "ad", headline: "Honda Fit EX", body: "Seminovo anunciado" };
+  const storedReferral = { source_type: "ad", headline: "Seminovos", body: "Veja o Toyota Yaris" };
+  for (const origin of ["current", "history", "organic"]) {
+    const f = workerFixture({
+      inboundReferral: origin === "current" ? { ...currentReferral, image_url: "https://example.invalid/photo" } : null,
+      storedReferral: origin === "organic" ? null : storedReferral,
+    });
+    const load = f.dependencies.tenantDefinitionRepository.load;
+    f.dependencies.tenantDefinitionRepository.load = async () => {
+      const definition = await load();
+      definition.ai.leadQualificationEnabled = true;
+      definition.runtime.catalog = { items: [] };
+      return definition;
+    };
+    f.message.text = "Aceita financiamento para este modelo?";
+    f.dependencies.repository.catalogBrowseState = async () => assert.fail("Sem catálogo conectado não há cursor");
+    f.dependencies.aiService.reply = async (input) => {
+      assert.equal(input.message, f.message.text);
+      f.contexts.push(input.context);
+      return { text: "Você gostaria de fazer uma simulação?", source: "ai" };
+    };
+    await f.run();
+    const expected = {
+      current: { referral: currentReferral, current: true },
+      history: { referral: storedReferral, current: false },
+      organic: null,
+    };
+    assert.deepEqual(f.contexts[0].adContext, expected[origin]);
+    assert.deepEqual(f.contexts[0].catalog.items, []);
+    assert.equal(f.state().prepared.leadQualification, undefined);
   }
 });
 

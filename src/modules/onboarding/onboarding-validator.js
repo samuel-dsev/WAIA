@@ -42,7 +42,7 @@ export function moduleDependenciesAreValid(configuration, capabilityCatalog) {
 export function menuIsValid(configuration, { actionOwner, validateActionParams }) {
   const enabled = selectedModules(configuration);
   const options = configuration?.menu?.options;
-  if (!Array.isArray(options) || options.length === 0) return false;
+  if (!Array.isArray(options)) return false;
   const ids = new Set();
   for (const option of options) {
     if (!option || !text(option.id) || !text(option.label) || !text(option.action) || ids.has(option.id)) return false;

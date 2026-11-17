@@ -101,8 +101,8 @@ export class ReadinessService {
         code: "MENU_ACTIONS_VALID",
         passed: menuIsValid(draft, { actionOwner: this.actionOwner, validateActionParams: this.validateActionParams }),
         step: 4,
-        message: "O menu possui ações válidas para os módulos habilitados.",
-        correctiveAction: "Configure um menu com opções únicas escolhidas no catálogo de ações.",
+        message: "As opções do menu são válidas. Uma saudação em texto pode ficar sem opções.",
+        correctiveAction: "Revise o menu e use opções únicas com ações dos módulos habilitados.",
       }),
       readinessCheck({
         code: "APPOINTMENT_SERVICE_AVAILABLE",
