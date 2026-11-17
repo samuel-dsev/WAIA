@@ -1,6 +1,7 @@
 import { paginateInteractiveOptions, withPageIndicator } from "../runtime/interactive-pagination.js";
 import { executeFlowAction } from "../flows/index.js";
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
+import { websiteCatalogBudget, websiteCatalogPage } from "./catalog-sales.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -78,7 +79,10 @@ function catalogHandler() {
   return {
     key: "catalog",
     actions: ["catalog.list"],
-    async handle({ config }) {
+    async handle({ config, input }) {
+      if (config.catalog.source?.type === "website_catalog") {
+        return { reply: websiteCatalogPage(config.catalog, { category: null, minPrice: null, maxPrice: websiteCatalogBudget(input?.text) }) };
+      }
       const items = availableCatalogProducts(config.catalog);
       if (items.length === 0) return { reply: reply("O catálogo ainda não possui itens disponíveis.") };
       if (config.catalog.source?.type === "google_sheets" || items.some((item) => item.imageUrl)) {

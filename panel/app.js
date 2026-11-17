@@ -918,6 +918,7 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   const integrationList = node("dl", "detail-list");
   const integrations = listFrom(integrationPayload);
   const googleSheetsIntegration = integrations.find((integration) => integration.type === "google_sheets");
+  const websiteCatalog = integrations.find((integration) => integration.type === "website_catalog");
   for (const integration of integrations) {
     integrationList.append(nodeWithText("dt", integration.name || integration.provider || "Integração"), valueNode(integration.health || integration.status, "status"));
     if (integration.type === "google_sheets") {
@@ -928,6 +929,25 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
       ));
     }
   }
+  integrationList.append(nodeWithText("dt", "Estoque do site da Turim"));
+  const websiteActions = node("dd");
+  const actionClass = "button button-secondary button-small";
+  if (!websiteCatalog) {
+    websiteActions.append(button("Adicionar integração", () => configureWebsiteCatalog(base), actionClass));
+  } else if (websiteCatalog.enabled) {
+    websiteActions.append(
+      button("Ver estoque sincronizado", () => openWebsiteCatalog(base), actionClass),
+      button("Pausar sincronização", async () => {
+        if (!await confirmAction("As fichas do site ficarão indisponíveis para este atendimento até a sincronização ser reativada.", "Pausar sincronização")) return;
+        await performMutation(`${base}/integrations/${encodeURIComponent(websiteCatalog.id)}`, {
+          method: "PATCH", body: { enabled: false, status: "desabilitada" }, success: "Sincronização pausada.",
+        });
+      }, actionClass),
+    );
+  } else {
+    websiteActions.append(button("Habilitar sincronização", () => configureWebsiteCatalog(base, websiteCatalog), actionClass));
+  }
+  integrationList.append(websiteActions);
   if (!googleSheetsIntegration) {
     if (!integrationList.children.length) integrationList.append(nodeWithText("dt", "Estado"), valueNode("not_configured", "status"));
     integrationList.append(
@@ -1009,6 +1029,67 @@ function openPaymentCredential() {
       success: "Chave PIX cadastrada no cofre. O valor não será exibido novamente.",
     });
   });
+}
+
+function configureWebsiteCatalog(base, integration) {
+  openFormDialog("Estoque do site da Turim", [["name", "Nome da integração", "text", true]], async ({ name }) => {
+    const path = `${base}/integrations`;
+    await apiFetch(integration ? `${path}/${encodeURIComponent(integration.id)}` : path, {
+      method: integration ? "PATCH" : "POST",
+      body: {
+        ...(integration ? {} : { type: "website_catalog", requiredForConfirmation: false, configuration: {} }),
+        name, enabled: true, status: "nao_configurada",
+      },
+    });
+    await loadCurrentView();
+    return () => openWebsiteCatalog(base, { sync: true });
+  }, { name: integration?.name || "Estoque do site da Turim" });
+}
+
+async function openWebsiteCatalog(base, { sync = false } = {}) {
+  const path = `${base}/integrations/website-catalog`;
+  elements.detailTitle.textContent = "Estoque do site da Turim";
+  const content = node("div");
+  const status = paragraph(sync ? "Sincronizando…" : "Carregando…");
+  status.setAttribute("role", "status");
+  content.append(status);
+  elements.detailContent.replaceChildren(content);
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  let syncResult;
+  try {
+    if (sync) syncResult = await apiFetch(`${path}/sync`, { method: "POST", body: {} });
+    const stock = await apiFetch(`${path}/stock`);
+    const { items, lastSyncedAt, health } = stock;
+    if (health === "healthy") {
+      status.textContent = `${items.length} veículo(s) · atualizado em ${formatDate(lastSyncedAt)}`;
+    } else {
+      status.textContent = health === "not_configured" ? "Integração desabilitada." : "A WAIA ainda não tem uma cópia atual do estoque.";
+    }
+    if (syncResult?.errorCode) status.append(` (${syncResult.errorCode})`);
+    const price = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const list = node("ul");
+    for (const item of items) {
+      const row = node("li");
+      const link = nodeWithText("a", item.name);
+      link.href = item.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      row.append(link, paragraph(`${item.price == null ? "Sob consulta" : price.format(item.price)} · ${item.description}`));
+      if (item.imageUrl) {
+        const photo = nodeWithText("a", "Ver foto");
+        photo.href = item.imageUrl;
+        photo.target = "_blank";
+        photo.rel = "noopener noreferrer";
+        row.append(photo);
+      }
+      list.append(row);
+    }
+    if (items.length) content.append(list);
+  } catch (error) {
+    status.textContent = error.message || "Não foi possível ler o estoque.";
+  }
+  content.append(button("Sincronizar agora", () => openWebsiteCatalog(base, { sync: true }), "button button-secondary"));
+  if (sync && content.isConnected) await loadCurrentView();
 }
 
 async function createGoogleSheetsIntegration(credentials) {

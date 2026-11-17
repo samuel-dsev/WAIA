@@ -5,6 +5,7 @@ import {
   parseTenantRuntimeConfig,
 } from "../modules/runtime/index.js";
 import { paginateInteractiveOptions, withPageIndicator } from "../modules/runtime/interactive-pagination.js";
+import { asksForVehiclePhoto, hasWebsiteCatalogLink, websiteCatalogBudget } from "../modules/business/catalog-sales.js";
 
 const ACTION_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
@@ -156,6 +157,9 @@ function withConfiguredHandlers(baseDefinitions, { publicReplies, eventPresentat
       ...definition,
       actions,
       async handle(context) {
+        if (context.action === "catalog.list" && context.config.catalog.source?.type === "website_catalog") {
+          return definition.handle(context);
+        }
         if (replies.has(context.action)) {
           return { reply: { text: replies.get(context.action), buttons: [] } };
         }
@@ -223,6 +227,7 @@ export function loadConfiguredTenant(definition) {
 
 export function createConfiguredTenantRuntime({ definition, stateRepository, ...dependencies } = {}) {
   const config = loadConfiguredTenant(definition);
+  const websiteCatalog = config.catalog.source?.type === "website_catalog" && config.enabledModules.includes("catalog");
   const hasScript = definition.ai?.enabled === true && Boolean(String(definition.ai?.prompt || "").trim())
     && config.enabledModules.includes("ai_freeform");
   const followUpQuestion = hasScript || definition.ai?.followUpQuestion == null
@@ -238,10 +243,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     },
   });
   const selectedAiHandler = dependencies.aiHandler || defaultAiHandler;
-  const contextualAiHandler = async (context) => withFollowUpQuestion(
-    await selectedAiHandler(context),
-    followUpQuestion,
-  );
+  const contextualAiHandler = async (context) => withFollowUpQuestion(await selectedAiHandler(context), followUpQuestion);
   const baseDefinitions = createCanonicalModuleDefinitions({
     ...dependencies,
     aiHandler: contextualAiHandler,
@@ -258,7 +260,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     ...dependencies,
   });
 
-  async function handle(input) {
+  async function route(input) {
     const hasExplicitCommand = Boolean(String(input?.action || input?.selectionId || "").trim());
     if (hasExplicitCommand) return router.handle(input);
     const text = normalized(input?.text);
@@ -277,12 +279,25 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
       });
     }
     const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
+    if (websiteCatalog && definition.ai?.leadIntakeOnlyEnabled !== true) {
+      if (websiteCatalogBudget(text) !== null) return router.handle({ ...input, action: "catalog.list", actionSource: "fallback" });
+      if (hasScript && alias?.action.startsWith("catalog.") && asksForVehiclePhoto(text)) {
+        return router.handle({ ...input, action: "ai_freeform.reply", actionSource: "fallback" });
+      }
+    }
     if (alias) return router.handle({ ...input, action: alias.action, payload: alias.payload });
     const fallbackAction = hasScript ? "ai_freeform.reply" : extensions.fallbackAction;
     if (fallbackAction) {
       return router.handle({ ...input, action: fallbackAction, actionSource: "fallback" });
     }
     return router.handle(input);
+  }
+
+  async function handle(input) {
+    const reply = await route(input);
+    if (!websiteCatalog || (!hasWebsiteCatalogLink(reply.text) && !reply.messages?.some((part) => hasWebsiteCatalogLink(part.text)))) return reply;
+    const { messages, catalogBrowse, ...rest } = reply;
+    return { ...rest, text: "Posso conferir o estoque com a equipe. Qual modelo ou faixa de preço você prefere?", buttons: [] };
   }
 
   return Object.freeze({ config, registry, handle });

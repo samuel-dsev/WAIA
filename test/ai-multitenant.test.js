@@ -11,6 +11,7 @@ import {
 } from "../src/modules/ai/index.js";
 import { VersionedPricingCatalog } from "../src/modules/ai/postgres-adapters.js";
 import { catalogAdContext } from "../src/modules/whatsapp/ad-referral.js";
+import { createWhatsAppReplyPayload } from "../src/modules/whatsapp/outbound.js";
 
 function config(empresaId, overrides = {}) {
   return {
@@ -94,6 +95,52 @@ function setup({ configs, histories = {}, responder, secretResolver, timeoutMs =
   });
   return { service, clientFactory, ledger, historyRequests, configResolver };
 }
+
+test("pedido de foto após nome usa o modelo da conversa e a imagem validada do site", async () => {
+  const imageUrl = "https://turimautos.com/storage/veiculos/onix-teste.jpg";
+  const onix = { id: "turim:1", name: "Onix 1.0", url: "https://turimautos.com/veiculo?id=1", imageUrl, price: 59900 };
+  const history = [
+    { type: "text", direction: "inbound", body: "vocês têm Onix?" },
+    { type: "text", direction: "outbound", body: "Como posso te chamar?" },
+    { type: "text", direction: "inbound", body: "Pessoa de teste" },
+    { type: "text", direction: "outbound", body: "Gostaria de simular o financiamento para o Onix?" },
+  ];
+  const filters = { category: null, minPrice: null, maxPrice: null };
+  let productIds = [onix.id];
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Primeiro nome e aceite de simulação de financiamento." })], histories: { "tenant-a": history },
+    responder: async () => ({ output_text: JSON.stringify({ text: "Você pode conferir as fotos no site.", catalogAction: "details",
+      productIds, filters, leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }), usage: {} }),
+  });
+  const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [onix],
+    browseState: { filters, seenProductIds: [onix.id], presentedProductIds: [onix.id] } };
+  const message = "tem fotos do carro?";
+  const reply = await ai.service.reply(request("tenant-a", { context: { catalog }, message }));
+  const call = ai.clientFactory.requests[0].request;
+  assert.ok(call.input.some(({ role, content }) => role === "user" && content === "vocês têm Onix?"));
+  assert.match(call.instructions, /pedidos de envio/u);
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.messages.length, 1);
+  assert.equal(reply.messages[0].catalogProductId, onix.id);
+  const payload = createWhatsAppReplyPayload({ to: "test-recipient", ...reply.messages[0] });
+  assert.equal(payload.type, "image");
+  assert.equal(payload.image.link, imageUrl);
+  assert.match(payload.image.caption, /Onix 1\.0/u);
+  assert.doesNotMatch(payload.image.caption, /turimautos\.com/u);
+
+  const questionWithModel = "tenho em mente um Onix, tem fotos dele?";
+  const explicitModel = await ai.service.reply(request("tenant-a", { context: { catalog }, message: questionWithModel }));
+  assert.deepEqual(explicitModel.messages, reply.messages);
+
+  const availability = await ai.service.reply(request("tenant-a", { context: { catalog }, message: "vocês têm Onix?" }));
+  assert.equal(availability.messages, undefined);
+  productIds = [];
+  const missing = await ai.service.reply(request("tenant-a", {
+    message: questionWithModel, context: { catalog: { ...catalog, items: [{ id: "turim:2", name: "Outro veículo" }] } },
+  }));
+  assert.equal(missing.messages, undefined);
+  assert.match(missing.text, /Não consegui confirmar esse veículo/u);
+});
 
 test("cada resposta recebe o roteiro inteiro e a configuração atual, acima do estilo complementar", async () => {
   const roteiro = `INÍCIO DO ROTEIRO\n${"Orientação detalhada.\n".repeat(800)}FIM DO ROTEIRO`;

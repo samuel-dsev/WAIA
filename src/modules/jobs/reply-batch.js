@@ -20,7 +20,7 @@ export function replyFromRow(row) {
 export async function loadCatalogBrowseState(client, empresaId, conversationId) {
   const row = (await client.query(
     `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND conversa_id = $2
-       AND direcao = 'saida' AND origem_resposta = 'ia' AND outbound_payload ? 'catalogBrowse'
+       AND direcao = 'saida' AND origem_resposta IN ('ia', 'fluxo_deterministico') AND outbound_payload ? 'catalogBrowse'
        AND redacted_at IS NULL ORDER BY sequence DESC LIMIT 1`, [empresaId, conversationId],
   )).rows[0];
   if (!row) return null;
@@ -33,7 +33,7 @@ export async function loadCatalogBrowseState(client, empresaId, conversationId) 
   // only the current query's cursor advances pagination.
   const history = (await client.query(
     `SELECT outbound_payload->>'catalogProductId' AS catalog_product_id FROM mensagens
-       WHERE empresa_id = $1 AND conversa_id = $2 AND direcao = 'saida' AND origem_resposta = 'ia'
+       WHERE empresa_id = $1 AND conversa_id = $2 AND direcao = 'saida' AND origem_resposta IN ('ia', 'fluxo_deterministico')
          AND redacted_at IS NULL AND external_message_id IS NOT NULL
          AND status IN ('enviada','entregue','lida') AND outbound_payload ? 'catalogProductId'
        GROUP BY outbound_payload->>'catalogProductId' ORDER BY min(sequence) LIMIT 100`, [empresaId, conversationId],

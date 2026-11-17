@@ -68,10 +68,10 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.deepEqual(stored.map((part) => Number(part.sequence)), [sequence+1, sequence+2, sequence+3]);
     await owner.query("UPDATE contatos SET bot_pausado=false WHERE id=$1", [contactId]);
     assert.equal(await handlers.canSendBotReply({ empresaId, messageId: batchMessageId }), true);
-    // Commercial page: intro + three product cards + question, all committed together.
+    // Deterministic catalog pages share the persisted cursor with AI pages.
     const pageSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
     const pageMessageId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Mais opções','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, pageSequence, randomUUID()])).rows[0].id;
-    const pageInput = { empresaId, message: { id: pageMessageId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, origin: "ai", reply: {
+    const pageInput = { empresaId, message: { id: pageMessageId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, origin: "deterministic_flow", reply: {
       text: "Página", catalogBrowse: { filters: { category: null, minPrice: null, maxPrice: 8000 }, priorSeenProductIds: [] },
       messages: [{ text: "Vou te mostrar mais opções." }, ...["D", "E", "F"].map((id) => ({ text: "Ficha " + id, imageUrl: `https://example.com/${id}.jpg`, catalogProductId: id })), { text: "Por qual modelo você se interessou?" }],
     } };

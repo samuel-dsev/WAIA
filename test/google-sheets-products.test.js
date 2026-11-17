@@ -143,6 +143,7 @@ test("runtime só lê catálogo do vínculo publicado e habilitado dentro do ten
     const pool = fakePool((sql, params) => {
       if (sql.includes("FROM empresas")) return { rows: [{ id: EMPRESA_ID, configuracao_runtime_modo: "versionado", configuracao_ativa_versao: 7, versao_configuracao: 7 }] };
       if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{ config_version: 7, checksum: compiled.checksum, configuracao_compilada: compiled }] };
+      if (sql.includes("tipo = 'website_catalog'")) return { rows: [] };
       if (sql.includes("FROM integracoes")) {
         assert.equal(enabled, true);
         assert.deepEqual(params, [EMPRESA_ID, [INTEGRATION_ID]]);
@@ -156,7 +157,7 @@ test("runtime só lê catálogo do vínculo publicado e habilitado dentro do ten
     assert.equal(runtime.catalog.items.length, enabled ? 1 : 0);
     assert.equal(runtime.events.items[0].id, "evento-manual");
     if (enabled) assert.equal(runtime.catalog.source.status, "healthy");
-    else assert.equal(pool.queries.some(({ sql }) => sql.includes("FROM integracoes")), false);
+    else assert.equal(pool.queries.some(({ sql }) => sql.includes("FROM integracoes") && sql.includes("tipo = 'google_sheets'")), false);
   }
 });
 
@@ -176,6 +177,7 @@ test("vínculo lógico do editor resolve catálogo único pelo tipo sem relaxar 
     const pool = fakePool((sql, params) => {
       if (sql.includes("FROM empresas")) return { rows: [{ id: EMPRESA_ID, configuracao_runtime_modo: "versionado", configuracao_ativa_versao: 9, versao_configuracao: 9 }] };
       if (sql.includes("FROM configuracoes_revisoes")) return { rows: [{ config_version: 9, checksum: compiled.checksum, configuracao_compilada: compiled }] };
+      if (sql.includes("tipo = 'website_catalog'")) return { rows: [] };
       if (sql.includes("FROM integracoes i")) {
         assert.deepEqual(params, [EMPRESA_ID, scopedId ? [scopedId] : null]);
         assert.match(sql, /NOT EXISTS[^]*other\.empresa_id = \$1[^]*other\.habilitada[^]*other\.id <> i\.id/u);

@@ -17,7 +17,11 @@ export function createGoogleSheetsSyncRunner({ configurationResolver, integratio
   });
 }
 
-export function startGoogleSheetsSyncScheduler(runner, { intervalMs = 120_000, logger = console } = {}) {
+export function startGoogleSheetsSyncScheduler(runner, options) {
+  return startIntegrationSyncScheduler(runner, { ...options, integration: "google_sheets", failureCode: "GOOGLE_SYNC_FAILED" });
+}
+
+export function startIntegrationSyncScheduler(runner, { intervalMs = 120_000, logger = console, integration, failureCode = "SYNC_FAILED" } = {}) {
   let timer;
   let running;
   let closed = false;
@@ -28,7 +32,7 @@ export function startGoogleSheetsSyncScheduler(runner, { intervalMs = 120_000, l
   };
   const run = () => {
     if (closed || running) return running;
-    running = runner.runOnce().catch((error) => logger.error?.("google_sheets_sync_cycle_failed", { code: error?.code || "GOOGLE_SYNC_FAILED" })).finally(() => {
+    running = runner.runOnce().catch((error) => logger.error?.(`${integration}_sync_cycle_failed`, { code: error?.code || failureCode })).finally(() => {
       running = null;
       schedule();
     });

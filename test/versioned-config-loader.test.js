@@ -54,6 +54,7 @@ test("loader usa exclusivamente a revisão ativa verificada para tenant versiona
       checksum: compiled.checksum,
       configuracao_compilada: structuredClone(compiled),
     }] };
+    if (sql.includes("tipo = 'website_catalog'")) return { rows: [] };
     assert.fail(`consulta legada inesperada: ${sql}`);
   });
 
@@ -86,6 +87,7 @@ test("loader versionado resolve exatamente a credencial de pagamento da revisão
       checksum: compiled.checksum,
       configuracao_compilada: structuredClone(compiled),
     }] };
+    if (sql.includes("tipo = 'website_catalog'")) return { rows: [] };
     assert.fail(`consulta inesperada: ${sql}`);
   });
   const calls = [];

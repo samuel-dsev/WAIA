@@ -199,8 +199,8 @@ export function parseTenantRuntimeConfig(input) {
     },
     catalog: {
       items,
-      ...(input.catalog?.source?.type === "google_sheets" ? { source: {
-        type: "google_sheets",
+      ...(["google_sheets", "website_catalog"].includes(input.catalog?.source?.type) ? { source: {
+        type: input.catalog.source.type,
         status: input.catalog.source.status === "healthy" ? "healthy" : "unavailable",
         lastSyncedAt: optionalText(input.catalog.source.lastSyncedAt, "catalog.source.lastSyncedAt", { max: 80 }),
       } } : {}),

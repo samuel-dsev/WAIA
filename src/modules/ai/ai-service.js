@@ -8,7 +8,7 @@ import {
 } from "./guardrails.js";
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
-import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
+import { catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
@@ -152,7 +152,9 @@ export class MultiTenantAiService {
       const recheckInstructions = intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS;
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
-          : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : ""].filter(Boolean).join("\n\n");
+          : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
+        catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",
+      ].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...historyInput(history, request.messageId),
@@ -298,7 +300,7 @@ export class MultiTenantAiService {
           break;
         }
       }
-      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies })
+      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, message: request.message })
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
       const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification }
         : nonLeadHandoff ? { text: config.nonLeadHandoffMessage, nonLeadHandoff } : baseReply;

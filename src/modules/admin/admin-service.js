@@ -282,7 +282,7 @@ function rethrowMetaError(error) {
 }
 
 export class AdminService {
-  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, metaAppRepository, metaHealthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, websiteCatalogIntegration, metaAppRepository, metaHealthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
     this.onboardingService = onboardingService;
@@ -291,6 +291,7 @@ export class AdminService {
     this.healthService = healthService;
     this.mediaStore = mediaStore;
     this.googleSheetsIntegration = googleSheetsIntegration;
+    this.websiteCatalogIntegration = websiteCatalogIntegration;
     this.metaAppRepository = metaAppRepository;
     this.metaHealthService = metaHealthService;
     this.clock = clock;
@@ -929,6 +930,22 @@ export class AdminService {
     } catch (error) {
       return rethrowMetaError(error);
     }
+  }
+
+  async readWebsiteCatalog({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { action: "website_catalog.read", resource: "integrations" });
+    if (!this.websiteCatalogIntegration) throw new AdminValidationError("Sincronização de estoque indisponível.");
+    return this.websiteCatalogIntegration.read(empresaId);
+  }
+
+  async syncWebsiteCatalog({ auth, empresaId, correlationId }) {
+    const action = "website_catalog.sync";
+    const resource = "integrations";
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { write: true, action, resource });
+    if (!this.websiteCatalogIntegration) throw new AdminValidationError("Sincronização de estoque indisponível.");
+    const result = await this.websiteCatalogIntegration.syncTenant(empresaId);
+    await this.#audit({ auth, empresaId, action, resource, result: result.health === "healthy" ? "success" : "failure", correlationId });
+    return result;
   }
 
   async syncGoogleSheets({ auth, empresaId, correlationId }) {

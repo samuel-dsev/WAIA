@@ -6,6 +6,9 @@ import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
+import { productMessage } from "../business/catalog-messages.js";
+import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
+import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -238,6 +241,30 @@ export class PostgresJobHandlerRepository {
     )).rowCount > 0);
   }
 
+  async canSendWebsiteReply({ empresaId, part }) {
+    const productId = part.catalogProductId;
+    const websiteCard = /^turim:[1-9]\d*$/u.test(productId);
+    const redirect = hasWebsiteCatalogLink(part.text);
+    if (!websiteCard && !redirect) return true;
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const catalog = await loadWebsiteCatalog(client, empresaId);
+      if (!catalog) return !websiteCard;
+      if (redirect) return false;
+      const live = await client.query(
+        `SELECT 1 FROM empresas e JOIN configuracoes_revisoes r
+           ON r.empresa_id = e.id AND r.config_version = e.configuracao_ativa_versao
+          WHERE e.id = $1 AND e.configuracao_runtime_modo = 'versionado'
+            AND e.versao_configuracao = e.configuracao_ativa_versao
+            AND r.configuracao_compilada #> '{configuration,modules}' ? 'catalog'`, [empresaId],
+      );
+      if (!live.rowCount) return false;
+      const item = catalog.items.find((candidate) => candidate.id === productId);
+      if (!item?.imageUrl) return false;
+      const current = productMessage(item);
+      return current.text === part.text && current.imageUrl === part.imageUrl;
+    });
+  }
+
   cancelPreparedReply({ empresaId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(
       `UPDATE mensagens SET status = 'ignorada_duplicidade', updated_at = now()
@@ -432,7 +459,9 @@ export function createWorkerHandlers({
             ? async ({ config, input }) => {
               const intakeOnly = definition.ai?.leadIntakeOnlyEnabled === true;
               const qualifiesLeads = definition.ai?.leadQualificationEnabled === true;
-              const salesMode = !intakeOnly && definition.ai?.catalogSalesEnabled === true && config.catalog?.source?.type === "google_sheets" && config.catalog.source.status === "healthy";
+              const websiteCatalog = config.catalog.source?.type === "website_catalog" && config.enabledModules.includes("catalog");
+              const sheetSales = config.catalog.source?.type === "google_sheets" && definition.ai?.catalogSalesEnabled === true;
+              const salesMode = !intakeOnly && (websiteCatalog || sheetSales) && config.catalog.source.status === "healthy";
               const referral = qualifiesLeads || salesMode
                 ? message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id })
                 : null;
@@ -446,7 +475,7 @@ export function createWorkerHandlers({
               const catalogContext = { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
-                interestHandoff: { enabled: config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
+                interestHandoff: { enabled: definition.ai?.catalogSalesEnabled === true && config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
               } : {}) };
               const direct = salesMode && !qualifiesLeads && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
               if (direct) return { reply: direct };
@@ -547,7 +576,8 @@ export function createWorkerHandlers({
       for (const part of prepared.messages) {
         if (part.externalMessageId) continue;
         const current = await conversationService.getConversation({ empresaId: reference.empresaId, conversationId: message.conversationId });
-        if (current.mode !== "bot" || !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id })) {
+        if (current.mode !== "bot" || !await repository.canSendBotReply({ empresaId: reference.empresaId, messageId: message.id })
+          || (repository.canSendWebsiteReply && !await repository.canSendWebsiteReply({ empresaId: reference.empresaId, part }))) {
           await repository.cancelPreparedReply({ empresaId: reference.empresaId, messageId: message.id });
           return { skipped: true, reason: "bot_reply_cancelled" };
         }
@@ -560,6 +590,10 @@ export function createWorkerHandlers({
         await repository.markReplySent({ empresaId: reference.empresaId, replyId: part.id, externalMessageId });
       }
       return { replied: true };
+    }
+    if (repository.canSendWebsiteReply && !await repository.canSendWebsiteReply({ empresaId: reference.empresaId, part: reply })) {
+      await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+      return { skipped: true, reason: "bot_reply_cancelled" };
     }
     const sent = await metaGateway.sendReply({
       empresaId: reference.empresaId,
