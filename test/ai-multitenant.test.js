@@ -166,7 +166,12 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
     adContext: { current: false, match: "unique", productId: other.id },
     ...(interaction ? { interaction: { ...interaction, direct: interaction.direct ?? true } } : {}),
   } } }));
-  const choice = await turn("Gostei do Tracker", { step: "list", productIds: [selected.id, other.id] });
+  const list = { step: "list", productIds: [selected.id, other.id] };
+  const affirmativeList = await turn("Sim", list);
+  assert.equal(affirmativeList.text, "Qual modelo chamou sua atenção?");
+  assert.deepEqual(affirmativeList.websiteInteraction, list);
+  assert.equal(affirmativeList.leadQualification, undefined);
+  const choice = await turn("Gostei do Tracker", affirmativeList.websiteInteraction);
   assert.equal(choice.websiteInteraction.step, "photo_offer");
   assert.equal(choice.leadQualification, undefined);
   const photos = await turn("Pode mandar as fotos dele", choice.websiteInteraction);

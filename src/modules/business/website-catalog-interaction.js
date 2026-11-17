@@ -3,6 +3,7 @@ import { availableCatalogProducts, productMessage } from "./catalog-messages.js"
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const STEPS = ["list", "gallery", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
 const listQuestion = "Gostou de algum? Se sim, gostaria de ver as fotos dele? Me diga qual modelo chamou sua atenção.";
+export const websiteCatalogSelectionPrompt = "Qual modelo chamou sua atenção?";
 const galleryQuestion = "Você gostou desse veículo?";
 const normalize = (text) => String(text || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/gu, " ");
 
@@ -83,7 +84,7 @@ export function continueWebsiteInteraction(catalog, message) {
   if (!state?.direct) return null;
   // A simple yes after the combined question needs the name of the vehicle.
   if (state.step === "list" && affirmative(message)) {
-    return { text: "Qual modelo chamou sua atenção?", websiteInteraction: normalizeWebsiteInteraction(state) };
+    return { text: websiteCatalogSelectionPrompt, websiteInteraction: normalizeWebsiteInteraction(state) };
   }
   const item = selectedVehicle(catalog);
   if (!item) return null;
@@ -103,7 +104,7 @@ export function chooseWebsiteVehicle(catalog, item, message) {
   const state = catalog?.interaction;
   if (!state || !item || !state.productIds.includes(item.id)) return { text: "Qual veículo chamou sua atenção?" };
   if (state.step === "list") {
-    if (affirmative(message)) return { text: "Qual modelo chamou sua atenção?", websiteInteraction: normalizeWebsiteInteraction(state) };
+    if (affirmative(message)) return { text: websiteCatalogSelectionPrompt, websiteInteraction: normalizeWebsiteInteraction(state) };
     return choiceQuestion("photo_offer", item, `Você gostaria de ver as fotos do ${item.name}?`);
   }
   if (state.step === "gallery" && !negative(message)) return financingOffer(item);
