@@ -47,17 +47,25 @@ function photoUrls(item) {
 export function websiteGalleryPart(item, index) {
   const urls = photoUrls(item);
   if (!urls[index]) return null;
-  const last = index === urls.length - 1;
-  const caption = index === 0 ? productMessage(item).text : item.name;
-  const limit = 1024 - (last ? galleryQuestion.length + 2 : 0);
-  const text = [...caption].slice(0, limit).join("") + (last ? `\n\n${galleryQuestion}` : "");
-  return { text, buttons: [], imageUrl: urls[index], catalogProductId: item.id, catalogPhotoIndex: index,
-    ...(last ? { websiteInteraction: { step: "gallery", productIds: [item.id] } } : {}) };
+  const text = index === 0 ? productMessage(item).text : "";
+  return { text, buttons: [], imageUrl: urls[index], catalogProductId: item.id, catalogPhotoIndex: index };
+}
+
+export function matchesWebsiteGalleryPart(item, index, { text, imageUrl }) {
+  const current = websiteGalleryPart(item, index);
+  if (!current || current.imageUrl !== imageUrl) return false;
+  if (current.text === text) return true;
+  // Retomadas de galerias preparadas antes da pergunta em separado.
+  const last = index === photoUrls(item).length - 1;
+  const question = last ? `\n\n${galleryQuestion}` : "";
+  const caption = index === 0 ? current.text : item.name;
+  return text === [...caption].slice(0, 1024 - question.length).join("") + question;
 }
 
 export function websiteGalleryReply(item) {
   const messages = photoUrls(item).map((_, index) => websiteGalleryPart(item, index));
   if (!messages.length) return choiceQuestion("gallery", item, `${productMessage(item).text}\n\nA ficha está sem fotos no momento. ${galleryQuestion}`);
+  messages.push(financingOffer(item));
   return { text: messages[0].text, messages };
 }
 

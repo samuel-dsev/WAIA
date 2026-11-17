@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { PostgresJobHandlerRepository } from "../src/modules/jobs/handlers.js";
 import { PostgresJobRepository } from "../src/modules/jobs/postgres-repository.js";
+import { websiteGalleryReply } from "../src/modules/business/website-catalog-interaction.js";
 
 test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é revalidada", {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
@@ -107,6 +108,24 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, websiteInteraction.productIds);
     await owner.query("UPDATE mensagens SET outbound_payload = $2::jsonb WHERE id = $1", [selectionId, JSON.stringify({ adReferral: { headline: "Outro anúncio" } })]);
     assert.equal(await handlers.websiteInteraction(websiteScope), null);
+    const imageUrls = Array.from({ length: 100 }, (_, index) => `https://turimautos.com/storage/veiculos/test-gallery-${index}.jpg`);
+    const gallery = websiteGalleryReply({ id: "turim:1", name: "Modelo teste", imageUrl: imageUrls[0], imageUrls });
+    const galleryBatch = await handlers.prepareReply({ empresaId, origin: "ai",
+      message: { id: selectionId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, reply: gallery });
+    assert.equal(galleryBatch.messages.length, 101);
+    assert.deepEqual(galleryBatch.messages.slice(0, -1).map(({ imageUrl }) => imageUrl), imageUrls);
+    assert.ok(galleryBatch.messages.slice(1, -1).every(({ text, websiteInteraction }) => text === "" && websiteInteraction === undefined));
+    const prompt = galleryBatch.messages.at(-1);
+    assert.match(prompt.text, /simulação de financiamento/u);
+    assert.equal(prompt.imageUrl, undefined);
+    assert.deepEqual(prompt.websiteInteraction, { step: "finance_offer", productIds: ["turim:1"] });
+    const answerSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
+    const answerId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Sim','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, answerSequence, randomUUID()])).rows[0].id;
+    const answerScope = { empresaId, conversationId, messageId: answerId };
+    await handlers.markReplySent({ empresaId, replyId: galleryBatch.messages[0].id, externalMessageId: "wamid." + randomUUID() });
+    assert.equal(await handlers.websiteInteraction(answerScope), null);
+    await handlers.markReplySent({ empresaId, replyId: prompt.id, externalMessageId: "wamid." + randomUUID() });
+    assert.deepEqual(await handlers.websiteInteraction(answerScope), { ...prompt.websiteInteraction, direct: true });
     await owner.query("UPDATE empresas SET status='suspensa' WHERE id=$1", [empresaId]);
     assert.equal(await handlers.canSendBotReply({ empresaId, messageId: batchMessageId }), false);
   } finally {

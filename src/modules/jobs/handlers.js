@@ -8,7 +8,7 @@ import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
-import { normalizeWebsiteInteraction, websiteCatalogListText, websiteCatalogSelectionPrompt, websiteGalleryPart } from "../business/website-catalog-interaction.js";
+import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, websiteCatalogListText, websiteCatalogSelectionPrompt } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
@@ -296,8 +296,9 @@ export class PostgresJobHandlerRepository {
       if (!websiteCard) return true;
       const item = trustedItem(productId);
       if (!item?.imageUrl) return false;
-      const current = Number.isInteger(part.catalogPhotoIndex) ? websiteGalleryPart(item, part.catalogPhotoIndex) : productMessage(item);
-      return current?.text === part.text && current?.imageUrl === part.imageUrl;
+      if (Number.isInteger(part.catalogPhotoIndex)) return matchesWebsiteGalleryPart(item, part.catalogPhotoIndex, part);
+      const current = productMessage(item);
+      return current.text === part.text && current.imageUrl === part.imageUrl;
     });
   }
 

@@ -108,9 +108,10 @@ test("um modelo específico usa todas as fotos validadas do site na ordem", asyn
   ];
   const filters = { category: null, minPrice: null, maxPrice: null };
   let productIds = [onix.id];
+  let generatedText = "Você pode conferir as fotos no site.";
   const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
     leadQualificationCriteria: "Primeiro nome e aceite de simulação de financiamento." })], histories: { "tenant-a": history },
-    responder: async () => ({ output_text: JSON.stringify({ text: "Você pode conferir as fotos no site.", catalogAction: "details",
+    responder: async () => ({ output_text: JSON.stringify({ text: generatedText, catalogAction: "details",
       productIds, filters, leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }), usage: {} }),
   });
   const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [onix],
@@ -122,17 +123,17 @@ test("um modelo específico usa todas as fotos validadas do site na ordem", asyn
   assert.match(call.instructions, /toda a galeria na ordem/u);
   assert.doesNotMatch(call.input[0].content, /onix-interior\.jpg/u);
   assert.equal(reply.leadQualification, undefined);
-  assert.deepEqual(reply.messages.map((part) => part.imageUrl), imageUrls);
-  assert.deepEqual(reply.messages.map((part) => part.catalogPhotoIndex), [0, 1, 2]);
-  assert.equal(reply.messages[0].websiteInteraction, undefined);
-  assert.equal(reply.messages[2].websiteInteraction.step, "gallery");
-  assert.match(reply.messages[2].text, /gostou desse veículo/u);
-  assert.equal(reply.messages[0].catalogProductId, onix.id);
-  const payload = createWhatsAppReplyPayload({ to: "test-recipient", ...reply.messages[0] });
-  assert.equal(payload.type, "image");
-  assert.equal(payload.image.link, imageUrl);
-  assert.match(payload.image.caption, /Onix 1\.0/u);
-  assert.doesNotMatch(payload.image.caption, /turimautos\.com/u);
+  const [first, second, third, offer] = reply.messages;
+  const payloads = reply.messages.map((part) => createWhatsAppReplyPayload({ to: "test-recipient", ...part }));
+  assert.deepEqual(payloads.map(({ type }) => type), ["image", "image", "image", "text"]);
+  assert.deepEqual(payloads.slice(0, 3).map(({ image }) => image.link), imageUrls);
+  assert.deepEqual([first, second, third].map((part) => part.catalogPhotoIndex), [0, 1, 2]);
+  assert.ok([first, second, third].every((part) => part.websiteInteraction === undefined && part.catalogProductId === onix.id));
+  assert.match(payloads[0].image.caption, /Onix 1\.0/u);
+  assert.doesNotMatch(payloads[0].image.caption, /turimautos\.com/u);
+  assert.ok(payloads.slice(1, 3).every(({ image }) => !Object.hasOwn(image, "caption")));
+  assert.deepEqual(offer.websiteInteraction, { step: "finance_offer", productIds: [onix.id] });
+  assert.equal(payloads[3].text.body, "Você gostaria de fazer uma simulação de financiamento para o Onix 1.0?");
 
   const questionWithModel = "tenho em mente um Onix, tem fotos dele?";
   const explicitModel = await ai.service.reply(request("tenant-a", { context: { catalog }, message: questionWithModel }));
@@ -140,6 +141,10 @@ test("um modelo específico usa todas as fotos validadas do site na ordem", asyn
 
   const availability = await ai.service.reply(request("tenant-a", { context: { catalog }, message: "vocês têm Onix?" }));
   assert.equal(availability.messages, undefined);
+  generatedText = "Sim, a Turim Autos trabalha com financiamento. A equipe confirma as condições para o Onix. Você gostaria de fazer uma simulação?";
+  const finance = await ai.service.reply(request("tenant-a", { context: { catalog }, message: "Aceita financiamento para este modelo?" }));
+  assert.equal(finance.text, "Sim, nós trabalhamos com financiamento. A equipe confirma as condições para o Onix. Você gostaria de fazer uma simulação?");
+  assert.equal(finance.messages, undefined);
   productIds = [];
   const missing = await ai.service.reply(request("tenant-a", {
     message: questionWithModel, context: { catalog: { ...catalog, items: [{ id: "turim:2", name: "Outro veículo" }] } },
@@ -175,11 +180,13 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
   assert.equal(choice.websiteInteraction.step, "photo_offer");
   assert.equal(choice.leadQualification, undefined);
   const photos = await turn("Pode mandar as fotos dele", choice.websiteInteraction);
-  assert.deepEqual(photos.messages.map(({ imageUrl }) => imageUrl), gallery);
+  assert.deepEqual(photos.messages.slice(0, -1).map(({ imageUrl }) => imageUrl), gallery);
   assert.equal(photos.leadQualification, undefined);
-  const offer = await turn("Sim, gostei", photos.messages.at(-1).websiteInteraction);
+  const offer = photos.messages.at(-1);
   assert.match(offer.text, /simulação de financiamento para o Tracker/u);
-  assert.equal(offer.leadQualification, undefined);
+  assert.equal(offer.websiteInteraction.step, "finance_offer");
+  const legacyOffer = await turn("Sim, gostei", { step: "gallery", productIds: [selected.id] });
+  assert.deepEqual(legacyOffer.websiteInteraction, offer.websiteInteraction);
   action = "none";
   productIds = [];
   const unrelatedYes = await turn("Sim", { ...offer.websiteInteraction, direct: false });

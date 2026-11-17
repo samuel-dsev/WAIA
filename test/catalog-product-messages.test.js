@@ -94,6 +94,10 @@ test("Meta e YCloud enviam image.link e caption com o número e credencial do te
     assert.match(body.image.caption, /Modelo aprovado/u);
     assert.equal(body.text, undefined);
     if (provider === "ycloud") { assert.equal(body.from, "+5511000000001"); assert.equal(calls[0].options.headers["X-API-Key"], "synthetic-a"); }
+    await gateway.sendReply({ empresaId: "tenant-a", numeroWhatsappId: "number-a" }, { to: "5511000000002", imageUrl: product().imageUrl });
+    const plain = JSON.parse(calls[1].options.body);
+    assert.equal(plain.type, "image");
+    assert.deepEqual(plain.image, { link: product().imageUrl });
   }
 });
 

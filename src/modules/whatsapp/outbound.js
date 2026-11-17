@@ -47,7 +47,6 @@ function options(value) {
 
 export function createWhatsAppReplyPayload({ to, text, buttons = [], imageUrl } = {}) {
   const recipient = requiredText(to, "to", LIMITS.recipient);
-  const body = requiredText(text, "text", LIMITS.text);
   const choices = options(buttons);
   const base = {
     messaging_product: "whatsapp",
@@ -56,9 +55,11 @@ export function createWhatsAppReplyPayload({ to, text, buttons = [], imageUrl } 
   };
   if (imageUrl) {
     if (choices.length) throw new TypeError("Uma imagem com legenda não aceita botões.");
-    if ([...body].length > LIMITS.imageCaption) throw new TypeError("A legenda da imagem excede 1024 caracteres.");
-    return { ...base, type: "image", image: { link: publicProductImageUrl(imageUrl), caption: body } };
+    const caption = String(text || "").trim();
+    if ([...caption].length > LIMITS.imageCaption) throw new TypeError("A legenda da imagem excede 1024 caracteres.");
+    return { ...base, type: "image", image: { link: publicProductImageUrl(imageUrl), ...(caption ? { caption } : {}) } };
   }
+  const body = requiredText(text, "text", LIMITS.text);
   if (choices.length === 0) {
     return { ...base, type: "text", text: { preview_url: false, body } };
   }

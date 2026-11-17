@@ -5,6 +5,7 @@ import { normalizeWebsiteInteraction } from "../business/website-catalog-interac
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
+const maxReplyParts = 101; // Até 100 fotos do estoque e a pergunta em texto.
 
 export function replyFromRow(row) {
   return row && {
@@ -54,7 +55,7 @@ export async function hydrateReply(client, empresaId, row) {
   const reply = replyFromRow(row);
   const ids = row?.outbound_payload?.partIds;
   if (ids == null) return reply;
-  if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids[0] !== row.id
+  if (!Array.isArray(ids) || !ids.length || ids.length > maxReplyParts || ids[0] !== row.id
     || new Set(ids).size !== ids.length || ids.some((id) => !/^[0-9a-f-]{36}$/iu.test(id))) throw invalid();
   const rows = (await client.query(
     `SELECT ${columns} FROM mensagens WHERE empresa_id = $1 AND id = ANY($2::uuid[])
@@ -67,14 +68,14 @@ export async function hydrateReply(client, empresaId, row) {
 
 /** All parts and their order are committed atomically, using the existing checkpoint. */
 export async function prepareReplyBatch(client, { empresaId, message, reply, origin }) {
-  if (!Array.isArray(reply.messages) || !reply.messages.length || reply.messages.length > 100) throw invalid();
+  if (!Array.isArray(reply.messages) || !reply.messages.length || reply.messages.length > maxReplyParts) throw invalid();
   const messages = reply.messages.map((part) => {
     if (part.catalogProductId != null && (typeof part.catalogProductId !== "string" || !part.catalogProductId || part.catalogProductId.length > 200)) throw invalid();
     const websiteInteraction = normalizeWebsiteInteraction(part.websiteInteraction);
     if (part.websiteInteraction && !websiteInteraction) throw invalid();
     if (part.catalogPhotoIndex != null && (!Number.isInteger(part.catalogPhotoIndex) || part.catalogPhotoIndex < 0 || part.catalogPhotoIndex >= 100 || !part.catalogProductId || !part.imageUrl)) throw invalid();
     const payload = createWhatsAppReplyPayload({ to: "validation", ...part });
-    return { text: payload.type === "image" ? payload.image.caption : part.text.trim(),
+    return { text: payload.type === "image" ? payload.image.caption || "" : part.text.trim(),
       buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(websiteInteraction ? { websiteInteraction } : {}),
