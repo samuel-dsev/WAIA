@@ -11,7 +11,7 @@ import { createConfiguredTenantRuntime } from "../src/tenants/configured-runtime
 import { createWhatsAppReplyPayload } from "../src/modules/whatsapp/outbound.js";
 
 const car = (id, price, fields = {}) => ({ id, titulo: `Modelo ${id}`, ano: 2020, preco: price,
-  km: 21345, cambio: "Automático", combustivel: "Flex", cor: "Prata", imagens: ["/storage/veiculos/a.jpg"], ...fields });
+  modelo: `Versão ${id}`, km: 21345, cambio: "Automático", combustivel: "Flex", cor: "Prata", imagens: ["/storage/veiculos/a.jpg"], ...fields });
 const page = (...vehicles) => `<html>\n<script>\n  window.VEICULOS = ${JSON.stringify(vehicles)};\n</script>\n</html>`;
 
 test("lê a fonte fixa, mantém IDs, preços e fotos, sem avaliar o script", async () => {
@@ -24,6 +24,7 @@ test("lê a fonte fixa, mantém IDs, preços e fotos, sem avaliar o script", asy
   assert.equal(onRequest.price, null);
   assert.equal(onRequest.availability, "on_request");
   assert.equal(priced.id, "turim:1");
+  assert.equal(priced.model, "Versão 1");
   assert.match(priced.description, /21\.345 km · Automático/u);
   assert.equal(priced.url, "https://turimautos.com/veiculo?id=1");
   assert.equal(priced.imageUrl, "https://turimautos.com/storage/veiculos/a.jpg");
@@ -40,13 +41,13 @@ test("catálogo comercial usa o teto pedido e ignora cache vencido", () => {
   assert.equal(catalogSalesFormat(catalog)?.name, "catalog_sales_reply");
   const selection = { text: "", productIds: [], catalogAction: "browse", filters: { category: null, minPrice: null, maxPrice: 60_000 } };
   const reply = parseCatalogSalesReply(JSON.stringify(selection), catalog);
-  const cards = reply.messages.filter((part) => part.imageUrl);
-  assert.deepEqual(cards.map((part) => part.catalogProductId), ["turim:1"]);
-  assert.doesNotMatch(cards[0].text, /turimautos\.com/u);
+  assert.equal(reply.messages.some((part) => part.imageUrl), false);
+  assert.deepEqual(reply.messages[0].websiteInteraction.productIds, ["turim:1"]);
+  assert.doesNotMatch(reply.text, /turimautos\.com/u);
   assert.equal(catalogSalesFormat(websiteCatalogFromCache(row, Date.now() + 601_000)), null);
 });
 
-test("pedidos de estoque da Turim usam somente fichas com foto e suprimem redirecionamentos", async () => {
+test("pedidos por faixa da Turim montam lista em texto e suprimem redirecionamentos", async () => {
   const link = "Confira em https://turimautos.com/estoque.";
   const stock = parseWebsiteStock(page(car(4, 65_000), car(1, 59_900), car(2, 60_000), car(3, 45_000, { imagens: [] })));
   const runtime = createConfiguredTenantRuntime({
@@ -64,20 +65,30 @@ test("pedidos de estoque da Turim usam somente fichas com foto e suprimem redire
   const turn = (text, extra) => runtime.handle({ conversationId: "conversation", type: "text", text, ...extra });
   assert.equal((await turn("Oi")).text, "Você já tem um modelo em mente?");
   const catalogList = await turn("", { action: "catalog.list" });
-  assert.deepEqual(catalogList.messages.map((part) => part.catalogProductId), ["turim:4", "turim:1", "turim:2"]);
+  assert.deepEqual(catalogList.messages[0].websiteInteraction.productIds, ["turim:4", "turim:1", "turim:2", "turim:3"]);
   const budget = await turn("quais modelos até 60 mil vcs tem disponível");
-  assert.deepEqual(budget.messages.map((part) => part.catalogProductId), ["turim:1", "turim:2"]);
+  assert.deepEqual(budget.messages[0].websiteInteraction.productIds, ["turim:1", "turim:2", "turim:3"]);
   assert.equal(budget.catalogBrowse.filters.maxPrice, 60_000);
-  for (const part of budget.messages) {
-    const outgoing = createWhatsAppReplyPayload({ to: "test-recipient", ...part });
-    assert.equal(outgoing.type, "image");
-    assert.match(outgoing.image.caption, /Ano 2020 · 21\.345 km · Automático/u);
-    assert.doesNotMatch(outgoing.image.caption, /turimautos\.com/u);
-  }
+  const outgoing = createWhatsAppReplyPayload({ to: "test-recipient", ...budget.messages[0] });
+  assert.equal(outgoing.type, "text");
+  assert.match(outgoing.text.body, /Modelo 1\*\nModelo: Versão 1\nAno 2020 · 21\.345 km · Automático[^\n]*\nValor: R\$\s59\.900,00\n\n\*Modelo 2\*/u);
+  assert.match(outgoing.text.body, /Gostou de algum\?.+fotos dele/u);
+  assert.doesNotMatch(outgoing.text.body, /turimautos\.com|Modelo 4/u);
   const photoRequest = await turn("tenho em mente um Onix, tem fotos dele?");
   assert.equal(photoRequest.messages, undefined, "Alias de fotos não pode enviar outros veículos como se fossem o Onix.");
   assert.doesNotMatch(photoRequest.text, /turimautos\.com/u);
   assert.equal((await turn("procuro um carro até 60 mil")).messages, undefined);
+});
+
+test("consulta por categoria usa a carroceria publicada sem afrouxar o filtro", () => {
+  const cache = parseWebsiteStock(page(car(1, 54_000, { detalhes: { categoria: "SUV" } }), car(2, 52_000, { categoria: "Hatch" })));
+  const catalog = websiteCatalogFromCache({ status: "saudavel", last_success_at: new Date(), cache_snapshot: cache });
+  const output = (category) => JSON.stringify({ text: "", catalogAction: "browse", productIds: [], filters: { category, minPrice: null, maxPrice: 60_000 } });
+  const reply = parseCatalogSalesReply(output("SUV"), catalog, { message: "Quais SUVs até 60 mil?" });
+  assert.deepEqual(reply.messages[0].websiteInteraction.productIds, ["turim:1"]);
+  const unresolved = parseCatalogSalesReply(output(null), catalog, { message: "Quais sedãs até 60 mil?" });
+  assert.equal(unresolved.messages, undefined);
+  assert.match(unresolved.text, /confirmar essa categoria/u);
 });
 
 test("PostgreSQL: troca de estoque, indisponibilidade, isolamento e tentativa concorrente", {

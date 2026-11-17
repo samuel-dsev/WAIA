@@ -8,6 +8,7 @@ import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
+import { normalizeWebsiteInteraction, websiteCatalogListText, websiteGalleryPart } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
@@ -161,6 +162,30 @@ export class PostgresJobHandlerRepository {
     return withTenantTransaction(this.pool, { empresaId }, ({ client }) => loadCatalogBrowseState(client, empresaId, conversationId));
   }
 
+  websiteInteraction({ empresaId, conversationId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const { rows: [row] } = await client.query(
+        `SELECT m.outbound_payload->'websiteInteraction' AS state, NOT EXISTS (
+           SELECT 1 FROM mensagens newer WHERE newer.empresa_id = m.empresa_id AND newer.conversa_id = m.conversa_id
+             AND newer.direcao = 'saida' AND newer.sequence > m.sequence AND newer.sequence < anchor.sequence AND newer.redacted_at IS NULL
+             AND newer.status IN ('enviada', 'entregue', 'lida') AND newer.external_message_id IS NOT NULL
+         ) AS direct
+           FROM mensagens m JOIN mensagens anchor ON anchor.empresa_id = m.empresa_id AND anchor.conversa_id = m.conversa_id
+             AND anchor.id = $3 AND anchor.direcao = 'entrada' AND anchor.redacted_at IS NULL
+           WHERE m.empresa_id = $1 AND m.conversa_id = $2 AND m.direcao = 'saida' AND m.sequence < anchor.sequence
+            AND m.origem_resposta IN ('ia', 'fluxo_deterministico') AND m.redacted_at IS NULL
+            AND m.status IN ('enviada', 'entregue', 'lida') AND m.external_message_id IS NOT NULL
+            AND m.outbound_payload ? 'websiteInteraction' AND NOT EXISTS (
+              SELECT 1 FROM mensagens referral WHERE referral.empresa_id = m.empresa_id AND referral.conversa_id = m.conversa_id
+                AND referral.direcao = 'entrada' AND referral.sequence > m.sequence AND referral.sequence <= anchor.sequence
+                AND referral.redacted_at IS NULL AND referral.outbound_payload ? 'adReferral'
+            ) ORDER BY m.sequence DESC LIMIT 1`, [empresaId, conversationId, messageId],
+      );
+      const state = normalizeWebsiteInteraction(row?.state);
+      return state ? { ...state, direct: row.direct } : null;
+    });
+  }
+
   adReferral({ empresaId, conversationId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const row = (await client.query(
@@ -213,6 +238,7 @@ export class PostgresJobHandlerRepository {
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
+            ...(reply.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(reply.websiteInteraction) } : {}),
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
@@ -245,10 +271,11 @@ export class PostgresJobHandlerRepository {
     const productId = part.catalogProductId;
     const websiteCard = /^turim:[1-9]\d*$/u.test(productId);
     const redirect = hasWebsiteCatalogLink(part.text);
-    if (!websiteCard && !redirect) return true;
+    const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
+    if (!websiteCard && !redirect && !interaction) return true;
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const catalog = await loadWebsiteCatalog(client, empresaId);
-      if (!catalog) return !websiteCard;
+      if (!catalog) return !websiteCard && !interaction;
       if (redirect) return false;
       const live = await client.query(
         `SELECT 1 FROM empresas e JOIN configuracoes_revisoes r
@@ -258,10 +285,17 @@ export class PostgresJobHandlerRepository {
             AND r.configuracao_compilada #> '{configuration,modules}' ? 'catalog'`, [empresaId],
       );
       if (!live.rowCount) return false;
-      const item = catalog.items.find((candidate) => candidate.id === productId);
+      const trustedItem = (id) => catalog.items.find((candidate) => candidate.id === id && candidate.active !== false && candidate.availability !== "unavailable");
+      if (interaction) {
+        const items = interaction.productIds.map(trustedItem);
+        if (items.some((item) => !item)) return false;
+        if (interaction.step === "list") return part.text === websiteCatalogListText(items);
+      }
+      if (!websiteCard) return true;
+      const item = trustedItem(productId);
       if (!item?.imageUrl) return false;
-      const current = productMessage(item);
-      return current.text === part.text && current.imageUrl === part.imageUrl;
+      const current = Number.isInteger(part.catalogPhotoIndex) ? websiteGalleryPart(item, part.catalogPhotoIndex) : productMessage(item);
+      return current?.text === part.text && current?.imageUrl === part.imageUrl;
     });
   }
 
@@ -472,7 +506,8 @@ export function createWorkerHandlers({
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
                 browseState = await repository.catalogBrowseState({ empresaId: config.empresaId, conversationId: input.conversationId });
               }
-              const catalogContext = { ...config.catalog, ...(salesMode ? { salesMode: true, browseState,
+              const interaction = websiteCatalog && !currentReferral ? await repository.websiteInteraction?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
+              const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
                 interestHandoff: { enabled: definition.ai?.catalogSalesEnabled === true && config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
@@ -549,6 +584,7 @@ export function createWorkerHandlers({
       }
     } else {
       reply = { text: prepared.text, buttons: prepared.buttons, ...(prepared.messages ? { messages: prepared.messages } : {}),
+        ...(prepared.websiteInteraction ? { websiteInteraction: prepared.websiteInteraction } : {}),
         ...(prepared.nonLeadHandoff ? { nonLeadHandoff: prepared.nonLeadHandoff } : {}) };
     }
     const sendNotBefore = prepared?.sendNotBefore || reply.sendNotBefore;
@@ -604,7 +640,8 @@ export function createWorkerHandlers({
       buttons: reply.buttons,
     });
     const externalMessageId = firstMetaMessageId(sent);
-    if ((reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff) && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
+    if ((reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff || reply.websiteInteraction?.step === "closed")
+      && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {
       await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
     } else {

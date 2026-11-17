@@ -1,4 +1,5 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
+import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleryReply } from "./website-catalog-interaction.js";
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -29,6 +30,9 @@ export function catalogSalesFormat(catalog) {
   if (!["google_sheets", "website_catalog"].includes(catalog?.source?.type)
     || catalog.source.status !== "healthy" || !products.length) return null;
   const categories = [...new Set(products.map((item) => item.category).filter(Boolean))];
+  const actions = catalog.source.type === "website_catalog"
+    ? [...ACTIONS.filter((action) => action !== "interest"), "choose"]
+    : ACTIONS.filter((action) => action !== "interest" || catalog.interestHandoff?.enabled === true);
   return {
     type: "json_schema", name: "catalog_sales_reply", strict: true,
     schema: {
@@ -36,7 +40,7 @@ export function catalogSalesFormat(catalog) {
       properties: {
         text: { type: "string" },
         productIds: { type: "array", maxItems: 3, items: { type: "string", enum: products.map((item) => item.id) } },
-        catalogAction: { type: "string", enum: ACTIONS.filter((action) => action !== "interest" || catalog.interestHandoff?.enabled === true) },
+        catalogAction: { type: "string", enum: actions },
         filters: {
           type: "object", additionalProperties: false,
           properties: {
@@ -69,9 +73,11 @@ export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
 
 export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Apresente o estoque aqui na conversa. Não escreva endereço do site, link ou instrução para abrir o estoque fora do WhatsApp. Se faltar ficha ou foto, ofereça conferência com a equipe.
-- Use browse/products apenas quando o cliente pedir para ver opções ou uma ficha, ou aceitar uma oferta clara de envio. Uma preferência, como "procuro um carro até 60 mil" ou "quero um SUV", pede none e uma pergunta útil sobre o que falta; preserve as preferências para usar quando ele pedir opções. No primeiro aceite de ver opções, use browse com os critérios informados. Reserve more para continuar uma página anterior.
-- "Tem fotos do carro?" e "Pode me mostrar a foto?" são pedidos de envio. Use products com o ID exato do veículo identificado na conversa, mesmo se a ficha já foi enviada. A pergunta pode se referir ao modelo que o cliente mencionou antes de informar o nome. A foto vem da ficha atual. Se houver várias unidades possíveis, pergunte qual delas. Se não encontrar o modelo no estoque publicado, informe isso e ofereça consulta à equipe.
-- Se a carroceria pedida não estiver cadastrada na fonte, use none e ofereça confirmação da equipe. Nunca remova esse filtro para enviar veículos de outra categoria. Se o cliente só perguntar se um modelo está no estoque ou qual o preço, use details para uma resposta textual. Confirme disponibilidade somente com um ID encontrado no estoque atual. Use productIds vazio se não houver correspondência.`;
+- Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, modelo, descrição e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
+- Use products com um único ID quando o cliente pedir detalhes, ficha ou fotos de um veículo específico, mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque e pergunta se gostou do veículo. Se houver várias unidades possíveis, use productIds vazio e esclareça qual. Uma pergunta só de preço ou disponibilidade usa details em texto.
+- Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista e, após confirmar o interesse, oferece a simulação para o veículo escolhido. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
+- Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. O contexto catalog.financingVehicle aparece somente quando o sistema tem esse aceite. Nesse caso, use none, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. Entrada de anúncio sem interação de catálogo segue o roteiro atual.
+- Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.`;
 
 export function asksForVehiclePhoto(message) {
   const text = normalize(message).replace(/\s+/gu, " ");
@@ -79,6 +85,11 @@ export function asksForVehiclePhoto(message) {
   const photoQuestion = /^(?:(?:voce|voces) )?(?:tem|teria|possui|possuem) (?:algumas? |as? )?(?:fotos?|imagens?)\b/u;
   const photoCommand = /^(?:(?:pode|poderia) )?(?:me )?(?:manda(?:r|m|e)?|envia(?:r|m)?|envie|mostra(?:r|m)?|mostre|quero ver) (?:me )?(?:as? |umas? )?(?:fotos?|imagens?)\b/u;
   return text.split(/\s*[,;.!?]\s*/u).some((part) => photoQuestion.test(part) || photoCommand.test(part));
+}
+
+export function asksForWebsiteVehicleDetails(message) {
+  const text = normalize(message);
+  return asksForVehiclePhoto(text) || /\b(?:tem|teria|quero|gostaria de ver|me (?:manda|envia|mostra)) (?:mais |a |os )?(?:detalhes|informacoes|ficha)\b/u.test(text);
 }
 
 function filteredProducts(products, query) {
@@ -89,38 +100,28 @@ function filteredProducts(products, query) {
 
 const websiteStockUnconfirmed = "Não consegui confirmar esse veículo no estoque publicado. Posso verificar com a equipe?";
 const websiteStockUnavailable = "Não consegui conferir o estoque agora. Posso verificar com a equipe?";
-const websitePhotoUnavailable = "A ficha desse veículo está sem foto no momento. Posso pedir uma foto à equipe?";
 
 export function hasWebsiteCatalogLink(text) {
   return /(?<![@.\p{L}\p{N}-])(?:www\.)?turimautos\.com(?!\.[\p{L}\p{N}]|[\p{L}\p{N}-])/iu.test(text || "");
 }
 
-function websiteCatalogCards(items, activeFilters, seen) {
-  const messages = items.filter((item) => item.imageUrl)
-    .map((item) => ({ ...productMessage(item), catalogProductId: item.id }));
-  if (!messages.length) return { text: websitePhotoUnavailable };
-  return {
-    text: messages.map((part) => part.text).join("\n\n"), messages,
-    ...(activeFilters ? { catalogBrowse: { filters: activeFilters, priorSeenProductIds: seen } } : {}),
-  };
-}
-
 export function websiteCatalogPage(catalog, query = { ...EMPTY_FILTERS }, seen = []) {
   if (catalog.source?.status !== "healthy") return { text: websiteStockUnavailable };
   const candidates = filteredProducts(availableCatalogProducts(catalog), query);
-  const withPhoto = candidates.filter((item) => item.imageUrl);
-  const selected = withPhoto.filter((item) => !seen.includes(item.id)).slice(0, 3);
   if (!candidates.length) return { text: "Não encontrei veículos com esses critérios no estoque publicado. Quer consultar outra faixa ou modelo?" };
-  if (!withPhoto.length) return { text: "Encontrei opções, mas as fichas estão sem foto. Posso confirmar as imagens com a equipe?" };
-  if (!selected.length) return { text: "Já mostrei as fichas com foto para essa busca. Quer mudar a faixa de preço ou o modelo?" };
-  return websiteCatalogCards(selected, query, seen.filter((id) => withPhoto.some((item) => item.id === id)).slice(0, 100));
+  const selected = websiteCatalogList(candidates.filter((item) => !seen.includes(item.id)));
+  if (!selected.length) return { text: "Já mostrei as opções dessa busca. Quer mudar a faixa de preço ou o modelo?" };
+  const text = websiteCatalogListText(selected);
+  const productIds = selected.map((item) => item.id);
+  return { text, messages: [{ text, buttons: [], websiteInteraction: { step: "list", productIds } }],
+    catalogBrowse: { filters: query, priorSeenProductIds: seen.filter((id) => candidates.some((item) => item.id === id)).slice(0, 100) } };
 }
 
 export function websiteCatalogBudget(message) {
   const text = normalize(message).replace(/\s+/gu, " ");
   // This shortcut handles requests where the only criterion is a ceiling.
   // Compound requests continue through the existing structured filters.
-  const match = /^(?:quais|que) (?:modelos|carros|veiculos|opcoes) ate (?:r\$\s*)?(\d+(?:,\d{1,2})?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)(?:\s*(mil|k))?(?: (?:(?:vcs?|voces?) )?tem)?(?: disponive(?:l|is))?[?!.]*$/u.exec(text);
+  const match = /^(?:(?:quais|que) (?:modelos|carros|veiculos|opcoes) )?ate (?:r\$\s*)?(\d+(?:,\d{1,2})?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)(?:\s*(mil|k))?(?: (?:(?:vcs?|voces?) )?tem)?(?: disponive(?:l|is))?[?!.]*$/u.exec(text);
   if (!match) return null;
   const [, amount, multiplier] = match;
   if (multiplier && amount.includes(".")) return null;
@@ -133,27 +134,30 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   let value;
   try { value = JSON.parse(output); } catch { throw invalid(); }
   const products = availableCatalogProducts(catalog), byId = new Map(products.map((item) => [item.id, item]));
+  const website = catalog.source?.type === "website_catalog";
   if (!plain(value) || Object.keys(value).length !== 4
-    || typeof value.text !== "string" || value.text.length > 4096 || !ACTIONS.includes(value.catalogAction)
+    || typeof value.text !== "string" || value.text.length > 4096 || !(ACTIONS.includes(value.catalogAction) || website && value.catalogAction === "choose")
     || !Array.isArray(value.productIds) || value.productIds.length > 3 || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => !byId.has(id))) throw invalid();
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
   if (action === "interest") {
     const handoff = catalog.interestHandoff;
-    if (leadQualificationEnabled || handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
+    if (website || leadQualificationEnabled || handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
       || handoff.message.length > 4096 || !value.productIds.length) throw invalid();
     // Model prose and browse filters have no operational effect here. Always use the approved closing.
     return { text: handoff.message.trim(), salesInterest: { products: value.productIds.map((id) => ({ id, name: byId.get(id).name })) } };
   }
   if (query.category !== null && !products.some((item) => item.category === query.category)) throw invalid();
-  const website = catalog.source?.type === "website_catalog";
-  if (website && ["none", "details", "products"].includes(action) && asksForVehiclePhoto(message)) {
-    // A photo request can be classified as a detail question. Render a card
-    // only if it resolves to one item from the current stock, including resends.
-    if (value.productIds.length === 1) return websiteCatalogCards([byId.get(value.productIds[0])]);
-    if (value.productIds.length > 1) return { text: "Qual dessas versões você gostaria de ver?" };
-    return { text: websiteStockUnconfirmed };
+  if (website && action === "browse" && query.category === null
+    && /\b(?:suvs?|hatchs?|sed[aã]s?|sedoes|picapes?|minivans?|crossovers?|peruas?)\b/u.test(normalize(message))) {
+    return { text: "Não consegui confirmar essa categoria no estoque publicado. Posso verificar com a equipe?" };
   }
+  if (website && (action === "products" || ["none", "details", "choose"].includes(action) && asksForWebsiteVehicleDetails(message))) {
+    if (value.productIds.length === 1) return websiteGalleryReply(byId.get(value.productIds[0]));
+    if (value.productIds.length > 1) return { text: "Qual dessas versões você gostaria de ver?" };
+    return { text: /\b(?:qual versao|qual veiculo|qual modelo)\b/u.test(normalize(text)) ? text : websiteStockUnconfirmed };
+  }
+  if (website && action === "choose") return chooseWebsiteVehicle(catalog, value.productIds.length === 1 ? byId.get(value.productIds[0]) : null, message);
   if (website && action === "details" && !value.productIds.length) return { text: websiteStockUnconfirmed };
   if (action === "none" || action === "details") {
     // During lead collection, known product IDs/valid filters may describe the prior
@@ -191,7 +195,6 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
         : "Não encontrei modelos com os filtros informados no catálogo atual. Gostaria de considerar outra faixa de preço ou categoria?",
     };
   }
-  if (website) return websiteCatalogCards(selected);
   const messages = [];
   if (action !== "products") messages.push({ text: action === "more"
     ? "Vou te enviar mais algumas opções que tenho certeza que você vai gostar!"

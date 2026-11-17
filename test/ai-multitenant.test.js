@@ -96,9 +96,10 @@ function setup({ configs, histories = {}, responder, secretResolver, timeoutMs =
   return { service, clientFactory, ledger, historyRequests, configResolver };
 }
 
-test("pedido de foto após nome usa o modelo da conversa e a imagem validada do site", async () => {
+test("um modelo específico usa todas as fotos validadas do site na ordem", async () => {
   const imageUrl = "https://turimautos.com/storage/veiculos/onix-teste.jpg";
-  const onix = { id: "turim:1", name: "Onix 1.0", url: "https://turimautos.com/veiculo?id=1", imageUrl, price: 59900 };
+  const imageUrls = [imageUrl, "https://turimautos.com/storage/veiculos/onix-interior.jpg", "https://turimautos.com/storage/veiculos/onix-painel.jpg"];
+  const onix = { id: "turim:1", name: "Onix 1.0", url: "https://turimautos.com/veiculo?id=1", imageUrl, imageUrls, price: 59900 };
   const history = [
     { type: "text", direction: "inbound", body: "vocês têm Onix?" },
     { type: "text", direction: "outbound", body: "Como posso te chamar?" },
@@ -118,9 +119,14 @@ test("pedido de foto após nome usa o modelo da conversa e a imagem validada do 
   const reply = await ai.service.reply(request("tenant-a", { context: { catalog }, message }));
   const call = ai.clientFactory.requests[0].request;
   assert.ok(call.input.some(({ role, content }) => role === "user" && content === "vocês têm Onix?"));
-  assert.match(call.instructions, /pedidos de envio/u);
+  assert.match(call.instructions, /toda a galeria na ordem/u);
+  assert.doesNotMatch(call.input[0].content, /onix-interior\.jpg/u);
   assert.equal(reply.leadQualification, undefined);
-  assert.equal(reply.messages.length, 1);
+  assert.deepEqual(reply.messages.map((part) => part.imageUrl), imageUrls);
+  assert.deepEqual(reply.messages.map((part) => part.catalogPhotoIndex), [0, 1, 2]);
+  assert.equal(reply.messages[0].websiteInteraction, undefined);
+  assert.equal(reply.messages[2].websiteInteraction.step, "gallery");
+  assert.match(reply.messages[2].text, /gostou desse veículo/u);
   assert.equal(reply.messages[0].catalogProductId, onix.id);
   const payload = createWhatsAppReplyPayload({ to: "test-recipient", ...reply.messages[0] });
   assert.equal(payload.type, "image");
@@ -140,6 +146,56 @@ test("pedido de foto após nome usa o modelo da conversa e a imagem validada do 
   }));
   assert.equal(missing.messages, undefined);
   assert.match(missing.text, /Não consegui confirmar esse veículo/u);
+});
+
+test("catálogo só produz ficha de lead depois do aceite vinculado à simulação daquele veículo", async () => {
+  const gallery = ["https://turimautos.com/storage/veiculos/tracker-a.jpg", "https://turimautos.com/storage/veiculos/tracker-b.jpg"];
+  const selected = { id: "turim:1", name: "Tracker 2.0", imageUrl: gallery[0], imageUrls: gallery };
+  const other = { id: "turim:2", name: "Modelo do anúncio" };
+  const filters = { category: null, minPrice: null, maxPrice: null };
+  const history = { "tenant-a": [{ type: "text", direction: "inbound", body: "Meu nome é Nome Teste" }] };
+  let action = "choose", productIds = [selected.id];
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Primeiro nome e interesse de financiamento.", leadQualificationClosing: "A equipe vai continuar por aqui." })],
+    histories: history,
+    responder: async () => ({ output_text: JSON.stringify({ text: "Posso confirmar?", catalogAction: action, productIds, filters,
+      leadQualification: { status: "qualified", name: "Nome Teste", summary: "Modelo do anúncio é o interesse do cliente.", qualification: "Pretende comprar" } }), usage: {} }),
+  });
+  const turn = (message, interaction) => ai.service.reply(request("tenant-a", { message, context: { catalog: {
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [selected, other],
+    adContext: { current: false, match: "unique", productId: other.id },
+    ...(interaction ? { interaction: { ...interaction, direct: interaction.direct ?? true } } : {}),
+  } } }));
+  const choice = await turn("Gostei do Tracker", { step: "list", productIds: [selected.id, other.id] });
+  assert.equal(choice.websiteInteraction.step, "photo_offer");
+  assert.equal(choice.leadQualification, undefined);
+  const photos = await turn("Pode mandar as fotos dele", choice.websiteInteraction);
+  assert.deepEqual(photos.messages.map(({ imageUrl }) => imageUrl), gallery);
+  assert.equal(photos.leadQualification, undefined);
+  const offer = await turn("Sim, gostei", photos.messages.at(-1).websiteInteraction);
+  assert.match(offer.text, /simulação de financiamento para o Tracker/u);
+  assert.equal(offer.leadQualification, undefined);
+  action = "none";
+  productIds = [];
+  const unrelatedYes = await turn("Sim", { ...offer.websiteInteraction, direct: false });
+  assert.equal(unrelatedYes.leadQualification, undefined);
+  const accepted = await turn("Sim", offer.websiteInteraction);
+  assert.equal(accepted.websiteInteraction.step, "closed");
+  assert.match(accepted.leadQualification.summary, /Tracker 2\.0/u);
+  assert.doesNotMatch(accepted.leadQualification.summary, /Modelo do anúncio/u);
+  const withoutPhotos = await turn("Não, quero simular", choice.websiteInteraction);
+  assert.equal(withoutPhotos.websiteInteraction.step, "closed");
+  assert.match(withoutPhotos.leadQualification.summary, /Tracker 2\.0/u);
+  const originalAd = await turn("Quero simular o carro do anúncio");
+  assert.match(originalAd.leadQualification.summary, /Modelo do anúncio/u);
+  history["tenant-a"] = [];
+  const withoutName = await turn("Sim", offer.websiteInteraction);
+  assert.equal(withoutName.leadQualification, undefined);
+  assert.equal(withoutName.websiteInteraction.step, "finance_accepted");
+  assert.match(withoutName.text, /nome/u);
+  const named = await turn("Nome Teste", withoutName.websiteInteraction);
+  assert.equal(named.websiteInteraction.step, "closed");
+  assert.match(named.leadQualification.summary, /Tracker 2\.0/u);
 });
 
 test("cada resposta recebe o roteiro inteiro e a configuração atual, acima do estilo complementar", async () => {

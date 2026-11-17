@@ -11,6 +11,7 @@ const mileage = new Intl.NumberFormat("pt-BR");
 const stockVehicle = z.object({
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   titulo: z.string().trim().min(1).max(160),
+  modelo: z.string().trim().max(160).nullish(),
   ano: z.number().int().min(1886).max(2100),
   preco: z.number().min(0).max(1_000_000_000),
   km: z.number().int().nonnegative().max(9_999_999),
@@ -18,6 +19,8 @@ const stockVehicle = z.object({
   combustivel: z.string().trim().max(60),
   cor: z.string().trim().max(60),
   carroceria: z.string().trim().max(100).nullish(),
+  categoria: z.string().trim().max(100).nullish(),
+  detalhes: z.object({ carroceria: z.string().trim().max(100).nullish(), categoria: z.string().trim().max(100).nullish() }).nullish(),
   imagens: z.array(z.string().max(2000)).max(100),
 });
 
@@ -45,19 +48,24 @@ export function parseWebsiteStock(html) {
   if (!parsed.success || new Set(parsed.data.map((vehicle) => vehicle.id)).size !== parsed.data.length) {
     throw stockError("WEBSITE_CATALOG_INVALID_STOCK");
   }
-  const products = parsed.data.map((vehicle) => ({
-    id: `turim:${vehicle.id}`,
-    name: vehicle.titulo,
-    price: vehicle.preco > 0 ? Math.round(vehicle.preco * 100) / 100 : null,
-    description: [
-      `Ano ${vehicle.ano}`, `${mileage.format(vehicle.km)} km`, vehicle.cambio, vehicle.combustivel, vehicle.cor,
-    ].filter(Boolean).join(" · "),
-    ...(vehicle.carroceria ? { category: vehicle.carroceria } : {}),
-    url: `${SITE_ORIGIN}/veiculo?id=${vehicle.id}`,
-    imageUrl: stockPhoto(vehicle.imagens[0]),
-    availability: vehicle.preco > 0 ? "available" : "on_request",
-    active: true,
-  }));
+  const products = parsed.data.map((vehicle) => {
+    const category = vehicle.carroceria || vehicle.categoria || vehicle.detalhes?.carroceria || vehicle.detalhes?.categoria;
+    const imageUrls = vehicle.imagens.map(stockPhoto).filter(Boolean);
+    return {
+      id: `turim:${vehicle.id}`,
+      name: vehicle.titulo,
+      ...(vehicle.modelo ? { model: vehicle.modelo } : {}),
+      price: vehicle.preco > 0 ? Math.round(vehicle.preco * 100) / 100 : null,
+      description: [
+        `Ano ${vehicle.ano}`, `${mileage.format(vehicle.km)} km`, vehicle.cambio, vehicle.combustivel, vehicle.cor,
+      ].filter(Boolean).join(" · "),
+      ...(category ? { category } : {}),
+      url: `${SITE_ORIGIN}/veiculo?id=${vehicle.id}`,
+      ...(imageUrls.length ? { imageUrl: imageUrls[0], imageUrls } : {}),
+      availability: vehicle.preco > 0 ? "available" : "on_request",
+      active: true,
+    };
+  });
   return { profile: WEBSITE_CATALOG_TYPE, schemaVersion: 1, products };
 }
 

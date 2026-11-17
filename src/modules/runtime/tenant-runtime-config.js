@@ -95,6 +95,8 @@ function parseCatalogItem(value, path) {
     ...(value.availability ? { availability: requiredText(value.availability, `${path}.availability`, { max: 20 }) } : {}),
     ...(value.units ? { units: list(value.units, `${path}.units`, (unit, unitPath) => requiredText(unit, unitPath, { max: 100 }), { max: 20 }) } : {}),
     ...(value.imageUrl ? { imageUrl: requiredText(value.imageUrl, `${path}.imageUrl`, { max: 2000 }) } : {}),
+    ...(value.model ? { model: requiredText(value.model, `${path}.model`, { max: 160 }) } : {}),
+    ...(value.imageUrls ? { imageUrls: list(value.imageUrls, `${path}.imageUrls`, (url, urlPath) => requiredText(url, urlPath, { max: 2000 }), { max: 100 }) } : {}),
   };
 }
 

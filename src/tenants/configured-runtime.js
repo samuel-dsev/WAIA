@@ -5,7 +5,7 @@ import {
   parseTenantRuntimeConfig,
 } from "../modules/runtime/index.js";
 import { paginateInteractiveOptions, withPageIndicator } from "../modules/runtime/interactive-pagination.js";
-import { asksForVehiclePhoto, hasWebsiteCatalogLink, websiteCatalogBudget } from "../modules/business/catalog-sales.js";
+import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, websiteCatalogBudget } from "../modules/business/catalog-sales.js";
 
 const ACTION_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
@@ -281,7 +281,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
     if (websiteCatalog && definition.ai?.leadIntakeOnlyEnabled !== true) {
       if (websiteCatalogBudget(text) !== null) return router.handle({ ...input, action: "catalog.list", actionSource: "fallback" });
-      if (hasScript && alias?.action.startsWith("catalog.") && asksForVehiclePhoto(text)) {
+      if (hasScript && alias?.action.startsWith("catalog.") && asksForWebsiteVehicleDetails(text)) {
         return router.handle({ ...input, action: "ai_freeform.reply", actionSource: "fallback" });
       }
     }
@@ -296,7 +296,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
   async function handle(input) {
     const reply = await route(input);
     if (!websiteCatalog || (!hasWebsiteCatalogLink(reply.text) && !reply.messages?.some((part) => hasWebsiteCatalogLink(part.text)))) return reply;
-    const { messages, catalogBrowse, ...rest } = reply;
+    const { messages, catalogBrowse, websiteInteraction, ...rest } = reply;
     return { ...rest, text: "Posso conferir o estoque com a equipe. Qual modelo ou faixa de preço você prefere?", buttons: [] };
   }
 

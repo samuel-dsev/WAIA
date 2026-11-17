@@ -91,6 +91,22 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, ["D"]);
     const pageTypes = (await owner.query("SELECT tipo FROM mensagens WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY sequence", [empresaId, page.messages.map((part) => part.id)])).rows;
     assert.deepEqual(pageTypes.map((row) => row.tipo), ["texto", "imagem", "imagem", "imagem", "texto"]);
+    const listSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
+    const listMessageId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Até 60 mil','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, listSequence, randomUUID()])).rows[0].id;
+    const websiteInteraction = { step: "list", productIds: ["turim:1", "turim:2"] };
+    const website = await handlers.prepareReply({ empresaId, message: { id: listMessageId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, origin: "deterministic_flow",
+      reply: { text: "Lista da Turim", messages: [{ text: "Lista da Turim", websiteInteraction }],
+        catalogBrowse: { filters: { category: null, minPrice: null, maxPrice: 60_000 }, priorSeenProductIds: [] } } });
+    const nextSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
+    const selectionId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Gostei do primeiro','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, nextSequence, randomUUID()])).rows[0].id;
+    const websiteScope = { empresaId, conversationId, messageId: selectionId };
+    assert.equal(await handlers.websiteInteraction(websiteScope), null);
+    await handlers.markReplySent({ empresaId, replyId: website.messages[0].id, externalMessageId: "wamid." + randomUUID() });
+    assert.deepEqual(await handlers.websiteInteraction(websiteScope), { ...websiteInteraction, direct: true });
+    assert.equal(await handlers.websiteInteraction({ ...websiteScope, empresaId: randomUUID() }), null);
+    assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, websiteInteraction.productIds);
+    await owner.query("UPDATE mensagens SET outbound_payload = $2::jsonb WHERE id = $1", [selectionId, JSON.stringify({ adReferral: { headline: "Outro anúncio" } })]);
+    assert.equal(await handlers.websiteInteraction(websiteScope), null);
     await owner.query("UPDATE empresas SET status='suspensa' WHERE id=$1", [empresaId]);
     assert.equal(await handlers.canSendBotReply({ empresaId, messageId: batchMessageId }), false);
   } finally {
