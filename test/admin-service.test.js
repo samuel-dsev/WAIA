@@ -26,6 +26,30 @@ test("operador lê operação, mas não altera configuração", async () => {
   await assert.rejects(service.create({ auth: operator, empresaId: "tenant-a", resource: "modules", body: { moduleKey: "catalog", enabled: true, configuration: {} } }), (error) => error.status === 403);
 });
 
+test("histórico administrativo carrega todos os lotes pelo cursor mesmo com novas mensagens", async () => {
+  const { service, repository } = fixture();
+  const base = { empresaId: "tenant-a", contactId: "contact-a", conversationId: "conversation-a" };
+  await repository.create({ resource: "conversations", empresaId: base.empresaId, id: base.conversationId, data: { contactId: base.contactId } });
+  for (let sequence = 1; sequence <= 207; sequence += 1) {
+    await repository.create({ resource: "messages", empresaId: base.empresaId, id: `message-${sequence}`, data: { ...base, sequence } });
+  }
+  await repository.create({ resource: "messages", empresaId: base.empresaId, id: "outside", data: { conversationId: "other", sequence: 1 } });
+  const input = { auth: operator, empresaId: base.empresaId, resource: "conversations", id: base.conversationId };
+  const recent = await service.get(input);
+  assert.equal(recent.nextBefore, "108");
+  assert.equal(recent.messages.length, 100);
+  await repository.create({ resource: "messages", empresaId: base.empresaId, id: "message-208", data: { ...base, sequence: 208 } });
+  const earlier = await service.get({ ...input, before: recent.nextBefore });
+  assert.equal(earlier.nextBefore, "8");
+  const oldest = await service.get({ ...input, before: earlier.nextBefore });
+  assert.equal(oldest.nextBefore, null);
+  assert.deepEqual([...oldest.messages, ...earlier.messages, ...recent.messages].map(item => item.sequence),
+    Array.from({ length: 207 }, (_, index) => index + 1));
+  await assert.rejects(service.get({ ...input, before: "9223372036854775808" }), { status: 400 });
+  await assert.rejects(service.get({ ...input, before: ["8"] }), { status: 400 });
+  await assert.rejects(service.get({ ...input, empresaId: "tenant-b", before: "8" }), { status: 403 });
+});
+
 test("operador não lê recursos administrativos mesmo com permissão curinga injetada", async () => {
   const { service } = fixture();
   const forged = { ...operator, memberships: [{ ...operator.memberships[0], permissions: ["*"] }] };

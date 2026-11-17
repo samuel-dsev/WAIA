@@ -118,7 +118,7 @@ const RESOURCES = Object.freeze({
   }),
   messages: descriptor({
     table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", operatorId: "operador_usuario_id", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
-    filters: { conversationId: "conversa_id", contactId: "contato_id", status: "status", direction: "direcao", type: "tipo", correlationId: "correlation_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", sequence: "sequence", status: "status" },
+    filters: { conversationId: "conversa_id", beforeSequence: "sequence", contactId: "contato_id", status: "status", direction: "direcao", type: "tipo", correlationId: "correlation_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", sequence: "sequence", status: "status" },
   }),
   logs: descriptor({
     table: "logs_operacionais", fields: {}, select: { severity: "severidade", category: "categoria", service: "servico", eventCode: "event_code", correlationId: "correlation_id", conversationId: "conversa_id", messageId: "mensagem_id", summary: "resumo_sanitizado", metadata: "metadata_sanitized", occurredAt: "occurred_at" },
@@ -228,8 +228,8 @@ function filterConditions(definition, filters, params) {
     }
     const column = definition.filters[name];
     if (!column) continue;
-    params.push(decodeBoolean(raw));
-    const operator = name === "from" ? ">=" : name === "to" ? "<=" : "=";
+    params.push(name === "beforeSequence" ? raw : decodeBoolean(raw));
+    const operator = { from: ">=", to: "<=", beforeSequence: "<" }[name] ?? "=";
     conditions.push(`${qualified(definition.alias, column)} ${operator} $${params.length}`);
   }
   return conditions;

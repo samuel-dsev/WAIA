@@ -90,7 +90,7 @@ export class MemoryAdminRepository {
     if (!this.tenants.has(empresaId)) return null;
     return { contacts: [...this.#resource("contacts").values()].filter((item) => item.empresaId === empresaId).length, conversations: [...this.#resource("conversations").values()].filter((item) => item.empresaId === empresaId).length };
   }
-  async list({ resource, empresaId, limit = 25 }) {
+  async list({ resource, empresaId, limit = 25, filters = {} }) {
     if (resource === "users") {
       const memberships = [...this.#resource("memberships").values()];
       const items = [...this.#resource("users").values()].flatMap((user) => {
@@ -106,7 +106,16 @@ export class MemoryAdminRepository {
       }).slice(0, limit);
       return { items, pagination: { total: items.length, page: 1, pageSize: limit } };
     }
-    const items = [...this.#resource(resource).values()].filter((item) => item.empresaId === empresaId && this.#visible(resource, item)).slice(0, limit).map((item) => this.#display(resource, item));
+    let rows = [...this.#resource(resource).values()].filter((item) => item.empresaId === empresaId && this.#visible(resource, item));
+    if (resource === "messages" && filters.conversationId) {
+      rows = rows.filter((item) => item.conversationId === filters.conversationId);
+      if (filters.beforeSequence !== undefined) {
+        const before = BigInt(filters.beforeSequence);
+        rows = rows.filter((item) => BigInt(item.sequence ?? 0) < before);
+      }
+      rows.sort((a, b) => Number(BigInt(b.sequence ?? 0) - BigInt(a.sequence ?? 0)));
+    }
+    const items = rows.slice(0, limit).map((item) => this.#display(resource, item));
     return { items, pagination: { total: items.length, page: 1, pageSize: limit } };
   }
   async get({ resource, empresaId, id }) {

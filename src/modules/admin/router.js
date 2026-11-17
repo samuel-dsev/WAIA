@@ -136,7 +136,7 @@ export function createAdminRouter({ adminService, groupNotifierService = null, a
   }));
   router.get("/tenants/:empresaId/:resource", asyncRoute(async (request, response) => response.json(await adminService.list({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, query: { ...request.query, limit: request.query.pageSize } }))));
   router.post("/tenants/:empresaId/:resource", asyncRoute(async (request, response) => response.status(201).json(await adminService.create({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, body: request.body }))));
-  router.get("/tenants/:empresaId/:resource/:id", asyncRoute(async (request, response) => response.json(await adminService.get({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, id: request.params.id }))));
+  router.get("/tenants/:empresaId/:resource/:id", asyncRoute(async (request, response) => response.json(await adminService.get({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, id: request.params.id, before: request.query.before }))));
   router.patch("/tenants/:empresaId/:resource/:id", asyncRoute(async (request, response) => response.json(await adminService.update({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, id: request.params.id, body: request.body }))));
   router.delete("/tenants/:empresaId/:resource/:id", asyncRoute(async (request, response) => response.json(await adminService.remove({ auth: request.auth, empresaId: request.params.empresaId, resource: request.params.resource, id: request.params.id }))));
   return router;

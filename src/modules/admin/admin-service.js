@@ -16,6 +16,7 @@ import { normalizePixKey } from "../secrets/payment-secret.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
+const CONVERSATION_HISTORY_LIMIT = 100;
 const SENSITIVE_FIELD = /secret|token|password|senha|credential|cipher|nonce|tag|authorization/iu;
 const OPERATOR_ASSIGNABLE_PERMISSIONS = new Set([
   "contacts.read", "contacts.update", "conversations.read", "conversations.update",
@@ -633,7 +634,7 @@ export class AdminService {
     return sanitizedAdminView(result);
   }
 
-  async get({ auth, empresaId, resource, id }) {
+  async get({ auth, empresaId, resource, id, before }) {
     const definition = adminResource(resource);
     if (!definition) throw new AdminNotFoundError();
     await this.#tenant(auth, empresaId, definition, { action: `${resource}.read`, resource });
@@ -641,11 +642,17 @@ export class AdminService {
     if (!record) throw new AdminNotFoundError();
     if (definition.pii) await this.#audit({ auth, empresaId, action: `${resource}.read`, resource, resourceId: id });
     if (resource === "conversations") {
+      if (before !== undefined && (typeof before !== "string" || !/^[1-9]\d{0,18}$/u.test(before) || BigInt(before) > 9223372036854775807n)) {
+        throw new AdminValidationError("Cursor do histórico inválido.", { field: "before" });
+      }
       const messages = await this.repository.list({
-        resource: "messages", empresaId, limit: 100, page: 1, sort: "sequence", direction: "desc",
-        filters: { conversationId: id },
+        resource: "messages", empresaId, limit: CONVERSATION_HISTORY_LIMIT + 1, page: 1, sort: "sequence", direction: "desc",
+        filters: before === undefined ? { conversationId: id } : { conversationId: id, beforeSequence: before },
       });
-      return sanitizedAdminView({ conversation: record, messages: [...(messages.items || [])].reverse() });
+      const rows = messages.items || [];
+      const history = rows.slice(0, CONVERSATION_HISTORY_LIMIT).reverse();
+      const nextBefore = rows.length > CONVERSATION_HISTORY_LIMIT ? String(history[0].sequence) : null;
+      return sanitizedAdminView({ conversation: record, messages: history, nextBefore });
     }
     return sanitizedAdminView(record);
   }

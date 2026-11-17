@@ -36,6 +36,16 @@ test("conversas consultam nome e telefone do cliente e ocultam contatos excluíd
   assert.match(selects[0].sql, /ct\.telefone_normalizado.+AS "contactPhone"/u);
 });
 
+test("paginação do histórico PostgreSQL usa limite exclusivo de sequência e conversa da empresa", async () => {
+  const { calls, pool } = fakePool();
+  const repository = new PostgresAdminRepository(pool);
+  await repository.list({ resource: "messages", empresaId: TENANT_ID, limit: 101, sort: "sequence", direction: "desc",
+    filters: { conversationId: ACTOR_ID, beforeSequence: "1" } });
+  const selection = calls.find(({ sql }) => /FROM mensagens r/u.test(sql) && /ORDER BY/u.test(sql));
+  assert.match(selection.sql, /r\.empresa_id = \$1.*r\.conversa_id = \$2.*r\.sequence < \$3.*ORDER BY r\.sequence DESC/u);
+  assert.deepEqual(selection.params, [TENANT_ID, ACTOR_ID, "1", 101, 0]);
+});
+
 test("exclusão bloqueia job em processamento e reverte a transação PostgreSQL", async () => {
   const calls = [];
   const client = {

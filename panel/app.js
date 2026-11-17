@@ -1111,14 +1111,32 @@ async function saveModules(event) {
   });
 }
 
+function conversationMessage(message) {
+  const item = node("article", "message");
+  const direction = message.direction || message.direcao || "inbound";
+  item.dataset.direction = ({ entrada: "inbound", saida: "outbound" })[direction] || direction;
+  item.append(paragraph(message.text || message.body || "Mensagem sem conteúdo exibível."));
+  if (message.mediaMimeType) {
+    item.append(button("Ver mídia privada", () => openReceiptPreview(message.id), "button button-secondary button-small"));
+  }
+  item.append(nodeWithText("small", `${message.responseOrigin || message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));
+  return item;
+}
+
 async function openConversation(id) {
   const base = endpointFor(VIEW_DEFINITIONS.conversations);
   if (!base) return;
+  const endpoint = `${base}/${encodeURIComponent(id)}`;
+  const content = node("div", "conversation-detail");
+  const current = () => elements.detailDialog.open && content.isConnected && endpointFor(VIEW_DEFINITIONS.conversations) === base;
   elements.detailTitle.textContent = "Conversa";
-  elements.detailContent.replaceChildren(paragraph("Carregando conversa…"));
+  content.append(paragraph("Carregando conversa…"));
+  elements.detailContent.replaceChildren(content);
   if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  elements.detailDialog.scrollTop = 0;
   try {
-    const payload = await apiFetch(`${base}/${encodeURIComponent(id)}`);
+    const payload = await apiFetch(endpoint);
+    if (!current()) return;
     const conversation = payload.conversation || payload.data || payload;
     elements.detailTitle.textContent = conversation.contactName || "Conversa";
     const details = node("dl", "detail-list");
@@ -1126,20 +1144,33 @@ async function openConversation(id) {
       ["Contato", conversation.contactName || "none"], ["Número", conversation.contactPhone], ["Estado", conversation.status, "status"],
       ["Modo", conversation.mode], ["Responsável", conversation.operatorId], ["Correlação", conversation.correlationId],
     ]) details.append(nodeWithText("dt", label), valueNode(value, key));
-    const messages = node("div", "message-list");
+    const messages = node("section", "message-list");
     messages.setAttribute("aria-label", "Mensagens da conversa");
-    for (const message of listFrom(payload.messages || conversation.messages || [])) {
-      const item = node("article", "message");
-      const direction = message.direction || message.direcao || "inbound";
-      item.dataset.direction = ({ entrada: "inbound", saida: "outbound" })[direction] || direction;
-      item.append(paragraph(message.text || message.body || "Mensagem sem conteúdo exibível."));
-      if (message.mediaMimeType) {
-        item.append(button("Ver mídia privada", () => openReceiptPreview(message.id), "button button-secondary button-small"));
-      }
-      item.append(nodeWithText("small", `${message.responseOrigin || message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));
-      messages.append(item);
-    }
+    messages.tabIndex = -1;
+    messages.append(...listFrom(payload.messages || conversation.messages || []).map(conversationMessage));
     if (!messages.children.length) messages.append(paragraph("Nenhuma mensagem disponível."));
+    let nextBefore = payload.nextBefore;
+    const older = button("Carregar mensagens anteriores", async () => {
+      older.disabled = true;
+      older.textContent = "Carregando…";
+      try {
+        const page = await apiFetch(`${endpoint}?before=${encodeURIComponent(nextBefore)}`);
+        if (!current()) return;
+        const first = messages.firstElementChild;
+        const previousTop = first.getBoundingClientRect().top;
+        messages.prepend(...listFrom(page.messages).map(conversationMessage));
+        nextBefore = page.nextBefore;
+        older.hidden = !nextBefore;
+        elements.detailDialog.scrollTop += first.getBoundingClientRect().top - previousTop;
+        if (older.hidden) messages.focus({ preventScroll: true });
+      } catch (error) {
+        if (current()) toast(error.message || "Não foi possível carregar as mensagens anteriores.");
+      } finally {
+        older.disabled = false;
+        older.textContent = "Carregar mensagens anteriores";
+      }
+    }, "button button-secondary button-small");
+    older.hidden = !nextBefore;
     const tools = node("div", "handoff-tools");
     tools.append(
       button("Assumir conversa", () => conversationAction(id, "assume"), "button button-primary button-small"),
@@ -1150,9 +1181,9 @@ async function openConversation(id) {
       button("Editar nome", () => editContactName(conversation), "button button-secondary button-small"),
       button("Excluir número", () => forgetContact(conversation), "button button-danger button-small"),
     );
-    elements.detailContent.replaceChildren(details, messages, tools, humanMessageComposer(id, conversation));
+    content.replaceChildren(details, older, messages, tools, humanMessageComposer(id, conversation));
   } catch (error) {
-    elements.detailContent.replaceChildren(paragraph(error.message || "Não foi possível abrir a conversa."));
+    if (current()) content.replaceChildren(paragraph(error.message || "Não foi possível abrir a conversa."));
   }
 }
 

@@ -257,6 +257,38 @@ dialog::backdrop { background: rgba(12, 27, 33, 0.7); }
 .message { max-width: 78%; padding: 11px 13px; border-radius: 12px; background: #edf2f4; }
 .message[data-direction="outbound"] { margin-left: auto; background: var(--brand-soft); }
 .message small { display: block; margin-top: 5px; color: var(--muted); }
+#detailDialog:has(.conversation-detail) {
+  width: min(calc(100% - 24px), 1024px);
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+body:has(#detailDialog[open] .conversation-detail) { overflow: hidden; }
+#detailDialog:has(.conversation-detail) .dialog-wide {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  padding: 0 clamp(12px, 3vw, 24px) clamp(12px, 3vw, 24px);
+}
+#detailDialog:has(.conversation-detail) .dialog-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+#detailDialog:has(.conversation-detail) h2 { min-width: 0; overflow-wrap: anywhere; }
+.conversation-detail { overflow-wrap: anywhere; }
+.conversation-detail .detail-list { grid-template-columns: max-content minmax(0, 1fr); }
+.conversation-detail .message-list { grid-template-columns: minmax(0, 1fr); }
+.conversation-detail .message { min-width: 0; max-width: min(84%, 75ch); justify-self: start; }
+.conversation-detail .message[data-direction="outbound"] { margin-left: 0; justify-self: end; }
+.conversation-detail .message > p { margin: 0; white-space: pre-wrap; }
+.conversation-detail .button { max-width: 100%; white-space: normal; }
 .handoff-tools { display: flex; flex-wrap: wrap; gap: 9px; padding: 14px; background: var(--warning-soft); border-radius: 10px; }
 .handoff-note { width: 100%; margin: 0; color: #70470c; font-size: 0.85rem; }
 .human-composer { display: grid; gap: 12px; margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
@@ -312,6 +344,7 @@ dialog::backdrop { background: rgba(12, 27, 33, 0.7); }
   .data-table td::before { content: attr(data-label); color: var(--muted); font-size: 0.76rem; font-weight: 800; text-transform: uppercase; }
   .pagination { justify-content: center; }
   .message { max-width: 92%; }
+  .conversation-detail .message { max-width: 92%; }
 }
 
 /* Onboarding versionado */
