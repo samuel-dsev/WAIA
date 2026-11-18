@@ -70,6 +70,8 @@ test("fotos e nome não encerram a avaliação inicial; legendas são contexto s
   const { ai } = setup(async (call) => {
     assert.match(call.input.at(-1).content, /Imagem recebida/u);
     assert.match(call.input.at(-1).content, /sem análise visual/u);
+    assert.match(call.instructions, /CONTEXTO DO TURNO ATUAL: recebidas 1 imagens/u);
+    assert.match(call.instructions, /nome não autorizam visita/u);
     return output("Obrigada pelas fotos! Você já tem algum modelo em mente?", state("collect_photos"), card);
   });
   const reply = await ai.reply(request("", { ...state("collect_photos"), direct: true }, { turnMessages: [

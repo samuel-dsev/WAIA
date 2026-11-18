@@ -41,6 +41,17 @@ export const TRADE_IN_EVALUATION_INSTRUCTIONS = [
   "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text responde às dúvidas atuais e pode encerrar naturalmente agradecendo pelo nome e informando que um vendedor entrará em contato para combinar os detalhes, seguindo a referência de encerramento. Encerre sem pergunta: não peça nova confirmação de cadastro/telefone/interesse nem pergunte se pode ajudar em algo mais. O sistema completa o encerramento quando faltar, sem duplicá-lo. Nunca afirme que enviou a ficha ou notificou o grupo/equipe e não repita CPF/nascimento no texto público.",
 ].join("\n");
 
+export function tradeInTurnInstructions(context, turnMessages = []) {
+  const photos = turnMessages.filter((part) => part.type === "image").length;
+  if (!photos || !["offer_photos", "collect_photos"].includes(context?.session?.step)) return "";
+  return "CONTEXTO DO TURNO ATUAL: recebidas " + photos + " imagens durante a avaliação inicial por fotos. "
+    + "O cliente já está enviando as fotos solicitadas; não pergunte novamente se quer avaliar por fotos. "
+    + "A resposta deve agradecer explicitamente o recebimento, responder também às perguntas textuais deste turno e continuar pelo modelo de compra. "
+    + "Se o modelo ainda não foi escolhido, pergunte qual procura; se já foi, ofereça as fotos desse modelo quando apropriado. "
+    + "Uma pergunta sobre cidade/endereço e o nome não autorizam visita nem contato de vendedor: nesse caso mantenha collect_photos e collecting, sem prometer retorno da equipe. "
+    + "Somente um pedido explícito de visita, atendimento humano ou recusa neste turno muda esse percurso. Não deduza características pelas imagens.";
+}
+
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
   const answer = normalized(message), session = context?.session;
   const last = history.findLast((part) => part.role === "assistant")?.content || "";
