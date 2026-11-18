@@ -1,7 +1,7 @@
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
-import { randomInt } from "node:crypto";
+import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
@@ -36,6 +36,7 @@ function permanent(message, code) {
 }
 
 export class PostgresJobHandlerRepository {
+  inboundTurn(input) { return loadInboundTurn(this.pool, input); }
   constructor(pool) {
     if (!pool?.connect) throw new TypeError("Pool PostgreSQL invalido.");
     this.pool = pool;
@@ -47,7 +48,7 @@ export class PostgresJobHandlerRepository {
         `SELECT m.id, m.empresa_id, m.conversa_id, m.contato_id, m.numero_whatsapp_id,
                 m.tipo, m.corpo, m.media_external_id, m.media_storage_key,
                 m.media_mime_type, m.media_size_bytes, m.media_sha256, m.external_message_id,
-                m.correlation_id, m.outbound_payload, c.telefone_normalizado
+                m.correlation_id, m.outbound_payload, m.sequence, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
           WHERE m.empresa_id = $1 AND m.id = $2 AND m.direcao = 'entrada' AND c.deleted_at IS NULL
@@ -58,6 +59,7 @@ export class PostgresJobHandlerRepository {
       if (!row) return null;
       return {
         id: row.id,
+        sequence: Number(row.sequence),
         empresaId: row.empresa_id,
         conversationId: row.conversa_id,
         contactId: row.contato_id,
@@ -186,6 +188,19 @@ export class PostgresJobHandlerRepository {
     });
   }
 
+  financingSession({ empresaId, conversationId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const row = (await client.query(`SELECT m.outbound_payload->'websiteInteraction' AS state
+        FROM mensagens m JOIN mensagens anchor ON anchor.empresa_id=m.empresa_id AND anchor.conversa_id=m.conversa_id AND anchor.id=$3
+        WHERE m.empresa_id=$1 AND m.conversa_id=$2 AND m.direcao='saida' AND m.sequence<anchor.sequence
+          AND m.redacted_at IS NULL AND m.external_message_id IS NOT NULL AND m.status IN ('enviada','entregue','lida')
+          AND m.outbound_payload#>>'{websiteInteraction,step}' IN ('finance_accepted','closed','declined')
+        ORDER BY m.sequence DESC LIMIT 1`, [empresaId, conversationId, messageId])).rows[0];
+      const state = normalizeWebsiteInteraction(row?.state);
+      return state?.step === "finance_accepted" ? { productId: state.productIds[0], status: "pending" } : null;
+    });
+  }
+
   adReferral({ empresaId, conversationId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const row = (await client.query(
@@ -236,24 +251,29 @@ export class PostgresJobHandlerRepository {
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
+            ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
             ...(reply.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(reply.websiteInteraction) } : {}),
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
-      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, status: row.status };
+      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, inboundTurnSequence: row.outbound_payload?.inboundTurnSequence, status: row.status };
       const existing = (await client.query(
         `SELECT id, corpo, outbound_payload, external_message_id, status
            FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
         [empresaId, message.id],
       )).rows[0];
-      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, externalMessageId: existing.external_message_id, status: existing.status };
+      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, inboundTurnSequence: existing.outbound_payload?.inboundTurnSequence, externalMessageId: existing.external_message_id, status: existing.status };
     });
   }
 
-  canSendBotReply({ empresaId, messageId }) {
-    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => (await client.query(
+  canSendBotReply(input) {
+    return withTenantTransaction(this.pool, { empresaId: input.empresaId }, ({ client }) => this.canSendBotReplyInTransaction(client, input));
+  }
+
+  async canSendBotReplyInTransaction(client, { empresaId, messageId }) {
+    return (await client.query(
       `SELECT 1 FROM mensagens m
          JOIN empresas e ON e.id = m.empresa_id AND e.status = 'ativa'
          JOIN conversas c ON c.empresa_id = m.empresa_id AND c.id = m.conversa_id
@@ -261,10 +281,39 @@ export class PostgresJobHandlerRepository {
          JOIN numeros_whatsapp n ON n.empresa_id = m.empresa_id AND n.id = m.numero_whatsapp_id
         WHERE m.empresa_id = $1 AND m.id = $2 AND m.redacted_at IS NULL
           AND c.status = 'aberta' AND c.modo_atendimento = 'bot'
+          AND NOT EXISTS (SELECT 1 FROM mensagens checkpoint JOIN mensagens newer
+            ON newer.empresa_id=checkpoint.empresa_id AND newer.conversa_id=checkpoint.conversa_id
+            WHERE checkpoint.empresa_id=m.empresa_id AND checkpoint.source_message_id=m.id
+              AND checkpoint.outbound_payload ? 'inboundTurnSequence'
+              AND newer.direcao='entrada' AND newer.redacted_at IS NULL
+              AND newer.sequence>(checkpoint.outbound_payload->>'inboundTurnSequence')::bigint)
           AND ct.deleted_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
           AND n.deleted_at IS NULL AND n.status = 'ativo'`,
       [empresaId, messageId],
-    )).rowCount > 0);
+    )).rowCount > 0;
+  }
+
+  claimBotDispatch({ empresaId, messageId, replyId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      await client.query(`SELECT c.id FROM conversas c JOIN mensagens m ON m.empresa_id=c.empresa_id AND m.conversa_id=c.id
+        WHERE m.empresa_id=$1 AND m.id=$2 FOR UPDATE OF c`, [empresaId, replyId]);
+      const row = (await client.query('SELECT * FROM mensagens WHERE empresa_id=$1 AND id=$2 FOR UPDATE', [empresaId, replyId])).rows[0];
+      if (!row || row.external_message_id) return { allowed: false };
+      if (['started','uncertain'].includes(row.outbound_payload?.dispatchState)) return { allowed: false, uncertain: true };
+      if (!['processando','enfileirada'].includes(row.status)) return { allowed: false };
+      if (!await this.canSendBotReplyInTransaction(client, { empresaId, messageId })) {
+        await client.query("UPDATE mensagens SET status='ignorada_duplicidade' WHERE empresa_id=$1 AND id=$2", [empresaId, replyId]);
+        return { allowed: false };
+      }
+      await client.query("UPDATE mensagens SET outbound_payload=jsonb_set(outbound_payload,'{dispatchState}','\"started\"') WHERE empresa_id=$1 AND id=$2", [empresaId, replyId]);
+      return { allowed: true };
+    });
+  }
+
+  markBotDispatchUncertain({ empresaId, replyId }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => client.query(`UPDATE mensagens SET
+      outbound_payload=jsonb_set(outbound_payload,'{dispatchState}','"uncertain"'),error_code='BOT_REPLY_RECONCILIATION_REQUIRED'
+      WHERE empresa_id=$1 AND id=$2 AND external_message_id IS NULL AND outbound_payload->>'dispatchState'='started'`, [empresaId, replyId]));
   }
 
   async canSendWebsiteReply({ empresaId, part }) {
@@ -309,7 +358,8 @@ export class PostgresJobHandlerRepository {
           AND (source_message_id = $2 OR outbound_payload->>'parentReplyId' IN (
             SELECT id::text FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'
           ))
-          AND external_message_id IS NULL AND status IN ('processando', 'enfileirada')`,
+          AND external_message_id IS NULL AND status IN ('processando', 'enfileirada')
+          AND coalesce(outbound_payload->>'dispatchState','pending') NOT IN ('started','uncertain')`,
       [empresaId, messageId],
     ));
   }
@@ -387,7 +437,7 @@ export function createWorkerHandlers({
   logger = console,
   firstMetaMessageId = (result) => result?.messages?.[0]?.id || result?.id || null,
   clock = () => new Date(),
-  aiReplyDelayMs = () => randomInt(30_000, 45_001),
+  aiReplyDelayMs = () => INBOUND_COOLDOWN_MS,
 } = {}) {
   if (typeof repository?.inboundMessage !== "function") throw new TypeError("repository.inboundMessage e obrigatorio.");
   if (typeof repository?.statusEvent !== "function") throw new TypeError("repository.statusEvent e obrigatorio.");
@@ -397,8 +447,25 @@ export function createWorkerHandlers({
   if (typeof tenantDefinitionRepository?.load !== "function") throw new TypeError("tenantDefinitionRepository.load e obrigatorio.");
   if (typeof metaGateway?.sendReply !== "function") throw new TypeError("metaGateway.sendReply e obrigatorio.");
 
+  async function dispatchBot(reference, message, prepared, part, payload) {
+    const guarded = typeof repository.claimBotDispatch === 'function' && part?.id && prepared?.inboundTurnSequence != null;
+    if (guarded) {
+      const claim = await repository.claimBotDispatch({ empresaId: reference.empresaId, messageId: message.id, replyId: part.id });
+      if (!claim.allowed) return { allowed: false, uncertain: claim.uncertain === true };
+    }
+    try {
+      const result = await metaGateway.sendReply({ empresaId: reference.empresaId, numeroWhatsappId: message.numeroWhatsappId }, payload);
+      if (guarded && !firstMetaMessageId(result)) throw permanent('Provedor não confirmou envio.', 'BOT_REPLY_SEND_ID_MISSING');
+      return { allowed: true, result };
+    } catch (error) {
+      if (!guarded) throw error;
+      await repository.markBotDispatchUncertain({ empresaId: reference.empresaId, replyId: part.id });
+      return { allowed: false, uncertain: true };
+    }
+  }
+
   async function processInboundMessage(reference, _record, execution = {}) {
-    const message = await repository.inboundMessage(reference);
+    let message = await repository.inboundMessage(reference);
     if (!message) throw permanent("Mensagem de entrada nao encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
     const conversation = await conversationService.getConversation({
       empresaId: reference.empresaId,
@@ -462,8 +529,31 @@ export function createWorkerHandlers({
     if (!prepared?.messages && prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
       return { replied: true, resumed: true };
     }
+    if (prepared && message.type === "text" && typeof repository.inboundTurn === "function") {
+      const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+      if (current && current.sequence > message.sequence) {
+        await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+        return { skipped: true, reason: "inbound_turn_changed" };
+      }
+    }
     let reply;
+    let inboundTurn;
     if (!prepared) {
+      const storedDefinition = mediaRejected ? null : await tenantDefinitionRepository.load(reference.empresaId);
+      if (!mediaRejected && !storedDefinition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
+      if (message.type === "text" && storedDefinition?.ai?.enabled === true
+        && typeof repository.inboundTurn === "function") {
+        inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+        if (!inboundTurn) return { skipped: true, reason: "inbound_turn_already_answered" };
+        if (Date.parse(inboundTurn.readyAt) > clock().getTime()) return { deferUntil: inboundTurn.readyAt };
+        if (message.id !== inboundTurn.messageId) {
+          const latest = await repository.inboundMessage({ ...reference, messageId: inboundTurn.messageId });
+          if (!latest) throw permanent("Mensagem de entrada nao encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
+          message = { ...latest, runtimeGeneration: message.runtimeGeneration };
+          prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
+          if (prepared) return { skipped: true, reason: "inbound_turn_checkpoint_exists" };
+        }
+      }
       let generatedByAi = false;
       let responseDelayEnabled = true;
       try {
@@ -481,8 +571,7 @@ export function createWorkerHandlers({
       if (mediaRejected) {
         reply = { text: "Não consegui aceitar esse comprovante. Envie uma imagem JPEG, PNG ou WEBP, ou um PDF, com até 10 MB.", buttons: [] };
       } else {
-        const definition = await tenantDefinitionRepository.load(reference.empresaId);
-        if (!definition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
+        const definition = storedDefinition;
         responseDelayEnabled = definition.ai?.responseDelayEnabled !== false;
         const runtime = createConfiguredTenantRuntime({
           definition,
@@ -510,7 +599,8 @@ export function createWorkerHandlers({
                 browseState = await repository.catalogBrowseState({ empresaId: config.empresaId, conversationId: input.conversationId });
               }
               const interaction = websiteCatalog && !currentReferral ? await repository.websiteInteraction?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
-              const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(salesMode ? { salesMode: true, browseState,
+              const financingSession = websiteCatalog ? await repository.financingSession?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
+              const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(financingSession ? { financingSession } : {}), ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
                 interestHandoff: { enabled: definition.ai?.catalogSalesEnabled === true && config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
@@ -523,6 +613,7 @@ export function createWorkerHandlers({
                 messageId: message.id,
                 correlationId: message.correlationId,
                 message: input.text,
+                ...(inboundTurn ? { turnMessages: inboundTurn.messages } : {}),
                 context: {
                   identity: config.identity,
                   menu: {
@@ -550,7 +641,7 @@ export function createWorkerHandlers({
           conversationId: message.conversationId,
           contactId: message.contactId,
           type: message.type,
-          text: message.text,
+          text: inboundTurn ? inboundTurn.messages.map((part) => part.text).join("\n") : message.text,
           selectionId: message.type === "interactive" ? message.text : undefined,
           mediaId: message.mediaId,
           messageId: message.id,
@@ -561,13 +652,18 @@ export function createWorkerHandlers({
           mediaSha256: message.mediaSha256,
         });
       }
+      if (inboundTurn && reply.module !== "human_handoff") {
+        const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+        if (current?.sequence !== inboundTurn.sequence) return current ? { deferUntil: current.readyAt } : { skipped: true, reason: "inbound_turn_changed" };
+        reply.inboundTurnSequence = inboundTurn.sequence;
+      }
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };
       }
       if (generatedByAi) {
         if (typeof repository.prepareReply !== "function") throw permanent("Persistência da resposta da IA não configurada.", "BOT_REPLY_CHECKPOINT_REQUIRED");
-        const delayMs = responseDelayEnabled ? aiReplyDelayMs() : 0;
-        if (responseDelayEnabled && (!Number.isInteger(delayMs) || delayMs < 30_000 || delayMs > 45_000)) throw new TypeError("Espera da IA deve ficar entre 30 e 45 segundos.");
+        const delayMs = !inboundTurn && responseDelayEnabled ? aiReplyDelayMs() : 0;
+        if (delayMs && (!Number.isInteger(delayMs) || delayMs < 10_000 || delayMs > 15_000)) throw new TypeError("Espera da IA deve ficar entre 10 e 15 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
       }
       if (reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff) {
@@ -621,10 +717,11 @@ export function createWorkerHandlers({
           return { skipped: true, reason: "bot_reply_cancelled" };
         }
         if (execution.canContinue && !execution.canContinue()) throw Object.assign(new Error("Lease de processamento foi perdido."), { code: "PROCESSING_LEASE_LOST", retryable: true });
-        const sent = await metaGateway.sendReply({ empresaId: reference.empresaId, numeroWhatsappId: message.numeroWhatsappId }, {
+        const dispatch = await dispatchBot(reference, message, prepared, part, {
           to: message.senderPhone, text: part.text, buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
         });
-        const externalMessageId = firstMetaMessageId(sent);
+        if (!dispatch.allowed) return dispatch.uncertain ? { reconciliationRequired: true } : { skipped: true, reason: 'bot_reply_cancelled' };
+        const externalMessageId = firstMetaMessageId(dispatch.result);
         if (typeof externalMessageId !== "string" || !externalMessageId) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
         await repository.markReplySent({ empresaId: reference.empresaId, replyId: part.id, externalMessageId });
       }
@@ -634,15 +731,13 @@ export function createWorkerHandlers({
       await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
       return { skipped: true, reason: "bot_reply_cancelled" };
     }
-    const sent = await metaGateway.sendReply({
-      empresaId: reference.empresaId,
-      numeroWhatsappId: message.numeroWhatsappId,
-    }, {
+    const dispatch = await dispatchBot(reference, message, prepared, prepared, {
       to: message.senderPhone,
       text: reply.text,
       buttons: reply.buttons,
     });
-    const externalMessageId = firstMetaMessageId(sent);
+    if (!dispatch.allowed) return dispatch.uncertain ? { reconciliationRequired: true } : { skipped: true, reason: 'bot_reply_cancelled' };
+    const externalMessageId = firstMetaMessageId(dispatch.result);
     if ((reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff || reply.websiteInteraction?.step === "closed")
       && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {

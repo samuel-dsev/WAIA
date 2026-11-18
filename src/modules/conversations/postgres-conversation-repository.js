@@ -107,6 +107,7 @@ function mapMessage(row, extra = {}) {
     mediaSha256: row.media_sha256,
     mediaStoredAt: row.media_stored_at,
     externalMessageId: row.external_message_id,
+    replyToExternalMessageId: row.outbound_payload?.replyToExternalMessageId || null,
     status: fromDatabase(row.status),
     origin: fromDatabase(row.origem_resposta),
     sequence: Number(row.sequence),

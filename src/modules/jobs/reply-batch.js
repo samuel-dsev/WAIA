@@ -5,7 +5,7 @@ import { normalizeWebsiteInteraction } from "../business/website-catalog-interac
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
-const maxReplyParts = 101; // Até 100 fotos do estoque e a pergunta em texto.
+const maxReplyParts = 303; // Até três veículos com 100 fotos e a pergunta em texto.
 
 export function replyFromRow(row) {
   return row && {
@@ -16,6 +16,7 @@ export function replyFromRow(row) {
     ...(Number.isInteger(row.outbound_payload?.catalogPhotoIndex) ? { catalogPhotoIndex: row.outbound_payload.catalogPhotoIndex } : {}),
     ...(row.outbound_payload?.nonLeadHandoff ? { nonLeadHandoff: row.outbound_payload.nonLeadHandoff } : {}),
     sendNotBefore: row.outbound_payload?.sendNotBefore || null,
+    inboundTurnSequence: row.outbound_payload?.inboundTurnSequence,
     externalMessageId: row.external_message_id, status: row.status,
   };
 }
@@ -98,6 +99,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
   let parent;
   for (const [index, part] of messages.entries()) {
     const payload = { buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
+      ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(part.websiteInteraction ? { websiteInteraction: part.websiteInteraction } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}),

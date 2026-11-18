@@ -9,22 +9,10 @@ import {
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
-import { continueWebsiteInteraction, websiteFinancingVehicle } from "../business/website-catalog-interaction.js";
+import { loadConversationContext } from "./conversation-context.js";
+import { hasWebsiteFinancingConsent } from "../business/website-catalog-interaction.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
-
-function historyInput(messages, messageId) {
-  return messages
-    .filter((item) => item?.id !== messageId)
-    .filter((item) => ["text", "image"].includes(item?.type) && typeof item.body === "string" && item.body.trim())
-    .filter((item) => item.type !== "image" || item.direction === "outbound")
-    .filter((item) => item.direction === "inbound" || item.direction === "outbound")
-    .filter((item) => item.direction !== "inbound" || !isPromptInjectionAttempt(item.body))
-    .map((item) => ({
-      role: item.direction === "inbound" ? "user" : "assistant",
-      content: item.body.slice(0, 8_000),
-    }));
-}
 
 function normalizeUsage(response) {
   const inputTokens = Math.max(0, Number(response?.usage?.input_tokens ?? response?.usage?.inputTokens) || 0);
@@ -141,29 +129,19 @@ export class MultiTenantAiService {
         : suppliedContext;
       const websiteCatalog = safeContext.catalog?.source?.type === "website_catalog" ? safeContext.catalog : null;
       const websiteDetails = websiteCatalog && asksForWebsiteVehicleDetails(request.message);
-      const websiteContinuation = websiteDetails && websiteCatalog.interaction?.step !== "photo_offer"
-        ? null : continueWebsiteInteraction(websiteCatalog, request.message);
-      if (websiteContinuation) return { ...websiteContinuation, source: "deterministic" };
-      const financingVehicle = websiteDetails ? null : websiteFinancingVehicle(websiteCatalog, request.message);
-      const history = config.maxHistoryMessages ? await this.conversationService.getHistory({
-        empresaId: request.empresaId, conversationId: request.conversationId,
-        limit: websiteCatalog?.interaction ? 100 : config.maxHistoryMessages,
-      }) : [];
-      const galleryTitles = new Set(websiteCatalog?.items.map((item) => item.name) || []);
-      const recent = websiteCatalog?.interaction
-        ? history.filter((item) => !(item.type === "image" && item.direction === "outbound" && galleryTitles.has(item.body)))
-        : history;
-      const promptHistory = historyInput(recent, request.messageId).slice(-config.maxHistoryMessages);
+      let financingVehicle = null;
+      const transcript = await loadConversationContext(this.conversationService, request, occurredAt);
+      const promptHistory = transcript.input;
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
       const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
         items: websiteCatalog.items.map(({ imageUrl, imageUrls, ...item }) => item),
-        ...(financingVehicle ? { financingVehicle: { id: financingVehicle.id, name: financingVehicle.name } } : {}),
       } } : safeContext;
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(modelContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
       const selectionFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
-      const recheckInstructions = intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS;
+      const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
+        + (websiteCatalog ? "\nReavalie o aceite contextual de simulação: se a última pergunta oferecia lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting." : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
@@ -172,7 +150,7 @@ export class MultiTenantAiService {
       const inputMessages = [
         { role: "developer", content: contextContent },
         ...promptHistory,
-        { role: "user", content: request.message },
+        ...transcript.current,
       ];
       pricing = normalizePricing(await this.pricingCatalog.get({
         provider: config.provider,
@@ -251,7 +229,7 @@ export class MultiTenantAiService {
           let intake;
           try {
             intake = parseLeadIntake(structured.leadQualification, { configVersion: config.version,
-              evidence: [request.message, ...historyInput(history, request.messageId).filter((item) => item.role === "user").map((item) => item.content)],
+              evidence: [request.message, ...transcript.evidence],
               adReferral: safeContext.adContext?.referral });
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_INTAKE" || !/^(NAME|CITY|MODEL)(?:_EVIDENCE)?$/u.test(error.validationReason)) throw error;
@@ -287,11 +265,27 @@ export class MultiTenantAiService {
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           const websitePresentation = websiteCatalog && ["browse", "more", "products", "choose"].includes(structured.catalogAction);
-          const websiteFlow = websiteCatalog && (websiteCatalog.interaction || websiteDetails || websitePresentation);
-          const mayQualify = !websiteFlow || Boolean(financingVehicle && !websitePresentation);
+          financingVehicle = websiteCatalog && !websiteDetails && structured.catalogAction === "finance" && structured.productIds?.length === 1
+            ? websiteCatalog.items.find((item) => item.id === structured.productIds[0] && item.active !== false && item.availability !== "unavailable") : null;
+          if (financingVehicle && !hasWebsiteFinancingConsent(websiteCatalog, request.message, financingVehicle.id, promptHistory)) financingVehicle = null;
+          let mayQualify = !websiteCatalog || Boolean(financingVehicle);
+          const prematureCollection = websiteCatalog && !financingVehicle && !websitePresentation
+            && (/\b(?:informe|envie|manda?|passe|diga|preciso|me fale|qual(?: é)?)\b[^.!?\n]{0,100}\b(?:cpf|nascimento)\b/iu.test(structured.text)
+              || /\b(?:cpf|nascimento)\b[^.!?\n]{0,80}(?:por favor|\?)/iu.test(structured.text));
+          if (prematureCollection || websiteCatalog && structured.catalogAction === "finance" && !financingVehicle) {
+            if (attempt === 0) {
+              ({ response, text } = await requestResponse(true));
+              continue;
+            }
+            structured.catalogAction = "none";
+            structured.productIds = [];
+            structured.text = "Você prefere conhecer as opções disponíveis ou tirar uma dúvida sobre algum modelo?";
+            financingVehicle = null;
+            mayQualify = false;
+          }
           try {
             leadQualification = mayQualify ? parseQualification(structured.leadQualification, { configVersion: config.version,
-              evidence: [request.message, ...promptHistory.filter((item) => item.role === "user").map((item) => item.content)] }) : null;
+              evidence: [request.message, ...transcript.evidence] }) : null;
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
             qualificationIssue = error.validationReason;

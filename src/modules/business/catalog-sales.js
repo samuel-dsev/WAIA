@@ -1,5 +1,5 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
-import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleryReply } from "./website-catalog-interaction.js";
+import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply } from "./website-catalog-interaction.js";
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -31,7 +31,7 @@ export function catalogSalesFormat(catalog) {
     || catalog.source.status !== "healthy" || !products.length) return null;
   const categories = [...new Set(products.map((item) => item.category).filter(Boolean))];
   const actions = catalog.source.type === "website_catalog"
-    ? [...ACTIONS.filter((action) => action !== "interest"), "choose"]
+    ? [...ACTIONS.filter((action) => action !== "interest"), "choose", "finance", "finance_decline"]
     : ACTIONS.filter((action) => action !== "interest" || catalog.interestHandoff?.enabled === true);
   return {
     type: "json_schema", name: "catalog_sales_reply", strict: true,
@@ -74,10 +74,13 @@ export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
 export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Apresente o estoque aqui na conversa. Não escreva endereço do site, link ou instrução para abrir o estoque fora do WhatsApp. Se faltar ficha ou foto, ofereça conferência com a equipe.
 - Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, modelo, descrição e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
-- Use products com um único ID quando o cliente pedir detalhes, ficha ou fotos de um veículo específico, mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque e oferece a simulação em texto separado. Se houver várias unidades possíveis, use productIds vazio e esclareça qual. Uma pergunta só de preço ou disponibilidade usa details em texto.
+- Use products com os IDs exatos quando o cliente pedir detalhes, ficha ou fotos de um ou mais veículos específicos (até três por turno), mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque. Dois modelos diferentes pedidos juntos não são versões ambíguas: envie ambos. Para um veículo, oferece a simulação em texto separado. Só esclareça quando realmente houver várias unidades possíveis para o mesmo nome, usando productIds vazio. Uma pergunta só de preço ou disponibilidade usa details em texto.
 - Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
-- Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. O contexto catalog.financingVehicle aparece somente quando o sistema tem esse aceite. Nesse caso, use none, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. Entrada de anúncio sem interação de catálogo segue o roteiro atual.
+- Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. Nesse caso, use finance, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. A entrada por anúncio não comprova aceite de simulação.
 - Ao confirmar que a loja trabalha com financiamento, comece com “Sim, nós trabalhamos com financiamento”.
+- Use finance com um único ID APENAS para aceite contextual ou pedido explícito de simulação daquele veículo, ou para retomar uma simulação já aceita em catalog.financingSession. Uma resposta curta só aceita simulação se responder à última pergunta enviada sobre simulação. Se a última pergunta ofereceu opções semelhantes, "Entendi" seguido de "Pode sim" usa browse e envia apenas a lista. Ofertas antigas não autorizam coleta de dados. Não peça CPF, nascimento ou dados para simulação sem esse aceite.
+- Em finance, text contém a continuação natural conforme os critérios publicados; mantenha collecting enquanto houver dados faltando ou outro pedido pendente. Para fotos, comparação ou dúvidas durante a coleta, use a ação desse pedido e collecting, preservando a simulação pendente; nunca conclua só porque o cliente informou o nome. Use none para respostas comuns; não use finance para dúvidas sobre se a loja aceita financiamento.
+- Use finance_decline com um único ID quando o cliente recusar ou cancelar a simulação desse veículo. Responda naturalmente em text e mantenha collecting. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação.
 - Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.`;
 
 export function asksForVehiclePhoto(message) {
@@ -137,7 +140,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   const products = availableCatalogProducts(catalog), byId = new Map(products.map((item) => [item.id, item]));
   const website = catalog.source?.type === "website_catalog";
   if (!plain(value) || Object.keys(value).length !== 4
-    || typeof value.text !== "string" || value.text.length > 4096 || !(ACTIONS.includes(value.catalogAction) || website && value.catalogAction === "choose")
+    || typeof value.text !== "string" || value.text.length > 4096 || !(ACTIONS.includes(value.catalogAction) || website && ["choose", "finance", "finance_decline"].includes(value.catalogAction))
     || !Array.isArray(value.productIds) || value.productIds.length > 3 || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => !byId.has(id))) throw invalid();
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
@@ -153,10 +156,18 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     && /\b(?:suvs?|hatchs?|sed[aã]s?|sedoes|picapes?|minivans?|crossovers?|peruas?)\b/u.test(normalize(message))) {
     return { text: "Não consegui confirmar essa categoria no estoque publicado. Posso verificar com a equipe?" };
   }
-  if (website && (action === "products" || ["none", "details", "choose"].includes(action) && asksForWebsiteVehicleDetails(message))) {
-    if (value.productIds.length === 1) return websiteGalleryReply(byId.get(value.productIds[0]));
-    if (value.productIds.length > 1) return { text: "Qual dessas versões você gostaria de ver?" };
+  if (website && (action === "products" || action === "choose" && value.productIds.length > 1
+    || ["none", "details", "choose"].includes(action) && asksForWebsiteVehicleDetails(message))) {
+    if (value.productIds.length) return websiteGalleriesReply(value.productIds.map((id) => byId.get(id)));
     return { text: /\b(?:qual versao|qual veiculo|qual modelo)\b/u.test(normalize(text)) ? text : websiteStockUnconfirmed };
+  }
+  if (website && action === "finance") {
+    if (value.productIds.length !== 1 || !text) throw invalid();
+    return { text };
+  }
+  if (website && action === "finance_decline") {
+    if (value.productIds.length !== 1 || !text) throw invalid();
+    return { text, websiteInteraction: { step: "declined", productIds: value.productIds } };
   }
   if (website && action === "choose") return chooseWebsiteVehicle(catalog, value.productIds.length === 1 ? byId.get(value.productIds[0]) : null, message);
   if (website && action === "details" && !value.productIds.length) return { text: websiteStockUnconfirmed };

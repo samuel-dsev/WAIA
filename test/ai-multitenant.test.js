@@ -191,14 +191,19 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
   productIds = [];
   const unrelatedYes = await turn("Sim", { ...offer.websiteInteraction, direct: false });
   assert.equal(unrelatedYes.leadQualification, undefined);
+  action = "finance"; productIds = [selected.id];
   const accepted = await turn("Sim", offer.websiteInteraction);
   assert.equal(accepted.websiteInteraction.step, "closed");
   assert.match(accepted.leadQualification.summary, /Tracker 2\.0/u);
   assert.doesNotMatch(accepted.leadQualification.summary, /Modelo do anúncio/u);
+  const acceptedBurst = await turn("Entendi\nPode sim", offer.websiteInteraction);
+  assert.equal(acceptedBurst.websiteInteraction.step, "closed");
   const withoutPhotos = await turn("Não, quero simular", choice.websiteInteraction);
   assert.equal(withoutPhotos.websiteInteraction.step, "closed");
   assert.match(withoutPhotos.leadQualification.summary, /Tracker 2\.0/u);
+  productIds = [other.id];
   const originalAd = await turn("Quero simular o carro do anúncio");
+  productIds = [selected.id];
   assert.match(originalAd.leadQualification.summary, /Modelo do anúncio/u);
   history["tenant-a"] = [];
   const withoutName = await turn("Sim", offer.websiteInteraction);
@@ -226,6 +231,92 @@ test("cada resposta recebe o roteiro inteiro e a configuração atual, acima do 
   await ai.service.reply(request("tenant-a", { messageId: "terceira" }));
   assert.match(ai.clientFactory.requests.at(-1).request.instructions, /NOVO ROTEIRO\nPeça somente o nome\./u);
   assert.doesNotMatch(ai.clientFactory.requests.at(-1).request.instructions, /FIM DO ROTEIRO/u);
+});
+
+test("Entendi e Pode sim são interpretados no contexto da última oferta; coleta prematura é reavaliada antes de enviar", async () => {
+  const filters = { category: null, minPrice: null, maxPrice: null };
+  const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true,
+    items: [{ id: "turim:1", name: "Onix Joy", price: 55900 }, { id: "turim:2", name: "HB20 Sense", price: 59900 }] };
+  let calls = 0;
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Aceite de simulação e nome." })], histories: { "tenant-a": [
+    { type: "text", direction: "outbound", status: "sent", body: "Gostaria de fazer uma simulação?" },
+    { type: "text", direction: "outbound", status: "sent", body: "O modelo está indisponível. Posso mostrar opções semelhantes?" },
+  ] }, responder: async (call) => {
+    assert.match(call.instructions, /última pergunta efetivamente enviada/u);
+    assert.deepEqual(call.input.slice(-2).map((item) => item.content), ["Entendi", "Pode sim"]);
+    calls++;
+    return { output_text: JSON.stringify({ text: calls === 1 ? "Informe CPF e data de nascimento." : "",
+      catalogAction: calls === 1 ? "finance" : "browse", productIds: calls === 1 ? ["turim:1"] : [], filters,
+      leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }), usage: {} };
+  } });
+  const result = await ai.service.reply(request("tenant-a", { messageId: "pode", turnMessages: [
+    { id: "entendi", text: "Entendi" }, { id: "pode", text: "Pode sim" },
+  ], context: { catalog } }));
+  assert.equal(calls, 2);
+  assert.equal(result.leadQualification, undefined);
+  assert.equal(result.messages.length, 1);
+  assert.match(result.messages[0].text, /Onix Joy/u);
+  assert.match(result.messages[0].text, /HB20 Sense/u);
+  assert.doesNotMatch(result.messages[0].text, /CPF|nascimento|simulação/u);
+});
+
+test("fotos de dois modelos interrompem coleta; nome no mesmo turno não encerra e Esses preserva a referência", async () => {
+  const items = ["Onix Joy", "HB20 Sense"].map((name, index) => ({ id: `turim:${index + 1}`, name,
+    imageUrl: `https://turimautos.com/storage/veiculos/vehicle-${index}.jpg` }));
+  const filters = { category: null, minPrice: null, maxPrice: null };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e aceite de simulação" })], histories: { "tenant-a": [
+    { id: "pedido", type: "text", direction: "inbound", body: "Tem fotos do Onix Joy? HB20 Sense" },
+    { id: "name", type: "text", direction: "inbound", body: "Nome Exemplo" },
+  ] }, responder: async (call) => {
+    assert.ok(call.input.some((item) => item.content.includes("Tem fotos do Onix Joy? HB20 Sense")));
+    assert.match(call.instructions, /Dois modelos diferentes pedidos juntos não são versões ambíguas/u);
+    return { output_text: JSON.stringify({ text: "Quais dessas versões você gostaria de ver?", catalogAction: call.input.at(-1).content.startsWith("Esses") ? "choose" : "products",
+      productIds: items.map((item) => item.id), filters,
+      leadQualification: { status: "qualified", name: "Nome Exemplo", summary: "Cliente quer simular", qualification: "Dados completos" } }), usage: {} };
+  } });
+  for (const message of ["Tem fotos do Onix Joy?\nHB20 Sense\nNome Exemplo", "Esses", "Esses aqui", "Tem fotos do Onix Joy? HB20 Sense"]) {
+    const reply = await ai.service.reply(request("tenant-a", { message, context: { catalog: {
+      source: { type: "website_catalog", status: "healthy" }, salesMode: true, items,
+      interaction: { step: "finance_accepted", productIds: [items[0].id], direct: false },
+      financingSession: { productId: items[0].id, status: "pending" },
+    } } }));
+    assert.equal(reply.leadQualification, undefined);
+    assert.deepEqual(reply.messages.filter((item) => item.imageUrl).map((item) => item.catalogProductId), items.map((item) => item.id));
+    assert.doesNotMatch(reply.messages.at(-1).text, /Quais dessas versões|simulação/u);
+    assert.deepEqual(reply.messages.at(-1).websiteInteraction.productIds, items.map((item) => item.id));
+  }
+});
+
+test("cancelar simulação registra recusa sem qualificar nem perder o atendimento", async () => {
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e aceite de simulação" })], responder: async () => ({ output_text: JSON.stringify({
+    text: "Tudo bem. Qual outra informação você gostaria de saber sobre o Onix?", catalogAction: "finance_decline",
+    productIds: ["turim:1"], filters: { category: null, minPrice: null, maxPrice: null },
+    leadQualification: { status: "collecting", name: null, summary: null, qualification: null },
+  }), usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { message: "Não quero mais fazer a simulação", context: { catalog: {
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "Onix" }],
+    financingSession: { productId: "turim:1", status: "pending" },
+  } } }));
+  assert.deepEqual(reply.websiteInteraction, { step: "declined", productIds: ["turim:1"] });
+  assert.equal(reply.leadQualification, undefined);
+  assert.match(reply.text, /Qual outra informação/u);
+});
+
+test("explicar a coleta de dados não é confundido com solicitar CPF sem aceite", async () => {
+  const text = "A equipe pode esclarecer por que o CPF é pedido; você ainda não autorizou a simulação.";
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e aceite de simulação" })], responder: async () => ({ output_text: JSON.stringify({
+    text, catalogAction: "none", productIds: [], filters: { category: null, minPrice: null, maxPrice: null },
+    leadQualification: { status: "collecting", name: null, summary: null, qualification: null },
+  }), usage: {} }) });
+  const reply = await ai.service.reply(request("tenant-a", { message: "Por que precisam dos meus dados?", context: { catalog: {
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "Onix" }],
+  } } }));
+  assert.equal(reply.text, text);
+  assert.equal(ai.clientFactory.requests.length, 1);
 });
 
 test("prompt, contexto e histórico permanecem isolados por empresa", async () => {

@@ -846,9 +846,9 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       card.append(element("p", "wizard-empty", "Habilite IA para texto livre na etapa Módulos.")); root.append(card); return;
     }
     const ai = state.configuration.ai;
+    card.append(element("p", "wizard-empty", "A IA reúne as mensagens de texto e responde após 15 segundos sem novas mensagens, considerando o histórico completo disponível da conversa."));
     const schema = [
       { name: "enabled", path: "ai.enabled", label: "IA habilitada", type: "checkbox", value: ai.enabled },
-      { name: "responseDelayEnabled", path: "ai.responseDelayEnabled", label: "Aguardar 30–45 segundos antes de enviar a resposta da IA", type: "checkbox", value: ai.responseDelayEnabled !== false },
       { name: "catalogSalesEnabled", path: "ai.catalogSalesEnabled", label: "Apresentar catálogo em páginas de três produtos, com abertura e pergunta final", type: "checkbox", value: ai.catalogSalesEnabled === true },
       { name: "leadQualificationEnabled", path: "ai.leadQualificationEnabled", label: "Qualificar leads e encaminhar para análise humana com notificação ao grupo configurado", type: "checkbox", value: ai.leadQualificationEnabled === true },
       { name: "leadIntakeOnlyEnabled", path: "ai.leadIntakeOnlyEnabled", label: "Triagem comercial simples: nome, cidade e modelo; pós-venda segue ao atendente sem notificar o grupo (exige qualificação habilitada)", type: "checkbox", value: ai.leadIntakeOnlyEnabled === true },

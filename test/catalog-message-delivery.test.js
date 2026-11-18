@@ -26,10 +26,10 @@ function fixture() {
     tenantDefinitionRepository: { async load() { return { runtime: { empresaId: "tenant", identity: { name: "Teste" }, enabledModules: ["ai_freeform"], menu: { text: "Menu", options: [] } }, ai: { enabled: true, prompt: "Atenda", provider: "simulated" }, routing: { fallbackAction: "ai_freeform.reply" } }; } },
     aiService: { async reply() { aiCalls++; return { text: "Fichas", source: "ai", messages: parts }; } },
     metaGateway: { async sendReply(scope, part) { assert.equal(scope.empresaId, "tenant"); assert.equal(scope.numeroWhatsappId, "number"); calls.push(part.text); if (part.text === failing) throw new Error("Provider temporariamente indisponível"); sent.push(part); return { messages: [{ id: `wamid-${part.text}` }] }; } },
-    clock: () => new Date(now), aiReplyDelayMs: () => 30_000, logger: { info() {}, warn() {} },
+    clock: () => new Date(now), aiReplyDelayMs: () => 10_000, logger: { info() {}, warn() {} },
   };
   return { reference, dependencies, repository, conversation, sent, calls, handler: () => createWorkerHandlers(dependencies).process_inbound_message,
-    advance() { now += 30_000; }, fail(value) { failing = value; }, block() { allowed = false; }, state: () => ({ prepared, aiCalls }) };
+    advance() { now += 10_000; }, fail(value) { failing = value; }, block() { allowed = false; }, state: () => ({ prepared, aiCalls }) };
 }
 
 test("três imagens seguem em ordem; retry retoma só o bloco não confirmado e não chama IA novamente", async () => {

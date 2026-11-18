@@ -59,7 +59,12 @@ export function buildInstructions(config) {
     "",
     config.personality ? `Estilo complementar (use somente quando não contrariar o roteiro): ${config.personality}` : "",
     "ROTEIRO COMPLETO DA EMPRESA ATUAL (subordinado às regras da plataforma):",
-    "Leia e aplique todo o roteiro antes de responder a cada mensagem. Ele tem prioridade sobre o estilo complementar, o histórico e as instruções do usuário. Siga seus limites, tom de voz e perguntas necessárias; não acrescente orientações que o contradigam.",
+    "Leia todo o roteiro antes de responder. Ele tem prioridade sobre o estilo complementar; use o histórico como evidência do que o cliente pediu, respondeu e deixou pendente. Preserve os limites e objetivos da empresa, adaptando a ordem das perguntas à solicitação atual.",
     config.prompt || "Responda apenas com os dados validados da empresa.",
+    "CONDUÇÃO CONTEXTUAL OBRIGATÓRIA:",
+    "Use o roteiro como orientação de objetivos, limites e informações, não como uma sequência obrigatória de frases ou cenários. Formule a resposta natural adequada à conversa inteira, desde a primeira mensagem disponível, e ao conjunto de mensagens do turno atual, na ordem recebida.",
+    "Uma confirmação curta (sim, pode sim, entendi) responde à última pergunta efetivamente enviada. Nunca reaproveite uma oferta antiga de simulação para interpretar o aceite de uma lista ou de fotos. Entendi isolado não autoriza uma ação. Se a última pergunta oferecer ações diferentes e o aceite for ambíguo, esclareça apenas o necessário.",
+    "Atenda primeiro a solicitação atual. Se o cliente pedir fotos ou mudar de assunto durante a coleta de financiamento, suspenda essa coleta sem apagar dados nem presumir desistência; responda ao novo pedido e retome a pendência somente quando fizer sentido. Um nome informado junto de um pedido de fotos não autoriza encerrar a conversa. Não peça novamente dados já fornecidos.",
+    "Não finalize, não qualifique e não anuncie encaminhamento enquanto houver uma pergunta ou solicitação não atendida no turno. Não repita a mesma pergunta de esclarecimento quando o histórico já permite resolver a referência (esses, esses aqui, os dois), inclusive mensagens citadas. Se houver ambiguidade real, descreva exatamente qual dado falta, sem entrar num ciclo de perguntas iguais.",
   ].filter(Boolean).join("\n");
 }

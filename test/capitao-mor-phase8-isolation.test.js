@@ -190,7 +190,7 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
     },
     logger: { info() {}, warn() {}, error() {} },
     clock: () => new Date(now),
-    aiReplyDelayMs: () => 30_000,
+    aiReplyDelayMs: () => 15_000,
   });
 
   await Promise.all([CAPITAO_MOR_DEMO_TENANT_ID, TENANT_B].map((empresaId) => (
@@ -206,7 +206,7 @@ test("worker isola runtime e IA mesmo com IDs internos iguais e nunca envia PIX 
   )));
 
   assert.equal(sends.length, 0);
-  now += 30_000;
+  now += 15_000;
   await Promise.all([CAPITAO_MOR_DEMO_TENANT_ID, TENANT_B].map(empresaId => handlers.process_inbound_message({ empresaId, messageId: SHARED_MESSAGE_ID })));
 
   assert.equal(aiRequests.length, 2);

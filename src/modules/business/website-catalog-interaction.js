@@ -10,7 +10,8 @@ const normalize = (text) => String(text || "").normalize("NFD").replace(/\p{M}/g
 export function normalizeWebsiteInteraction(value) {
   if (!value || !STEPS.includes(value.step) || !Array.isArray(value.productIds)
     || value.productIds.length < 1 || value.productIds.length > 100
-    || (value.step !== "list" && value.productIds.length !== 1)
+    || (value.step !== "list" && value.step !== "gallery" && value.productIds.length !== 1)
+    || (value.step === "gallery" && value.productIds.length > 3)
     || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => typeof id !== "string" || !/^turim:[1-9]\d*$/u.test(id))) return null;
   return { step: value.step, productIds: [...value.productIds] };
@@ -69,12 +70,38 @@ export function websiteGalleryReply(item) {
   return { text: messages[0].text, messages };
 }
 
+export function websiteGalleriesReply(items) {
+  if (items.length === 1) return websiteGalleryReply(items[0]);
+  const messages = items.flatMap((item) => photoUrls(item).length
+    ? photoUrls(item).map((_, index) => websiteGalleryPart(item, index))
+    : [{ text: `${productMessage(item).text}\n\nA ficha está sem fotos no momento.`, buttons: [] }]);
+  messages.push({ text: `Quer saber mais sobre ${items.map((item) => item.name).join(" ou ")}?`, buttons: [],
+    websiteInteraction: { step: "gallery", productIds: items.map((item) => item.id) } });
+  return { text: messages[0].text, messages };
+}
+
 function affirmative(message) {
   return /^(?:sim(?:[, ]+(?:por favor|quero|gostei|curti))?|quero|pode|pode (?:mandar|enviar|mostrar|simular)|claro|com certeza|isso mesmo|gostei|curti|tenho interesse)[.!? ]*$/u.test(normalize(message));
 }
 
 function negative(message) {
   return /^(?:nao\b|desisti\b|deixa pra la\b|agora nao\b)/u.test(normalize(message));
+}
+
+export function hasWebsiteFinancingConsent(catalog, message, productId, history) {
+  const answer = normalize(message);
+  if (/\b(?:nao quero|nao (?:vou|preciso)|cancel[ae]|desisti)\b/u.test(answer)) return false;
+  if (catalog.financingSession?.productId === productId
+    || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds[0] === productId) return true;
+  if (/\b(?:quero|gostaria|vamos|preciso|aceito|pode(?: me)?|poderia)\b.{0,60}\b(?:simular|simulacao|financiar|financiamento)\b/u.test(answer)) return true;
+  const last = history.findLast((item) => item.role === "assistant")?.content || "";
+  const offer = catalog.interaction?.step === "finance_offer" && catalog.interaction.direct
+    && catalog.interaction.productIds[0] === productId;
+  // A short acceptance needs a current financing question, never an older offer.
+  const currentQuestion = /\b(?:gostaria|quer|deseja|posso|podemos|vamos)\b[^?]*\b(?:simula[cç][aã]o|simular)\b[^?]*\?\s*$/iu.test(last);
+  const replies = String(message).split("\n").map(normalize).filter((part) => !/^(?:entendi|certo|ta|tudo bem)[.! ]*$/u.test(part));
+  return (offer || currentQuestion) && replies.length > 0
+    && replies.every((part) => /^(?:sim|pode(?: sim| fazer| mandar)?|claro|quero|ok|vamos|com certeza|por favor)[,.! ]*(?:por favor[.! ]*)?$/u.test(part));
 }
 
 function financingOffer(item) {

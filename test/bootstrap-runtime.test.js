@@ -278,7 +278,7 @@ test("worker envia somente a base pública à IA e acrescenta pergunta de contin
       },
     },
     clock: () => new Date(now),
-    aiReplyDelayMs: () => 30_000,
+    aiReplyDelayMs: () => 15_000,
   });
 
   assert.ok((await handlers.process_inbound_message({ empresaId: "tenant-a", messageId: "message-ai" })).deferUntil);

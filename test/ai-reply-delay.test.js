@@ -4,7 +4,7 @@ import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 import { compileTenantRuntimeConfigV2, materializeLegacyTenantDefinition } from "../src/modules/configuration/index.js";
 import { createJobProcessor, MemoryJobRepository, MemoryLockManager } from "../src/modules/jobs/index.js";
 
-function fixture({ delayMs = 30_000, source = "ai", responseDelayEnabled } = {}) {
+function fixture({ delayMs = 10_000, source = "ai", responseDelayEnabled } = {}) {
   let now = Date.parse("2026-10-11T12:00:00Z");
   let prepared = null, aiCalls = 0, draws = 0, allowed = true, failSend = false;
   const conversation = { mode: "bot" };
@@ -43,8 +43,94 @@ function fixture({ delayMs = 30_000, source = "ai", responseDelayEnabled } = {})
   };
 }
 
-test("IA termina, salva a resposta e aguarda 30 ou 45 segundos sem enviar antes", async () => {
-  for (const delayMs of [30_000, 45_000]) {
+function burstFixture() {
+  const f = fixture({ responseDelayEnabled: false });
+  const messages = [{ ...f.message, sequence: 1, at: f.now() }];
+  let covered = 0;
+  f.dependencies.repository.inboundMessage = async ({ messageId }) => messages.find((item) => item.id === messageId);
+  f.dependencies.repository.inboundTurn = async () => {
+    const pending = messages.filter((item) => item.sequence > covered);
+    if (!pending.length) return null;
+    return { messageId: pending.at(-1).id, sequence: pending.at(-1).sequence,
+      readyAt: new Date(pending.at(-1).at + 15_000).toISOString(),
+      messages: pending.map(({ id, text }) => ({ id, text })) };
+  };
+  const prepare = f.dependencies.repository.prepareReply;
+  f.dependencies.repository.prepareReply = async (input) => {
+    const result = await prepare(input);
+    f.state().prepared.inboundTurnSequence = input.reply.inboundTurnSequence;
+    return { ...result, inboundTurnSequence: input.reply.inboundTurnSequence };
+  };
+  const sent = f.dependencies.repository.markReplySent;
+  f.dependencies.repository.markReplySent = async (input) => { await sent(input); covered = f.state().prepared.inboundTurnSequence; };
+  const allowed = f.dependencies.repository.canSendBotReply;
+  f.dependencies.repository.canSendBotReply = async () => await allowed()
+    && messages.at(-1).sequence <= f.state().prepared.inboundTurnSequence;
+  f.add = (text) => {
+    const id = `inbound-${messages.length + 1}`;
+    messages.push({ ...f.message, id, text, sequence: messages.length + 1, at: f.now() });
+    return { ...f.reference, messageId: id, jobId: `job-${id}` };
+  };
+  return f;
+}
+
+test("turno espera 15 segundos desde a última mensagem e gera uma resposta com todas na ordem", async () => {
+  const f = burstFixture();
+  const calls = [];
+  f.dependencies.aiService.reply = async (input) => { calls.push(input); return { text: "Lista solicitada", source: "ai" }; };
+  const first = await f.handler()(f.reference);
+  assert.equal(Date.parse(first.deferUntil), f.now() + 15_000);
+  assert.equal(calls.length, 0);
+  f.advance(10_000);
+  f.add("Entendi"); const last = f.add("Pode sim");
+  assert.equal(Date.parse((await f.handler()(f.reference)).deferUntil), f.now() + 15_000);
+  f.advance(14_999);
+  assert.ok((await f.handler()(f.reference)).deferUntil);
+  assert.equal(f.sent.length, 0);
+  f.advance(1);
+  assert.equal((await f.handler()(f.reference)).replied, true);
+  assert.deepEqual(calls[0].turnMessages.map((part) => part.text), [f.message.text, "Entendi", "Pode sim"]);
+  assert.equal(calls[0].messageId, last.messageId);
+  assert.equal(f.sent.length, 1);
+  // Every following job shares the already answered watermark.
+  assert.equal((await f.handler()(last)).resumed, true);
+  assert.equal(f.sent.length, 1);
+});
+
+test("mensagem recebida durante inferência descarta o resultado e reprocessa o turno inteiro", async () => {
+  const f = burstFixture(), calls = [];
+  f.advance(15_000);
+  f.dependencies.aiService.reply = async (input) => {
+    calls.push(input);
+    if (calls.length === 1) f.add("Tem fotos dos dois modelos?");
+    return { text: "Resposta atualizada", source: "ai" };
+  };
+  assert.ok((await f.handler()(f.reference)).deferUntil);
+  assert.equal(f.state().prepared, null);
+  assert.equal(f.sent.length, 0);
+  f.advance(15_000);
+  assert.equal((await f.handler()(f.reference)).replied, true);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].turnMessages.map((part) => part.text), [f.message.text, "Tem fotos dos dois modelos?"]);
+  assert.equal(f.sent.length, 1);
+});
+
+test("agrupamento libera o lock e o slot sem consumir tentativas, inclusive com espera legada desabilitada", async () => {
+  const f = burstFixture();
+  const jobs = new MemoryJobRepository({ now: f.now }); jobs.seed(f.reference);
+  const locks = new MemoryLockManager({ now: f.now });
+  const processor = createJobProcessor({ repository: jobs, lockManager: locks,
+    handlers: { process_inbound_message: f.handler() }, logger: { warn() {} } });
+  assert.equal((await processor.process(f.reference, { maxAttempts: 1 })).outcome, "deferred");
+  assert.equal(locks.locks.size, 0);
+  assert.equal(f.state().aiCalls, 0);
+  f.advance(15_000);
+  assert.equal((await processor.process(f.reference, { maxAttempts: 1 })).outcome, "completed");
+  assert.equal(jobs.failed.size, 0);
+});
+
+test("IA termina, salva a resposta e aguarda 10 ou 15 segundos sem enviar antes", async () => {
+  for (const delayMs of [10_000, 15_000]) {
     const f = fixture({ delayMs });
     const start = f.now();
     const first = await f.handler()(f.reference);
@@ -98,7 +184,7 @@ test("trocar configuração não altera o prazo de uma resposta já persistida",
 test("reinício e retry de envio reutilizam o prazo e a resposta sem chamar IA novamente", async () => {
   const f = fixture();
   await f.handler()(f.reference);
-  f.advance(30_000);
+  f.advance(10_000);
   f.failSend(true);
   await assert.rejects(f.handler()(f.reference), /Envio temporariamente/u);
   f.failSend(false);
@@ -111,7 +197,7 @@ test("pausa, atendimento humano e bloqueio cancelam resposta pendente", async ()
   for (const mode of ["paused", "human", "blocked"]) {
     const f = fixture();
     await f.handler()(f.reference);
-    f.advance(30_000);
+    f.advance(10_000);
     if (mode === "blocked") f.block(); else f.conversation.mode = mode;
     assert.equal((await f.handler()(f.reference)).skipped, true);
     assert.equal(f.sent.length, 0);
@@ -148,7 +234,7 @@ test("worker libera lock e slot durante a espera, preservando ordem sem consumir
   assert.equal(active, 0); assert.equal(locks.locks.size, 0);
   for (let i = 0; i < 8; i++) assert.equal((await processor.process(next, { attempt: 1, maxAttempts: 1 })).outcome, "deferred");
   assert.equal(calls, 1); assert.equal(repository.failed.size, 0);
-  f.advance(30_000);
+  f.advance(10_000);
   assert.equal((await processor.process(f.reference)).outcome, "completed");
   assert.equal(f.sent.length, 1);
 });
@@ -157,13 +243,13 @@ test("contato excluído durante a espera encerra o job sem enviar", async () => 
   const f = fixture(); const repository = new MemoryJobRepository({ now: f.now }); repository.seed(f.reference);
   const processor = createJobProcessor({ repository, handlers: { process_inbound_message: f.handler() }, logger: { warn() {} } });
   assert.equal((await processor.process(f.reference)).outcome, "deferred");
-  await repository.complete(f.reference); f.advance(30_000);
+  await repository.complete(f.reference); f.advance(10_000);
   assert.equal((await processor.process(f.reference)).outcome, "duplicate");
   assert.equal(f.sent.length, 0);
 });
 
 test("lease perdido antes do envio bloqueia resposta e prazo inválido falha fechado", async () => {
-  const f = fixture(); await f.handler()(f.reference); f.advance(30_000);
+  const f = fixture(); await f.handler()(f.reference); f.advance(10_000);
   await assert.rejects(f.handler()(f.reference, null, { canContinue: () => false }), (error) => error.code === "PROCESSING_LEASE_LOST");
   assert.equal(f.sent.length, 0);
   f.state().prepared.sendNotBefore = "data inválida";

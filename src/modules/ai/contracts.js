@@ -38,12 +38,17 @@ function integer(value, field, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) 
 
 export function requireAiRequest(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("Requisição de IA inválida.");
+  const turnMessages = input.turnMessages == null ? null : input.turnMessages.map((part) => ({
+    id: requiredText(part.id, "turnMessages.id", 200), text: requiredText(part.text, "turnMessages.text", 8_000),
+  }));
+  if (turnMessages && (!turnMessages.length || new Set(turnMessages.map((part) => part.id)).size !== turnMessages.length)) throw new TypeError("Turno inválido.");
   return Object.freeze({
     empresaId: requiredText(input.empresaId, "empresaId", 200),
     conversationId: requiredText(input.conversationId, "conversationId", 200),
     messageId: input.messageId == null ? null : requiredText(input.messageId, "messageId", 200),
     correlationId: requiredText(input.correlationId, "correlationId", 200),
-    message: requiredText(input.message, "message", 8_000),
+    message: turnMessages ? turnMessages.map((part) => part.text).join("\n") : requiredText(input.message, "message", 8_000),
+    ...(turnMessages ? { turnMessages } : {}),
     context: input.context && typeof input.context === "object" && !Array.isArray(input.context)
       ? input.context
       : {},
