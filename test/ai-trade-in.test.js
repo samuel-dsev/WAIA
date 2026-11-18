@@ -103,3 +103,14 @@ test("encerramento de avaliação não duplica promessa nem repete CPF no texto 
   assert.match(reply.text, /^A loja fica em Taubaté/u);
   assert.equal(reply.usage.totalTokens, 40);
 });
+
+test("encerramento natural válido da IA é aproveitado sem exigir texto vazio nem duplicar modelo", async () => {
+  const text = "Obrigada, Ana! Um de nossos vendedores entrará em contato por aqui para combinar a avaliação do seu HB20.";
+  const { ai, factory } = setup(async () => output(text, state("visit_requested"), card),
+    [{ type: "text", direction: "inbound", body: "Sou Ana, quero avaliação presencial do meu HB20" }]);
+  const reply = await ai.reply(request("Pode continuar a avaliação", state("visit_requested")));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.text, text);
+  assert.equal(factory.requests.length, 1);
+  assert.equal(reply.tradeInEvaluation.step, "completed");
+});

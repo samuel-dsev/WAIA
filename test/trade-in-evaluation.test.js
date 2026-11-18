@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeTradeInEvaluation, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking } from "../src/modules/business/trade-in-evaluation.js";
+import { normalizeTradeInEvaluation, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery } from "../src/modules/business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../src/modules/ai/inbound-content.js";
 import { loadConversationContext } from "../src/modules/ai/conversation-context.js";
 import { requireAiRequest } from "../src/modules/ai/contracts.js";
@@ -49,6 +49,11 @@ test("ficha distingue interesse declarado, anúncio e carro de troca sem elimina
   const closing = evaluationClosing("Ficamos em Taubaté.", undefined, "Ana");
   assert.match(closing, /^Ficamos em Taubaté\.\n\nObrigada, Ana!/u);
   assert.doesNotMatch(closing, /agendado|grupo/u);
+  const natural = "Obrigada, Ana! Um vendedor entrará em contato por aqui para combinar a avaliação.";
+  assert.equal(evaluationClosing(natural, undefined, "Ana"), natural);
+  assert.equal(evaluationClosing(natural.replace("Ana", "{nome}"), undefined, "Ana"), natural);
+  assert.equal(announcesEvaluationDelivery("Encaminhei a ficha para o vendedor."), true);
+  assert.equal(announcesEvaluationDelivery("Um vendedor entrará em contato por aqui."), false);
   assert.equal(announcesEvaluationBooking("Agendei a avaliação para amanhã."), true);
   assert.equal(announcesEvaluationBooking("Seu horário está confirmado."), true);
   assert.equal(announcesEvaluationBooking("O horário ainda não está confirmado."), false);

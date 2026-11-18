@@ -37,7 +37,7 @@ export const TRADE_IN_EVALUATION_INSTRUCTIONS = [
   "As mensagens de imagem fornecem somente metadados de recebimento e legenda escrita pelo cliente. Não há análise visual: não identifique marca, modelo, placa, estado, danos ou valor pela imagem. Se o arquivo estiver indisponível, explique o problema e permita alternativa. Não chame foto de carro de comprovante.",
   "Separe o veículo de troca do veículo de interesse. Em quero o Onix e tenho um HB20 para trocar, interesse é Onix e troca é HB20. interestName descreve só o interesse de compra, nunca o carro de troca. Use interestSource=customer apenas para escolha explícita do cliente, com a forma do nome que ele escreveu; ad para modelo identificável no anúncio e ainda não escolhido; unknown e interestName=null quando desconhecido. O anúncio não comprova intenção. Uma escolha recente prevalece e possível interesse não precisa ser dito ao cliente.",
   "tradeInEvaluation é null quando não atualizar esse assunto. Quando houver atualização, retorne step, interestName e interestSource. O sistema valida aceite, acrescenta o rótulo de interesse na ficha e só conclui após a confirmação de envio. Não use finance para avaliação; use none/details conforme a solicitação. Preserve a simulação pendente quando houver.",
-  "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text contém SOMENTE respostas públicas às dúvidas ainda feitas no turno, ou vazio se não houver; não escreva encerramento nem promessa de contato, pois o sistema acrescenta o encerramento da avaliação na mesma mensagem. Não repita CPF/nascimento no texto público.",
+  "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text responde às dúvidas atuais e pode encerrar naturalmente agradecendo pelo nome e informando que um vendedor entrará em contato para combinar os detalhes, seguindo a referência de encerramento. Não peça nova confirmação de cadastro. O sistema completa o encerramento quando faltar, sem duplicá-lo. Nunca afirme que enviou a ficha ou notificou o grupo/equipe e não repita CPF/nascimento no texto público.",
 ].join("\n");
 
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
@@ -101,9 +101,20 @@ export function evaluationLeadCard(value, state, context, evidence) {
 }
 
 export function evaluationClosing(answer, template, name) {
-  const text = [answer?.trim(), (template || EVALUATION_CLOSING).replaceAll("{nome}", name)].filter(Boolean).join("\n\n");
+  const publicAnswer = (answer || "").trim().replaceAll("{nome}", name);
+  const contactReturn = /\b(?:vendedor(?:es)?|equipe|responsavel|atendente)\b[^.!?\n]{0,140}\b(?:contato|retorno|retornar|retornarao?|contatarao?)\b/u.test(normalized(publicAnswer));
+  const body = contactReturn ? publicAnswer : publicAnswer.replace(/^\s*Obrigad[oa][^.!?\n]{0,100}[.!]\s*/iu, "");
+  const text = contactReturn ? body : [body, (template || EVALUATION_CLOSING).replaceAll("{nome}", name)].filter(Boolean).join("\n\n");
   if (text.length > 4096) throw invalid();
   return text;
+}
+
+export function announcesEvaluationDelivery(text) {
+  const value = normalized(text);
+  return /\b(?:enviei|enviamos|encaminhei|encaminhamos|notifiquei|notificamos)\b[^.!?\n]{0,100}\b(?:grupo|equipe|vendedor)\b/u.test(value)
+    || /\b(?:ficha|resumo|pedido|dados|informacoes|solicitacao)\b[^.!?\n]{0,55}\b(?:foi|foram|ja esta|esta|estao)\s+(?:enviad[oa]s?|encaminhad[oa]s?)\b/u.test(value)
+    || /\b(?:equipe|vendedor|grupo)\b[^.!?\n]{0,45}\b(?:foi notificad[oa]|ja recebeu)\b/u.test(value)
+    || /\b(?:enviarei|encaminharei|vou enviar|vou encaminhar|sera enviad[oa])\b[^.!?\n]{0,100}\bgrupo\b/u.test(value);
 }
 
 export function announcesEvaluationBooking(text) {
