@@ -315,11 +315,8 @@ export class MultiTenantAiService {
       const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, message: request.message })
         : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
       if (websiteCatalog) baseReply.text = baseReply.text.replace(/^Sim,\s+a Turim Autos trabalha com financiamento\b/iu, "Sim, nós trabalhamos com financiamento");
-      if (leadQualification && financingVehicle) {
-        leadQualification = { ...leadQualification,
-          summary: `${leadQualification.name} confirmou interesse em simular o financiamento para o ${financingVehicle.name}.`,
-          qualification: "Interesse em simulação de financiamento confirmado." };
-      }
+      // The validated card carries the collected data. Financing state must not
+      // replace its summary or operational qualification with generic prose.
       const financingState = qualifies && financingVehicle && !baseReply.messages && !baseReply.websiteInteraction
         ? { websiteInteraction: { step: leadQualification ? "closed" : "finance_accepted", productIds: [financingVehicle.id] } } : {};
       const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification, ...financingState }

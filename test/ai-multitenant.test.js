@@ -12,6 +12,7 @@ import {
 import { VersionedPricingCatalog } from "../src/modules/ai/postgres-adapters.js";
 import { catalogAdContext } from "../src/modules/whatsapp/ad-referral.js";
 import { createWhatsAppReplyPayload } from "../src/modules/whatsapp/outbound.js";
+import { notificationText } from "../src/modules/group-notifier/qualification.js";
 
 function config(empresaId, overrides = {}) {
   return {
@@ -164,7 +165,7 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
     leadQualificationCriteria: "Primeiro nome e interesse de financiamento.", leadQualificationClosing: "A equipe vai continuar por aqui." })],
     histories: history,
     responder: async () => ({ output_text: JSON.stringify({ text: "Posso confirmar?", catalogAction: action, productIds, filters,
-      leadQualification: { status: "qualified", name: "Nome Teste", summary: "Modelo do anúncio é o interesse do cliente.", qualification: "Pretende comprar" } }), usage: {} }),
+      leadQualification: { status: "qualified", name: "Nome Teste", summary: `Nome Teste solicita a simulação do ${productIds[0] === other.id ? other.name : selected.name}.`, qualification: "Pretende comprar" } }), usage: {} }),
   });
   const turn = (message, interaction) => ai.service.reply(request("tenant-a", { message, context: { catalog: {
     source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [selected, other],
@@ -213,6 +214,33 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
   const named = await turn("Nome Teste", withoutName.websiteInteraction);
   assert.equal(named.websiteInteraction.step, "closed");
   assert.match(named.leadQualification.summary, /Tracker 2\.0/u);
+});
+
+test("simulação preserva ficha completa e dados coletados até o texto da notificação", async () => {
+  const summary = "Solicita simulação do HB20 Sense 1.0.\nDados coletados:\nNome: Ana Teste\nCidade: Taubaté\nCPF: 000.000.000-00\nNascimento: 01/01/1990\nEntrada: R$ 10.000,00\nTroca: sem veículo para troca.";
+  const qualification = "Aceitou simulação para HB20 Sense; forneceu os dados solicitados e pretende dar R$ 10.000,00 de entrada, sem troca. Equipe deve analisar as condições.";
+  const history = [{ id: "dados", type: "text", direction: "inbound", body: "Ana Teste, de Taubaté. CPF 000.000.000-00, nascimento 01/01/1990. Tenho R$ 10.000,00 de entrada e não tenho troca." }];
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e dados de simulação fornecidos após aceite.", leadQualificationClosing: "A equipe dará continuidade por aqui." })],
+    histories: { "tenant-a": history }, responder: async (call) => {
+      assert.match(call.instructions, /Dados coletados:/u);
+      assert.ok(call.input.some((item) => item.content.includes("000.000.000-00")));
+      return { output_text: JSON.stringify({ text: "", catalogAction: "finance", productIds: ["turim:1"],
+        filters: { category: null, minPrice: null, maxPrice: null },
+        leadQualification: { status: "qualified", name: "Ana Teste", summary, qualification } }), usage: {} };
+    } });
+  const reply = await ai.service.reply(request("tenant-a", { message: "Pode continuar a simulação do HB20 Sense", context: { catalog: {
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "HB20 Sense 1.0" }],
+    financingSession: { productId: "turim:1", status: "pending" },
+  } } }));
+  assert.equal(reply.leadQualification.summary, summary);
+  assert.equal(reply.leadQualification.qualification, qualification);
+  assert.equal(reply.text, "A equipe dará continuidade por aqui.");
+  assert.doesNotMatch(reply.text, /000\.000|1990|10\.000/u);
+  assert.equal(reply.websiteInteraction.step, "closed");
+  const delivered = notificationText({ companyName: "Loja fictícia", phone: "5511000000001", ...reply.leadQualification });
+  for (const value of ["Nome: Ana Teste", "Dados coletados:", "Taubaté", "000.000.000-00", "01/01/1990", "R$ 10.000,00", "sem veículo para troca.", qualification]) assert.ok(delivered.includes(value));
+  assert.match(delivered, /^NOVO LEAD QUALIFICADO — Loja fictícia\n\nNome: Ana Teste\nResumo do caso:/u);
 });
 
 test("cada resposta recebe o roteiro inteiro e a configuração atual, acima do estilo complementar", async () => {
