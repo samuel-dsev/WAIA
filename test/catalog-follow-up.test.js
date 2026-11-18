@@ -101,7 +101,8 @@ test("ficha de simulação preserva dados e distingue os modelos com fotos do ú
 test("dados de financiamento aceito concluem ficha mesmo quando a IA classifica a continuação como none", async () => {
   const card = { status: "qualified", name: "Ana", summary: "Ana forneceu CPF e nascimento para a simulação do Onix que já aceitou.", qualification: "Dados coletados para análise da equipe." };
   const { service } = setup(async () => response("none", [items[0].id], "Recebi os dados e a equipe dará continuidade.", card),
-    [{ type: "text", direction: "inbound", body: "Sou Ana, quero simular o Onix." }]);
+    [{ type: "text", direction: "inbound", body: "Sou Ana, de Taubaté. Quero simular o Onix." },
+      { type: "text", direction: "outbound", status: "sent", body: "Por favor, informe seu CPF e data de nascimento." }]);
   const current = { ...catalog, financingSession: { productIds: [items[0].id], status: "pending" }, photoHistoryProductIds: items.map((item) => item.id) };
   const reply = await service.reply(request("000.000.000-00\n01/01/1990", current));
   assert.equal(reply.source, "ai");
@@ -109,6 +110,9 @@ test("dados de financiamento aceito concluem ficha mesmo quando a IA classifica 
   assert.equal(reply.websiteInteraction.step, "closed");
   assert.deepEqual(reply.websiteInteraction.productIds, [items[0].id]);
   assert.match(reply.leadQualification.summary, /Últimos modelos com fotos/u);
+  assert.match(reply.leadQualification.summary, /CPF informado: 000\.000\.000-00/u);
+  assert.match(reply.leadQualification.summary, /01\/01\/1990/u);
+  assert.match(reply.leadQualification.summary, /Taubaté/u);
   const unaccepted = await service.reply(request("000.000.000-00\n01/01/1990", catalog));
   assert.equal(unaccepted.leadQualification, undefined);
   const photos = await service.reply({ ...request("", current), turnMessages: [{ id: "photo", type: "image", text: "Sou Ana", mediaStored: true }] });

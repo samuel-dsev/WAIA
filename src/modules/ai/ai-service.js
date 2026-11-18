@@ -10,6 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
+import { preserveCollectedFinancingData } from "../group-notifier/collected-financing-data.js";
 import { hasWebsiteFinancingConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
@@ -155,7 +156,7 @@ export class MultiTenantAiService {
       const turnGuidance = [
         alternativesAccepted ? "OFERTA ATUAL ACEITA: a última pergunta enviada ofereceu modelos/opções semelhantes e o cliente aceitou. Use browse para apresentar somente a lista do estoque, com filtros coerentes com o histórico. Não use finance/products, não pergunte para qual modelo quer simulação e não peça dados de financiamento. Uma oferta antiga de simulação não muda esse aceite." : "",
         paragraphReply ? "FORMATAÇÃO DESTE TURNO: responda a cada pergunta em seu próprio parágrafo. Separe os parágrafos por uma linha em branco (\\n\\n), mantendo uma única mensagem. A resposta sobre troca, a localização e o convite final de avaliação ficam em três parágrafos distintos." : "",
-        photoHistoryLine ? "Na ficha de simulação, preserve os dados coletados e demais solicitações. Diferencie os modelos com fotos no histórico dos modelos que o cliente escolheu simular. O sistema acrescenta uma linha dos últimos modelos com fotos; reserve até 650 caracteres de summary para essa linha, sem apagar os dados fornecidos." : "",
+        photoHistoryLine ? "Na ficha de simulação, preserve os dados coletados e demais solicitações. Diferencie os modelos com fotos no histórico dos modelos que o cliente escolheu simular. O sistema acrescenta dados literais conferidos nas mensagens e a linha dos últimos modelos com fotos; redija o relato de summary em até 750 caracteres para reservar espaço, sem apagar os dados fornecidos." : "",
       ].filter(Boolean).join("\n");
       const evaluationTurnInstructions = evaluationEnabled ? tradeInTurnInstructions(safeContext.tradeInEvaluation, request.turnMessages) : "";
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
@@ -359,6 +360,7 @@ export class MultiTenantAiService {
           try {
             let card = evaluationQualifies && structured.leadQualification?.status === "qualified"
               ? evaluationLeadCard(structured.leadQualification, currentEvaluation, safeContext, qualificationEvidence) : structured.leadQualification;
+            if (financingVehicles.length && card?.status === "qualified") card = preserveCollectedFinancingData(card, qualificationEvidence, [...promptHistory, ...transcript.current]);
             if (financingVehicles.length && card?.status === "qualified" && photoHistoryLine && !String(card.summary || "").includes(photoHistoryLine)) {
               card = { ...card, summary: String(card.summary || "") + "\n" + photoHistoryLine };
             }
