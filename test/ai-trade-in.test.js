@@ -1,0 +1,105 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { MemoryAiConfigResolver, MemoryAiLedger, MemoryAiSecretResolver, MemoryPricingCatalog,
+  MemoryResponsesClientFactory, MultiTenantAiService } from "../src/modules/ai/index.js";
+
+const state = (step, interestName = null, interestSource = "unknown") => ({ step, interestName, interestSource });
+const collecting = { status: "collecting", name: null, summary: null, qualification: null };
+const card = { status: "qualified", name: "Ana", summary: "Solicita avaliação presencial. Dados coletados: HB20 cinza, 2016, oferecido na troca.",
+  qualification: "Necessita avaliação do veículo de troca e confirmação dos detalhes pela equipe." };
+function setup(responder, histories = [], overrides = {}) {
+  const config = { empresaId: "a", enabled: true, provider: "openai", model: "test", prompt: "Aceitamos avaliar veículos na troca. Endereço em Taubaté.",
+    keyType: "shared", maxOutputTokens: 800, leadQualificationEnabled: true, leadQualificationCriteria: "Nome e pedido de avaliação.",
+    tradeInEvaluationEnabled: true, allowedContextKeys: ["catalog", "adContext", "tradeInEvaluation", "identity"], version: 1, ...overrides };
+  const factory = new MemoryResponsesClientFactory(responder);
+  const ai = new MultiTenantAiService({ configResolver: new MemoryAiConfigResolver([config]), conversationService: { async getHistory() { return histories; } },
+    clientFactory: factory, secretResolver: new MemoryAiSecretResolver({ sharedSecret: "fake" }), ledger: new MemoryAiLedger(),
+    pricingCatalog: new MemoryPricingCatalog({ test: { inputPerMillion: 1, outputPerMillion: 1, version: "test" } }), timeoutMs: 1000, logger: { warn() {} } });
+  return { ai, factory };
+}
+function output(text, evaluation, leadQualification = collecting) {
+  return { output_text: JSON.stringify({ text, catalogAction: "none", productIds: [], filters: { category: null, minPrice: null, maxPrice: null },
+    leadQualification, tradeInEvaluation: evaluation }), usage: { input_tokens: 10, output_tokens: 10 } };
+}
+function request(message, session, extra = {}) {
+  return { empresaId: "a", conversationId: "chat", correlationId: "c", messageId: "current", message,
+    context: { catalog: { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "Onix Joy" }],
+      adContext: { match: "unique", productId: "turim:1", referral: { headline: "Onix Joy" } } },
+    tradeInEvaluation: { session } }, ...extra };
+}
+
+test("troca e endereço no turno recebem uma resposta, com oferta e sem qualificação", async () => {
+  const { ai } = setup(async (call) => {
+    assert.ok(call.text.format.schema.properties.tradeInEvaluation);
+    assert.match(call.instructions, /todas as perguntas/u);
+    assert.deepEqual(call.input.slice(-2).map((part) => part.content), ["Aceita veículo na troca?", "Qual cidade fica essa loja?"]);
+    return output("Sim, avaliamos seu veículo na troca.\n\nFicamos em Taubaté.\n\nGostaria de solicitar uma avaliação presencial?", state("offer_visit"));
+  });
+  const reply = await ai.reply(request("", null, { turnMessages: [{ id: "trade", text: "Aceita veículo na troca?" }, { id: "city", text: "Qual cidade fica essa loja?" }] }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.messages, undefined);
+  assert.match(reply.text, /troca[\s\S]*Taubaté/u);
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.tradeInEvaluation.step, "offer_visit");
+});
+
+test("aceite presencial com nome aproveita anúncio, preserva resposta pública e fecha uma ficha de avaliação", async () => {
+  const history = [{ type: "text", direction: "outbound", status: "sent", body: "Você gostaria de solicitar uma avaliação presencial?" }];
+  const { ai } = setup(async () => output("A loja fica em Taubaté.", state("visit_requested"), card), history);
+  const reply = await ai.reply(request("Sim, sou Ana. Tenho um HB20 cinza 2016 para trocar. Qual a cidade?", { ...state("offer_visit"), direct: true }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.tradeInEvaluation.step, "completed");
+  assert.match(reply.leadQualification.summary, /Possível interesse: Onix Joy/u);
+  assert.match(reply.leadQualification.summary, /HB20 cinza, 2016/u);
+  assert.match(reply.leadQualification.qualification, /avaliação/u);
+  assert.match(reply.text, /^A loja fica em Taubaté\.\n\nObrigada, Ana!/u);
+  assert.doesNotMatch(reply.text, /CPF|nascimento|agendad|grupo/u);
+});
+
+test("aceite após outro assunto não autoriza avaliação nem gera ficha", async () => {
+  const { ai } = setup(async () => output("Você gostaria de solicitar uma avaliação presencial?", state("visit_requested"), card),
+    [{ type: "text", direction: "outbound", status: "sent", body: "Posso mostrar opções semelhantes?" },
+      { type: "text", direction: "inbound", body: "Sou Ana" }]);
+  const reply = await ai.reply(request("Pode sim", { ...state("offer_visit"), direct: false }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.tradeInEvaluation, undefined);
+});
+
+test("fotos e nome não encerram a avaliação inicial; legendas são contexto sem análise visual", async () => {
+  const { ai } = setup(async (call) => {
+    assert.match(call.input.at(-1).content, /Imagem recebida/u);
+    assert.match(call.input.at(-1).content, /sem análise visual/u);
+    return output("Obrigada pelas fotos! Você já tem algum modelo em mente?", state("collect_photos"), card);
+  });
+  const reply = await ai.reply(request("", { ...state("collect_photos"), direct: true }, { turnMessages: [
+    { id: "name", text: "Sou Ana, tenho um HB20" }, { id: "photo", type: "image", text: "Meu carro é cinza", mediaStored: true },
+  ] }));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.tradeInEvaluation.step, "collect_photos");
+  assert.match(reply.text, /Obrigada pelas fotos/u);
+});
+
+test("interesse explícito prevalece sobre anúncio e nome já informado não é repetido", async () => {
+  const { ai } = setup(async () => output("", state("visit_requested", "HB20", "customer"), card),
+    [{ type: "text", direction: "inbound", body: "Sou Ana. Quero comprar um HB20; meu carro para troca é um Gol" }]);
+  const reply = await ai.reply(request("Pode agendar a avaliação", state("visit_requested")));
+  assert.equal(reply.source, "ai");
+  assert.match(reply.leadQualification.summary, /Interesse declarado: HB20/u);
+  assert.doesNotMatch(reply.leadQualification.summary, /Possível interesse/u);
+  assert.doesNotMatch(reply.text, /Como posso te chamar/u);
+});
+
+test("encerramento de avaliação não duplica promessa nem repete CPF no texto público", async () => {
+  let calls = 0;
+  const { ai } = setup(async () => output(++calls === 1 ? "Nosso vendedor entrará em contato. CPF 000.000.000-00." : "A loja fica em Taubaté.",
+    state("visit_requested"), card), [{ type: "text", direction: "inbound", body: "Sou Ana. Quero fazer uma avaliação presencial." }]);
+  const reply = await ai.reply(request("Pode continuar a avaliação", state("visit_requested")));
+  assert.equal(calls, 2);
+  assert.equal(reply.source, "ai");
+  assert.equal((reply.text.match(/entrará em contato/gu) || []).length, 1);
+  assert.doesNotMatch(reply.text, /000\.000/u);
+  assert.match(reply.text, /^A loja fica em Taubaté/u);
+  assert.equal(reply.usage.totalTokens, 40);
+});

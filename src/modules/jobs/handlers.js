@@ -2,6 +2,9 @@ import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
 import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
+import { loadTradeInEvaluationSession } from "./trade-in-session.js";
+import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
+import { inboundMessageContent } from "../ai/inbound-content.js";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
@@ -37,6 +40,7 @@ function permanent(message, code) {
 
 export class PostgresJobHandlerRepository {
   inboundTurn(input) { return loadInboundTurn(this.pool, input); }
+  tradeInEvaluationSession(input) { return loadTradeInEvaluationSession(this.pool, input); }
   constructor(pool) {
     if (!pool?.connect) throw new TypeError("Pool PostgreSQL invalido.");
     this.pool = pool;
@@ -252,9 +256,11 @@ export class PostgresJobHandlerRepository {
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
             ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
+            ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
             ...(reply.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(reply.websiteInteraction) } : {}),
+            ...(reply.tradeInEvaluation ? { tradeInEvaluation: normalizeTradeInEvaluation(reply.tradeInEvaluation) } : {}),
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
@@ -529,8 +535,9 @@ export function createWorkerHandlers({
     if (!prepared?.messages && prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
       return { replied: true, resumed: true };
     }
-    if (prepared && message.type === "text" && typeof repository.inboundTurn === "function") {
-      const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+    if (prepared && (message.type === "text" || prepared.inboundTurnIncludesImages && message.type === "image") && typeof repository.inboundTurn === "function") {
+      const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id,
+        ...(prepared.inboundTurnIncludesImages ? { includeImages: true } : {}) });
       if (current && current.sequence > message.sequence) {
         await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
         return { skipped: true, reason: "inbound_turn_changed" };
@@ -541,9 +548,12 @@ export function createWorkerHandlers({
     if (!prepared) {
       const storedDefinition = mediaRejected ? null : await tenantDefinitionRepository.load(reference.empresaId);
       if (!mediaRejected && !storedDefinition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
-      if (message.type === "text" && storedDefinition?.ai?.enabled === true
+      const activeFlow = storedDefinition?.ai?.tradeInEvaluationEnabled === true
+        ? await conversationService.getState?.({ empresaId: reference.empresaId, conversationId: message.conversationId }) : null;
+      const includeImages = storedDefinition?.ai?.tradeInEvaluationEnabled === true && !["orders", "appointments", "flows"].includes(activeFlow?.flowKey);
+      if ((message.type === "text" || includeImages && message.type === "image") && storedDefinition?.ai?.enabled === true
         && typeof repository.inboundTurn === "function") {
-        inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+        inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(includeImages ? { includeImages: true } : {}) });
         if (!inboundTurn) return { skipped: true, reason: "inbound_turn_already_answered" };
         if (Date.parse(inboundTurn.readyAt) > clock().getTime()) return { deferUntil: inboundTurn.readyAt };
         if (message.id !== inboundTurn.messageId) {
@@ -569,7 +579,7 @@ export function createWorkerHandlers({
         });
       }
       if (mediaRejected) {
-        reply = { text: "Não consegui aceitar esse comprovante. Envie uma imagem JPEG, PNG ou WEBP, ou um PDF, com até 10 MB.", buttons: [] };
+        reply = { text: "Não consegui aceitar esse arquivo. Envie uma imagem JPEG, PNG ou WEBP, ou um PDF, com até 10 MB.", buttons: [] };
       } else {
         const definition = storedDefinition;
         responseDelayEnabled = definition.ai?.responseDelayEnabled !== false;
@@ -593,6 +603,8 @@ export function createWorkerHandlers({
                 : null;
               const leadReferral = qualifiesLeads ? normalizeAdReferral(referral) : null;
               const currentReferral = Boolean(message.adReferral);
+              const evaluationSession = definition.ai?.tradeInEvaluationEnabled === true
+                ? await repository.tradeInEvaluationSession?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
               let browseState;
               if (salesMode) {
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
@@ -621,6 +633,7 @@ export function createWorkerHandlers({
                     options: config.menu.options.map(({ label }) => ({ label })),
                   },
                   ...(qualifiesLeads ? { adContext: leadReferral ? { referral: leadReferral, current: currentReferral } : null } : {}),
+                  ...(definition.ai?.tradeInEvaluationEnabled === true ? { tradeInEvaluation: { session: evaluationSession || null } } : {}),
                   ...(intakeOnly ? {} : {
                     events: config.events,
                     catalog: catalogContext,
@@ -641,7 +654,7 @@ export function createWorkerHandlers({
           conversationId: message.conversationId,
           contactId: message.contactId,
           type: message.type,
-          text: inboundTurn ? inboundTurn.messages.map((part) => part.text).join("\n") : message.text,
+          text: inboundTurn ? inboundTurn.messages.map(inboundMessageContent).join("\n") : message.text,
           selectionId: message.type === "interactive" ? message.text : undefined,
           mediaId: message.mediaId,
           messageId: message.id,
@@ -653,9 +666,10 @@ export function createWorkerHandlers({
         });
       }
       if (inboundTurn && reply.module !== "human_handoff") {
-        const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+        const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(inboundTurn.includesImages ? { includeImages: true } : {}) });
         if (current?.sequence !== inboundTurn.sequence) return current ? { deferUntil: current.readyAt } : { skipped: true, reason: "inbound_turn_changed" };
         reply.inboundTurnSequence = inboundTurn.sequence;
+        if (inboundTurn.includesImages) reply.inboundTurnIncludesImages = true;
       }
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };

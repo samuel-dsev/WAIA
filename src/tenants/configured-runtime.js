@@ -281,7 +281,7 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
     const alias = extensions.aliases.find((candidate) => matchesAlias(text, candidate.terms));
     if (websiteCatalog && definition.ai?.leadIntakeOnlyEnabled !== true) {
       if (websiteCatalogBudget(text) !== null) return router.handle({ ...input, action: "catalog.list", actionSource: "fallback" });
-      if (hasScript && alias?.action.startsWith("catalog.") && asksForWebsiteVehicleDetails(text)) {
+      if (hasScript && alias?.action.startsWith("catalog.")) {
         return router.handle({ ...input, action: "ai_freeform.reply", actionSource: "fallback" });
       }
     }

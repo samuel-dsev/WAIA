@@ -1,3 +1,4 @@
+import { inboundMessageContent } from "./inbound-content.js";
 const PROVIDERS = new Set(["openai", "simulated"]);
 const KEY_TYPES = new Set(["shared", "own", "simulated"]);
 const PROVIDER_ALIASES = Object.freeze({ openai: "openai", simulated: "simulated", simulado: "simulated" });
@@ -39,7 +40,9 @@ function integer(value, field, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) 
 export function requireAiRequest(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("Requisição de IA inválida.");
   const turnMessages = input.turnMessages == null ? null : input.turnMessages.map((part) => ({
-    id: requiredText(part.id, "turnMessages.id", 200), text: requiredText(part.text, "turnMessages.text", 8_000),
+    id: requiredText(part.id, "turnMessages.id", 200),
+    text: part.type === "image" ? optionalText(part.text, "turnMessages.text", 8_000) : requiredText(part.text, "turnMessages.text", 8_000),
+    ...(part.type === "image" ? { type: "image", mediaStored: part.mediaStored === true } : {}),
   }));
   if (turnMessages && (!turnMessages.length || new Set(turnMessages.map((part) => part.id)).size !== turnMessages.length)) throw new TypeError("Turno inválido.");
   return Object.freeze({
@@ -47,7 +50,7 @@ export function requireAiRequest(input) {
     conversationId: requiredText(input.conversationId, "conversationId", 200),
     messageId: input.messageId == null ? null : requiredText(input.messageId, "messageId", 200),
     correlationId: requiredText(input.correlationId, "correlationId", 200),
-    message: turnMessages ? turnMessages.map((part) => part.text).join("\n") : requiredText(input.message, "message", 8_000),
+    message: turnMessages ? turnMessages.map(inboundMessageContent).join("\n") : requiredText(input.message, "message", 8_000),
     ...(turnMessages ? { turnMessages } : {}),
     context: input.context && typeof input.context === "object" && !Array.isArray(input.context)
       ? input.context
@@ -81,6 +84,8 @@ export function normalizeAiConfig(input, empresaId) {
     leadIntakeOnlyEnabled: input.leadIntakeOnlyEnabled === true,
     nonLeadHandoffMessage: input.leadIntakeOnlyEnabled === true ? optionalText(input.nonLeadHandoffMessage, "nonLeadHandoffMessage", 1000) : "",
     leadQualificationEnabled: input.leadQualificationEnabled === true,
+    tradeInEvaluationEnabled: input.tradeInEvaluationEnabled === true && input.leadQualificationEnabled === true && input.leadIntakeOnlyEnabled !== true,
+    tradeInEvaluationClosing: optionalText(input.tradeInEvaluationClosing, "tradeInEvaluationClosing", 1000),
     leadQualificationCriteria: optionalText(input.leadQualificationCriteria, "leadQualificationCriteria", 2000),
     leadQualificationClosing: optionalText(input.leadQualificationClosing, "leadQualificationClosing", 1000),
     provider,

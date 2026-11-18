@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createWhatsAppReplyPayload } from "../whatsapp/outbound.js";
 import { normalizeCatalogBrowseState } from "../business/catalog-sales.js";
 import { normalizeWebsiteInteraction } from "../business/website-catalog-interaction.js";
+import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
@@ -13,6 +14,8 @@ export function replyFromRow(row) {
     ...(row.outbound_payload?.imageUrl ? { imageUrl: row.outbound_payload.imageUrl } : {}),
     ...(row.outbound_payload?.catalogProductId ? { catalogProductId: row.outbound_payload.catalogProductId } : {}),
     ...(row.outbound_payload?.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(row.outbound_payload.websiteInteraction) } : {}),
+    ...(row.outbound_payload?.tradeInEvaluation ? { tradeInEvaluation: normalizeTradeInEvaluation(row.outbound_payload.tradeInEvaluation) } : {}),
+    ...(row.outbound_payload?.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
     ...(Number.isInteger(row.outbound_payload?.catalogPhotoIndex) ? { catalogPhotoIndex: row.outbound_payload.catalogPhotoIndex } : {}),
     ...(row.outbound_payload?.nonLeadHandoff ? { nonLeadHandoff: row.outbound_payload.nonLeadHandoff } : {}),
     sendNotBefore: row.outbound_payload?.sendNotBefore || null,
@@ -73,6 +76,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
   const messages = reply.messages.map((part) => {
     if (part.catalogProductId != null && (typeof part.catalogProductId !== "string" || !part.catalogProductId || part.catalogProductId.length > 200)) throw invalid();
     const websiteInteraction = normalizeWebsiteInteraction(part.websiteInteraction);
+    const tradeInEvaluation = normalizeTradeInEvaluation(part.tradeInEvaluation);
     if (part.websiteInteraction && !websiteInteraction) throw invalid();
     if (part.catalogPhotoIndex != null && (!Number.isInteger(part.catalogPhotoIndex) || part.catalogPhotoIndex < 0 || part.catalogPhotoIndex >= 100 || !part.catalogProductId || !part.imageUrl)) throw invalid();
     const payload = createWhatsAppReplyPayload({ to: "validation", ...part });
@@ -80,6 +84,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
       buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(websiteInteraction ? { websiteInteraction } : {}),
+      ...(tradeInEvaluation ? { tradeInEvaluation } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}) };
   });
   const browseState = reply.catalogBrowse == null ? null : normalizeCatalogBrowseState({ filters: reply.catalogBrowse.filters, seenProductIds: reply.catalogBrowse.priorSeenProductIds });
@@ -100,8 +105,10 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
   for (const [index, part] of messages.entries()) {
     const payload = { buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
       ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
+      ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(part.websiteInteraction ? { websiteInteraction: part.websiteInteraction } : {}),
+      ...(part.tradeInEvaluation ? { tradeInEvaluation: part.tradeInEvaluation } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}),
       ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
         ...(browseState ? { catalogBrowse: { filters: browseState.filters, priorSeenProductIds: browseState.seenProductIds } } : {}) } : { parentReplyId: ids[0] }) };

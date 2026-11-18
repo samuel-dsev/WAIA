@@ -457,10 +457,10 @@ test("regras públicas do estabelecimento chegam ao contexto processado pelo mod
 test("limite mensal bloqueia somente o tenant que consumiu sua quota", async () => {
   const setupAi = setup({
     configs: [
-      config("tenant-a", { monthlyTokenLimit: 1_000, maxOutputTokens: 10 }),
-      config("tenant-b", { monthlyTokenLimit: 1_000, maxOutputTokens: 10 }),
+      config("tenant-a", { monthlyTokenLimit: 2_000, maxOutputTokens: 10 }),
+      config("tenant-b", { monthlyTokenLimit: 2_000, maxOutputTokens: 10 }),
     ],
-    responder: async () => ({ output_text: "ok", usage: { input_tokens: 800, output_tokens: 200 } }),
+    responder: async () => ({ output_text: "ok", usage: { input_tokens: 1800, output_tokens: 200 } }),
   });
   assert.equal((await setupAi.service.reply(request("tenant-a"))).source, "ai");
   const blocked = await setupAi.service.reply(request("tenant-a", { messageId: "a-second" }));
@@ -468,8 +468,8 @@ test("limite mensal bloqueia somente o tenant que consumiu sua quota", async () 
   assert.equal(blocked.reason, "monthly_limit");
   assert.equal(otherTenant.source, "ai");
   assert.equal(setupAi.clientFactory.requests.length, 2);
-  assert.deepEqual(setupAi.ledger.usage("tenant-a"), { tokens: 1_000, cost: 0.0032, period: "2026-08" });
-  assert.equal(setupAi.ledger.usage("tenant-b").tokens, 1_000);
+  assert.deepEqual(setupAi.ledger.usage("tenant-a"), { tokens: 2_000, cost: 0.0052, period: "2026-08" });
+  assert.equal(setupAi.ledger.usage("tenant-b").tokens, 2_000);
 });
 
 test("resolve chave compartilhada e chave própria vinculada ao tenant", async () => {

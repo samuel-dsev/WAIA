@@ -143,3 +143,23 @@ test("PostgreSQL: troca de estoque, indisponibilidade, isolamento e tentativa co
     } finally { await Promise.all([pool.end(), owner.end()]); }
   }
 });
+
+test("alias de endereço não elimina a pergunta sobre troca no mesmo turno", async () => {
+  let received;
+  const runtime = createConfiguredTenantRuntime({
+    definition: {
+      runtime: { empresaId: "turim", identity: { name: "Turim" }, enabledModules: ["catalog", "ai_freeform"],
+        menu: { text: "Menu", options: [] },
+        catalog: websiteCatalogFromCache({ status: "saudavel", last_success_at: new Date(), cache_snapshot: parseWebsiteStock(page(car(1, 59_900))) }) },
+      publicReplies: [{ module: "catalog", action: "catalog.address", text: "ENDEREÇO FIXO ISOLADO" }],
+      routing: { aliases: [{ terms: ["onde fica", "endereço"], action: "catalog.address" }] },
+      ai: { enabled: true, prompt: "Responda todas as perguntas." },
+    }, stateRepository: { async load() { return null; }, async save() {} },
+    async aiHandler({ input }) { received = input.text; return { reply: { source: "ai", text: "Aceitamos avaliar a troca. Ficamos em Taubaté. Gostaria de solicitar uma avaliação?" } }; },
+  });
+  const reply = await runtime.handle({ conversationId: "chat", type: "text", text: "Aceita veículo na troca?\nOnde fica a loja?" });
+  assert.equal(received, "Aceita veículo na troca?\nOnde fica a loja?");
+  assert.equal(reply.module, "ai_freeform");
+  assert.match(reply.text, /troca.*Taubaté/u);
+  assert.equal(reply.messages, undefined);
+});

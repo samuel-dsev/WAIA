@@ -11,6 +11,8 @@ import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRU
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
 import { hasWebsiteFinancingConsent, websiteReferenceClarification } from "../business/website-catalog-interaction.js";
+import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, hasTradeInEvaluationConsent,
+  mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
@@ -130,7 +132,9 @@ export class MultiTenantAiService {
       const websiteCatalog = safeContext.catalog?.source?.type === "website_catalog" ? safeContext.catalog : null;
       const websiteDetails = websiteCatalog && asksForWebsiteVehicleDetails(request.message);
       let financingVehicles = [];
-      const transcript = await loadConversationContext(this.conversationService, request, occurredAt);
+      const evaluationEnabled = config.tradeInEvaluationEnabled && qualifies && !intakeOnly;
+      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: evaluationEnabled });
+      const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       const promptHistory = transcript.input;
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
       const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
@@ -139,13 +143,16 @@ export class MultiTenantAiService {
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(modelContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
-      const selectionFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
+      const baseFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
+      const selectionFormat = evaluationEnabled ? tradeInEvaluationFormat(baseFormat) : baseFormat;
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
-        + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "");
+        + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "")
+        + (evaluationEnabled ? "\nNa avaliação, se a ficha estiver completa, text contém apenas respostas públicas às perguntas do turno, sem encerramento/promessa de contato nem CPF/nascimento. O sistema acrescentará o encerramento na mesma mensagem. Preserve os dados da ficha em summary com no máximo 1600 caracteres." : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
         catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",
+        evaluationEnabled ? TRADE_IN_EVALUATION_INSTRUCTIONS : "",
       ].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
@@ -220,7 +227,7 @@ export class MultiTenantAiService {
         return { response, text };
       };
       let { response, text } = await requestResponse();
-      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff, validatedCatalogReply;
+      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff, validatedCatalogReply, evaluationState, evaluationAnswer;
       if (intakeOnly) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const structured = JSON.parse(text);
@@ -229,7 +236,7 @@ export class MultiTenantAiService {
           let intake;
           try {
             intake = parseLeadIntake(structured.leadQualification, { configVersion: config.version,
-              evidence: [request.message, ...transcript.evidence],
+              evidence: qualificationEvidence,
               adReferral: safeContext.adContext?.referral });
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_INTAKE" || !/^(NAME|CITY|MODEL)(?:_EVIDENCE)?$/u.test(error.validationReason)) throw error;
@@ -264,7 +271,14 @@ export class MultiTenantAiService {
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
-          const clarification = websiteCatalog && websiteReferenceClarification(websiteCatalog, request.message, structured.productIds);
+          const evaluationProposal = evaluationEnabled ? normalizeTradeInEvaluation(structured.tradeInEvaluation) : null;
+          delete structured.tradeInEvaluation;
+          const evaluationConsent = evaluationEnabled && hasTradeInEvaluationConsent(safeContext.tradeInEvaluation, request.message, promptHistory, request.turnMessages, evaluationProposal?.step);
+          evaluationState = evaluationProposal && (!["collect_photos", "visit_requested", "human_review_requested"].includes(evaluationProposal.step) || evaluationConsent)
+            ? evaluationProposal : null;
+          const currentEvaluation = evaluationState || safeContext.tradeInEvaluation?.session;
+          const evaluationQualifies = evaluationEnabled && structured.catalogAction !== "finance" && mayQualifyTradeInEvaluation(currentEvaluation, evaluationConsent);
+          const clarification = websiteCatalog && !evaluationProposal && websiteReferenceClarification(websiteCatalog, request.message, structured.productIds);
           if (clarification) {
             structured.text = clarification.text;
             structured.productIds = clarification.websiteInteraction.productIds;
@@ -277,7 +291,7 @@ export class MultiTenantAiService {
             && selectedIds.length > 0 && selectedIds.length <= 3 && new Set(selectedIds).size === selectedIds.length
             ? selectedIds.map((id) => websiteCatalog.items.find((item) => item.id === id && item.active !== false && item.availability !== "unavailable")) : [];
           if (financingVehicles.some((item) => !item || !hasWebsiteFinancingConsent(websiteCatalog, request.message, item.id, promptHistory))) financingVehicles = [];
-          let mayQualify = !websiteCatalog || financingVehicles.length > 0;
+          let mayQualify = !websiteCatalog && !currentEvaluation || financingVehicles.length > 0 || evaluationQualifies && !websitePresentation && !websiteDetails;
           const prematureCollection = websiteCatalog && !financingVehicles.length && !websitePresentation
             && (/\b(?:informe|envie|manda?|passe|diga|preciso|me fale|qual(?: é)?)\b[^.!?\n]{0,100}\b(?:cpf|nascimento)\b/iu.test(structured.text)
               || /\b(?:cpf|nascimento)\b[^.!?\n]{0,80}(?:por favor|\?)/iu.test(structured.text));
@@ -293,14 +307,32 @@ export class MultiTenantAiService {
             structured.text = focus.length
               ? "Sobre " + focus.map((item) => item.name).join(" e ") + ", você quer fazer uma simulação ou tirar outra dúvida?"
               : "Para quais modelos você quer a simulação?";
+            if (evaluationEnabled && currentEvaluation) {
+              structured.text = "Você prefere enviar fotos para uma análise inicial ou solicitar uma avaliação presencial?";
+              evaluationState = null;
+            }
             financingVehicles = [];
             mayQualify = false;
           }
           try {
-            leadQualification = mayQualify ? parseQualification(structured.leadQualification, { configVersion: config.version,
-              evidence: [request.message, ...transcript.evidence] }) : null;
+            const card = evaluationQualifies && structured.leadQualification?.status === "qualified"
+              ? evaluationLeadCard(structured.leadQualification, currentEvaluation, safeContext, qualificationEvidence) : structured.leadQualification;
+            leadQualification = mayQualify ? parseQualification(card, { configVersion: config.version,
+              evidence: qualificationEvidence }) : null;
+            if (leadQualification && evaluationQualifies) {
+              if (announcesQualificationClosing(structured.text) || announcesEvaluationBooking(structured.text)
+                || /\b\d{3}\.?\d{3}\.?\d{3}[- ]?\d{2}\b/u.test(structured.text)) {
+                if (attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }
+                throw Object.assign(new Error("Texto público de avaliação inválido."), { code: "AI_INVALID_TRADE_EVALUATION" });
+              }
+              evaluationState = normalizeTradeInEvaluation({ step: currentEvaluation.step, interestName: currentEvaluation.interestName || null, interestSource: currentEvaluation.interestSource || "unknown" });
+              evaluationAnswer = structured.text;
+            }
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
+            if (evaluationQualifies && error.validationReason === "SUMMARY" && attempt === 0) {
+              ({ response, text } = await requestResponse(true)); continue;
+            }
             qualificationIssue = error.validationReason;
             structured.text = financingVehicles.length && ["NAME", "NAME_EVIDENCE"].includes(qualificationIssue)
               ? "Qual é o seu primeiro nome?" : qualificationContinuation(structured.text, qualificationIssue);
@@ -343,8 +375,14 @@ export class MultiTenantAiService {
       // replace its summary or operational qualification with generic prose.
       const financingState = qualifies && financingVehicles.length && !baseReply.messages && !baseReply.websiteInteraction
         ? { websiteInteraction: { step: leadQualification ? "closed" : "finance_accepted", productIds: financingVehicles.map((item) => item.id) } } : {};
-      const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification, ...financingState }
+      const evaluationHandoff = leadQualification && mayQualifyTradeInEvaluation(evaluationState, true);
+      const evaluationMetadata = evaluationState ? { tradeInEvaluation: evaluationHandoff ? { ...evaluationState, step: "completed" } : evaluationState } : {};
+      if (baseReply.messages && evaluationState) Object.assign(baseReply.messages.at(-1), evaluationMetadata);
+      const reply = leadQualification ? { text: evaluationHandoff
+        ? evaluationClosing(evaluationAnswer, config.tradeInEvaluationClosing, leadQualification.name)
+        : config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification, ...financingState, ...evaluationMetadata }
         : nonLeadHandoff ? { text: config.nonLeadHandoffMessage, nonLeadHandoff } : { ...baseReply, ...financingState };
+      if (!reply.messages && evaluationState) Object.assign(reply, evaluationMetadata);
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

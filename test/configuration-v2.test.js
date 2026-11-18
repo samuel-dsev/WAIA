@@ -45,6 +45,23 @@ function memoryStateRepository() {
   };
 }
 
+test("avaliação de troca é opcional, validada e preservada na materialização do painel", () => {
+  const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
+  assert.equal(Object.hasOwn(old.configuration.ai, "tradeInEvaluationEnabled"), false);
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(old), true);
+  const input = minimalConfig({ modules: ["catalog", "ai_freeform", "human_handoff"],
+    ai: { enabled: true, provider: "openai", model: "test", prompt: "Atenda às perguntas.",
+      leadQualificationEnabled: true, leadQualificationCriteria: "Nome e aceite de avaliação.",
+      tradeInEvaluationEnabled: true, tradeInEvaluationClosing: "Obrigada, {nome}! A equipe confirmará os detalhes." } });
+  const compiled = compileTenantRuntimeConfigV2(input, { empresaId: "tenant-a", configVersion: 2 });
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled), true);
+  const legacy = materializeLegacyTenantDefinition(compiled);
+  assert.equal(legacy.ai.tradeInEvaluationEnabled, true);
+  assert.equal(legacy.ai.tradeInEvaluationClosing, input.ai.tradeInEvaluationClosing);
+  assert.throws(() => parseTenantRuntimeConfigV2({ ...input, ai: { ...input.ai, leadQualificationEnabled: false } }));
+  assert.throws(() => parseTenantRuntimeConfigV2({ ...input, ai: { ...input.ai, tradeInEvaluationEnabled: "yes" } }));
+});
+
 test("espera da IA é opcional, booleana e preserva checksum das revisões existentes", () => {
   const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
   assert.equal(Object.hasOwn(old.configuration.ai, "responseDelayEnabled"), false);

@@ -68,6 +68,8 @@ function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum)
     leadQualificationEnabled: ai.leadQualificationEnabled === true,
     leadQualificationCriteria: ai.leadQualificationCriteria,
     leadQualificationClosing: ai.leadQualificationClosing,
+    tradeInEvaluationEnabled: ai.tradeInEvaluationEnabled === true,
+    tradeInEvaluationClosing: ai.tradeInEvaluationClosing,
     keyType: ai.keyMode,
     credentialId: ai.keyMode === "own" ? referenceId(ai.credentialRef, "credential") : null,
     monthlyTokenLimit: ai.monthlyTokenLimit,
@@ -76,7 +78,7 @@ function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum)
     maxHistoryMessages: ai.leadQualificationEnabled === true ? 30 : 8,
     maxOutputTokens: ai.maxOutputTokens,
     contingencyMessage: ai.fallbackMessage,
-    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address", ...(ai.leadQualificationEnabled === true ? ["adContext"] : [])],
+    allowedContextKeys: ["identity", "menu", "events", "catalog", "services", "knowledgeBase", "hours", "address", ...(ai.leadQualificationEnabled === true ? ["adContext"] : []), ...(ai.tradeInEvaluationEnabled === true ? ["tradeInEvaluation"] : [])],
     version: Number(configVersion),
   };
 }
