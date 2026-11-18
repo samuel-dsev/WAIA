@@ -54,11 +54,12 @@ test("PostgreSQL: turno durável reúne mensagens, invalida envio antigo e mant�
       imageUrls: Array.from({ length: 100 }, (_, i) => `https://turimautos.com/storage/veiculos/car-${id}-${i}.jpg`) }));
     const gallery = await handlers.prepareReply({ empresaId, origin: "ai",
       message: await handlers.inboundMessage({ empresaId, messageId: photoRequest.messageId }), reply: websiteGalleriesReply(items) });
-    assert.equal(gallery.messages.length, 201);
+    assert.equal(gallery.messages.length, 200);
     assert.deepEqual(gallery.messages.filter((part) => part.imageUrl).map((part) => part.catalogProductId), [...Array(100).fill("turim:1"), ...Array(100).fill("turim:2")]);
     await handlers.markReplySent({ empresaId, replyId: gallery.messages[0].id, externalMessageId: `wamid.${randomUUID()}` });
     await handlers.markReplySent({ empresaId, replyId: gallery.messages.at(-1).id, externalMessageId: `wamid.${randomUUID()}` });
     const resume = await inbound("Pode continuar a simulação do primeiro");
+    assert.deepEqual(await handlers.catalogPhotosPresented({ ...scope, messageId: resume.messageId }), ["turim:1", "turim:2"]);
     assert.deepEqual(await handlers.financingSession({ ...scope, messageId: resume.messageId }), { productId: "turim:1", productIds: ["turim:1"], status: "pending" });
     assert.deepEqual((await handlers.websiteInteraction({ ...scope, messageId: resume.messageId })).productIds, ["turim:1", "turim:2"]);
     // Execute the worker with the real repositories, including the oldest job

@@ -10,7 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
-import { hasWebsiteFinancingConsent, websiteReferenceClarification } from "../business/website-catalog-interaction.js";
+import { hasWebsiteFinancingConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
@@ -136,6 +136,8 @@ export class MultiTenantAiService {
       const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: evaluationEnabled });
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       const promptHistory = transcript.input;
+      const alternativesAccepted = websiteCatalog && acceptsWebsiteAlternativesOffer(request.message, promptHistory);
+      const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
       const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
         items: websiteCatalog.items.map(({ imageUrl, imageUrls, ...item }) => item),
@@ -145,17 +147,29 @@ export class MultiTenantAiService {
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
       const baseFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
       const selectionFormat = evaluationEnabled ? tradeInEvaluationFormat(baseFormat) : baseFormat;
+      const paragraphReply = evaluationEnabled && /\b(?:troca|avalia[cç][aã]o)\b/iu.test(request.message)
+        && (request.message.match(/\?/gu) || []).length > 1;
+      if (paragraphReply && selectionFormat?.schema?.properties?.text) {
+        selectionFormat.schema.properties.text.pattern = "[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S[\\s\\S]*";
+      }
+      const turnGuidance = [
+        alternativesAccepted ? "OFERTA ATUAL ACEITA: a última pergunta enviada ofereceu modelos/opções semelhantes e o cliente aceitou. Use browse para apresentar somente a lista do estoque, com filtros coerentes com o histórico. Não use finance/products, não pergunte para qual modelo quer simulação e não peça dados de financiamento. Uma oferta antiga de simulação não muda esse aceite." : "",
+        paragraphReply ? "FORMATAÇÃO DESTE TURNO: responda a cada pergunta em seu próprio parágrafo. Separe os parágrafos por uma linha em branco (\\n\\n), mantendo uma única mensagem. A resposta sobre troca, a localização e o convite final de avaliação ficam em três parágrafos distintos." : "",
+        photoHistoryLine ? "Na ficha de simulação, preserve os dados coletados e demais solicitações. Diferencie os modelos com fotos no histórico dos modelos que o cliente escolheu simular. O sistema acrescenta uma linha dos últimos modelos com fotos; reserve até 650 caracteres de summary para essa linha, sem apagar os dados fornecidos." : "",
+      ].filter(Boolean).join("\n");
       const evaluationTurnInstructions = evaluationEnabled ? tradeInTurnInstructions(safeContext.tradeInEvaluation, request.turnMessages) : "";
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
         + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "")
         + (evaluationEnabled ? "\nNa avaliação, nome informado e pedido/aceite presencial permitem concluir no mesmo turno, sem nova confirmação de cadastro. text responde às perguntas atuais e pode agradecer e informar contato futuro de um vendedor. Encerre sem pergunta de continuidade ou confirmação de cadastro, interesse ou telefone. Se apenas recebeu fotos e uma dúvida de localização, mantenha collect_photos e collecting, sem anunciar contato de vendedor. Sempre preencha tradeInEvaluation ao tratar de avaliação. Não afirme reserva de horário, envio da ficha ou notificação ao grupo/equipe, nem repita CPF/nascimento. Preserve os dados da ficha em summary com no máximo 1600 caracteres." : "")
-        + (evaluationTurnInstructions ? "\n" + evaluationTurnInstructions : "");
+        + (evaluationTurnInstructions ? "\n" + evaluationTurnInstructions : "")
+        + (turnGuidance ? "\n" + turnGuidance : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
         catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",
         evaluationEnabled ? TRADE_IN_EVALUATION_INSTRUCTIONS + "\nReferência para o encerramento: " + (config.tradeInEvaluationClosing || EVALUATION_CLOSING) : "",
         evaluationTurnInstructions,
+        turnGuidance,
       ].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
@@ -274,6 +288,15 @@ export class MultiTenantAiService {
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+          if (alternativesAccepted) {
+            if (structured.catalogAction !== "browse" && attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }
+            if (structured.catalogAction !== "browse") {
+              structured.catalogAction = "browse";
+              structured.filters = { category: null, minPrice: null, maxPrice: null };
+            }
+            structured.productIds = [];
+            structured.leadQualification = { status: "collecting", name: null, summary: null, qualification: null };
+          }
           const evaluationProposal = evaluationEnabled ? normalizeTradeInEvaluation(reconcileTradeInEvaluation(declinesTradeInEvaluation(request.message)
             && safeContext.tradeInEvaluation?.session ? { step: "declined", interestName: safeContext.tradeInEvaluation.session.interestName || null,
               interestSource: safeContext.tradeInEvaluation.session.interestSource || "unknown" } : structured.tradeInEvaluation
@@ -322,8 +345,11 @@ export class MultiTenantAiService {
             mayQualify = false;
           }
           try {
-            const card = evaluationQualifies && structured.leadQualification?.status === "qualified"
+            let card = evaluationQualifies && structured.leadQualification?.status === "qualified"
               ? evaluationLeadCard(structured.leadQualification, currentEvaluation, safeContext, qualificationEvidence) : structured.leadQualification;
+            if (financingVehicles.length && card?.status === "qualified" && photoHistoryLine && !String(card.summary || "").includes(photoHistoryLine)) {
+              card = { ...card, summary: String(card.summary || "") + "\n" + photoHistoryLine };
+            }
             leadQualification = mayQualify ? parseQualification(card, { configVersion: config.version,
               evidence: qualificationEvidence }) : null;
             if (leadQualification && evaluationQualifies) {
@@ -338,7 +364,7 @@ export class MultiTenantAiService {
             }
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
-            if (evaluationQualifies && error.validationReason === "SUMMARY" && attempt === 0) {
+            if ((evaluationQualifies || financingVehicles.length) && error.validationReason === "SUMMARY" && attempt === 0) {
               ({ response, text } = await requestResponse(true)); continue;
             }
             qualificationIssue = error.validationReason;

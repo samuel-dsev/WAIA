@@ -124,17 +124,18 @@ test("um modelo específico usa todas as fotos validadas do site na ordem", asyn
   assert.match(call.instructions, /toda a galeria na ordem/u);
   assert.doesNotMatch(call.input[0].content, /onix-interior\.jpg/u);
   assert.equal(reply.leadQualification, undefined);
-  const [first, second, third, offer] = reply.messages;
+  const [first, second, third] = reply.messages;
   const payloads = reply.messages.map((part) => createWhatsAppReplyPayload({ to: "test-recipient", ...part }));
-  assert.deepEqual(payloads.map(({ type }) => type), ["image", "image", "image", "text"]);
+  assert.deepEqual(payloads.map(({ type }) => type), ["image", "image", "image"]);
   assert.deepEqual(payloads.slice(0, 3).map(({ image }) => image.link), imageUrls);
   assert.deepEqual([first, second, third].map((part) => part.catalogPhotoIndex), [0, 1, 2]);
-  assert.ok([first, second, third].every((part) => part.websiteInteraction === undefined && part.catalogProductId === onix.id));
+  assert.ok([first, second, third].every((part) => part.catalogProductId === onix.id));
+  assert.ok([first, second].every((part) => part.websiteInteraction === undefined));
   assert.match(payloads[0].image.caption, /Onix 1\.0/u);
   assert.doesNotMatch(payloads[0].image.caption, /turimautos\.com/u);
-  assert.ok(payloads.slice(1, 3).every(({ image }) => !Object.hasOwn(image, "caption")));
-  assert.deepEqual(offer.websiteInteraction, { step: "finance_offer", productIds: [onix.id] });
-  assert.equal(payloads[3].text.body, "Você gostaria de fazer uma simulação de financiamento para o Onix 1.0?");
+  assert.equal(Object.hasOwn(payloads[1].image, "caption"), false);
+  assert.deepEqual(third.websiteInteraction, { step: "finance_offer", productIds: [onix.id] });
+  assert.equal(payloads[2].image.caption, "Você gostaria de fazer uma simulação de financiamento para o Onix 1.0?");
 
   const questionWithModel = "tenho em mente um Onix, tem fotos dele?";
   const explicitModel = await ai.service.reply(request("tenant-a", { context: { catalog }, message: questionWithModel }));
@@ -181,7 +182,7 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
   assert.equal(choice.websiteInteraction.step, "photo_offer");
   assert.equal(choice.leadQualification, undefined);
   const photos = await turn("Pode mandar as fotos dele", choice.websiteInteraction);
-  assert.deepEqual(photos.messages.slice(0, -1).map(({ imageUrl }) => imageUrl), gallery);
+  assert.deepEqual(photos.messages.map(({ imageUrl }) => imageUrl), gallery);
   assert.equal(photos.leadQualification, undefined);
   const offer = photos.messages.at(-1);
   assert.match(offer.text, /simulação de financiamento para o Tracker/u);
@@ -369,7 +370,8 @@ test("fotos de dois modelos interrompem coleta; nome no mesmo turno não encerra
     } } }));
     assert.equal(reply.leadQualification, undefined);
     assert.deepEqual(reply.messages.filter((item) => item.imageUrl).map((item) => item.catalogProductId), items.map((item) => item.id));
-    assert.doesNotMatch(reply.messages.at(-1).text, /Quais dessas versões|simulação/u);
+    assert.doesNotMatch(reply.messages.at(-1).text, /Quais dessas versões|CPF|nascimento/u);
+    assert.match(reply.messages.at(-1).text, /Qual modelo você mais gostou\?/u);
     assert.deepEqual(reply.messages.at(-1).websiteInteraction.productIds, items.map((item) => item.id));
   }
 });

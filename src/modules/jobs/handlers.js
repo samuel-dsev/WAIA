@@ -192,6 +192,20 @@ export class PostgresJobHandlerRepository {
     });
   }
 
+  catalogPhotosPresented({ empresaId, conversationId, messageId }) {
+    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
+      const { rows } = await client.query(`SELECT m.outbound_payload->>'catalogProductId' AS product_id
+        FROM mensagens m JOIN mensagens anchor ON anchor.empresa_id=m.empresa_id AND anchor.conversa_id=m.conversa_id AND anchor.id=$3
+        WHERE m.empresa_id=$1 AND m.conversa_id=$2 AND m.sequence<anchor.sequence AND m.direcao='saida' AND m.tipo='imagem'
+          AND m.redacted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>now())
+          AND m.external_message_id IS NOT NULL AND m.status IN ('enviada','entregue','lida')
+          AND m.origem_resposta IN ('ia','fluxo_deterministico') AND m.outbound_payload ? 'catalogPhotoIndex'
+          AND m.outbound_payload->>'catalogProductId' IS NOT NULL
+        GROUP BY m.outbound_payload->>'catalogProductId' ORDER BY max(m.sequence) DESC LIMIT 100`, [empresaId, conversationId, messageId]);
+      return rows.map((row) => row.product_id).reverse();
+    });
+  }
+
   financingSession({ empresaId, conversationId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       const { rows } = await client.query(`SELECT m.outbound_payload->'websiteInteraction' AS state
@@ -612,7 +626,8 @@ export function createWorkerHandlers({
               }
               const interaction = websiteCatalog && !currentReferral ? await repository.websiteInteraction?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
               const financingSession = websiteCatalog ? await repository.financingSession?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
-              const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(financingSession ? { financingSession } : {}), ...(salesMode ? { salesMode: true, browseState,
+              const photoHistoryProductIds = websiteCatalog ? await repository.catalogPhotosPresented?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
+              const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(financingSession ? { financingSession } : {}), ...(photoHistoryProductIds?.length ? { photoHistoryProductIds } : {}), ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
                 interestHandoff: { enabled: definition.ai?.catalogSalesEnabled === true && config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },

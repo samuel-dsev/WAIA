@@ -4,6 +4,7 @@ const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
 const listQuestion = "Gostou de algum? Se sim, gostaria de ver as fotos dele? Me diga qual modelo chamou sua atenção.";
 export const websiteCatalogSelectionPrompt = "Qual modelo chamou sua atenção?";
+export const websiteGalleryClosing = "Qual modelo você mais gostou?\n\nSe quiser fazer a simulação do financiamento de algum deles, é só me falar!";
 const galleryQuestion = "Você gostou desse veículo?";
 const normalize = (text) => String(text || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/gu, " ");
 
@@ -91,26 +92,56 @@ export function matchesWebsiteGalleryPart(item, index, { text, imageUrl }) {
   if (current.text === text) return true;
   // Retomadas de galerias preparadas antes da pergunta em separado.
   const last = index === photoUrls(item).length - 1;
+  if (last && [websiteGalleryClosing, financingOffer(item).text].some((closing) => galleryClosingCaption(current, closing) === text)) return true;
   const question = last ? `\n\n${galleryQuestion}` : "";
   const caption = index === 0 ? current.text : item.name;
   return text === [...caption].slice(0, 1024 - question.length).join("") + question;
 }
 
+function galleryClosingCaption(part, closing) {
+  const body = [...part.text].slice(0, 1024 - [...closing].length - 2).join("").trimEnd();
+  return [body, closing].filter(Boolean).join("\n\n");
+}
+
+function closeGallery(messages, closing) {
+  const last = messages.at(-1);
+  if (last.imageUrl) Object.assign(last, { ...closing, text: galleryClosingCaption(last, closing.text) });
+  else Object.assign(last, { text: last.text + "\n\n" + closing.text, websiteInteraction: closing.websiteInteraction });
+  return { text: messages[0].text, messages };
+}
+
 export function websiteGalleryReply(item) {
   const messages = photoUrls(item).map((_, index) => websiteGalleryPart(item, index));
   if (!messages.length) return choiceQuestion("gallery", item, `${productMessage(item).text}\n\nA ficha está sem fotos no momento. ${galleryQuestion}`);
-  messages.push(financingOffer(item));
-  return { text: messages[0].text, messages };
+  return closeGallery(messages, financingOffer(item));
 }
 
 export function websiteGalleriesReply(items) {
   if (items.length === 1) return websiteGalleryReply(items[0]);
-  const messages = items.flatMap((item) => photoUrls(item).length
-    ? photoUrls(item).map((_, index) => websiteGalleryPart(item, index))
-    : [{ text: `${productMessage(item).text}\n\nA ficha está sem fotos no momento.`, buttons: [] }]);
-  messages.push({ text: `Quer saber mais sobre ${items.map((item) => item.name).join(" ou ")}?`, buttons: [],
+  // Put unavailable-photo notices before the actual galleries. The final
+  // invitation belongs to the last image payload, so it cannot overtake it.
+  const messages = [
+    ...items.filter((item) => !photoUrls(item).length).map((item) => ({ text: `${productMessage(item).text}\n\nA ficha está sem fotos no momento.`, buttons: [] })),
+    ...items.filter((item) => photoUrls(item).length).flatMap((item) => photoUrls(item).map((_, index) => websiteGalleryPart(item, index))),
+  ];
+  return closeGallery(messages, { text: websiteGalleryClosing, buttons: [],
     websiteInteraction: { step: "gallery", productIds: items.map((item) => item.id) } });
-  return { text: messages[0].text, messages };
+}
+
+export function acceptsWebsiteAlternativesOffer(message, history) {
+  const last = normalize(history.findLast((item) => item.role === "assistant")?.content);
+  const question = last.match(/\b(?:gostaria|quer|deseja|prefere|posso|podemos)\b[^?]*\?\s*$/u)?.[0] || "";
+  if (/\b(?:simulacao|simular|financiamento|financiar)\b/u.test(question)
+    || !/\b(?:(?:outros|outras) (?:modelos|opcoes|veiculos)|(?:modelos|opcoes|veiculos) (?:semelhantes|similares|parecidos|proximos))\b/u.test(question)) return false;
+  const parts = String(message || "").split("\n").map(normalize).filter(Boolean);
+  const yes = (part) => /^(?:sim|pode(?: sim| ser| mandar| enviar| mostrar)?|quero(?: sim)?|claro|com certeza|por favor)[,.! ]*$/u.test(part);
+  return parts.some(yes) && parts.every((part) => yes(part) || /^(?:entendi|certo|ta|tudo bem)[,.! ]*$/u.test(part));
+}
+
+export function websitePhotoHistoryLine(catalog) {
+  const ids = [...new Set(catalog?.photoHistoryProductIds || [])].slice(-3);
+  const names = ids.map((id) => catalog.items.find((item) => item.id === id)?.name).filter(Boolean);
+  return names.length ? "Últimos modelos com fotos no atendimento: " + names.join("; ") : "";
 }
 
 function affirmative(message) {
