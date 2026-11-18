@@ -1,8 +1,10 @@
 import { availableCatalogProducts } from "./catalog-messages.js";
+import { vehicleFactsText } from "../../core/vehicle-facts.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
 const listQuestion = "Gostou de algum? Se sim, gostaria de ver as fotos dele? Me diga qual modelo chamou sua atenção.";
+export const WEBSITE_CATALOG_LIST_FORMAT_VERSION = 2;
 export const websiteCatalogSelectionPrompt = "Qual modelo chamou sua atenção?";
 export const websiteGalleryClosing = "Qual modelo você mais gostou?\n\nSe quiser fazer a simulação do financiamento de algum deles, é só me falar!";
 const galleryQuestion = "Você gostou desse veículo?";
@@ -55,13 +57,18 @@ function choiceQuestion(step, item, text) {
   return { text, websiteInteraction: { step, productIds: [item.id] } };
 }
 
-function listEntry(item) {
-  const price = item.price == null ? "Sob consulta" : MONEY.format(item.price);
-  return [`*${item.name}*`, `Modelo: ${item.model || item.name}`, `Valor: ${price}`].join("\n");
+export function normalizeWebsiteListFormatVersion(value) {
+  return value === undefined ? 1 : [1, 2].includes(value) ? value : null;
 }
 
-export function websiteCatalogListText(items) {
-  return [...items.map(listEntry), listQuestion].join("\n\n");
+function listEntry(item, formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION) {
+  const price = item.price == null ? "Sob consulta" : MONEY.format(item.price);
+  return [`*${item.name}*`, formatVersion === 1 ? `Modelo: ${item.model || item.name}` : vehicleFactsText(item), `Valor: ${price}`].join("\n");
+}
+
+export function websiteCatalogListText(items, { formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION } = {}) {
+  if (normalizeWebsiteListFormatVersion(formatVersion) === null) throw new TypeError("Formato de lista inválido.");
+  return [...items.map((item) => listEntry(item, formatVersion)), listQuestion].join("\n\n");
 }
 
 export function websiteCatalogList(candidates) {

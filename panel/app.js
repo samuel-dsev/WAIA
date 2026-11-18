@@ -1067,6 +1067,7 @@ async function openWebsiteCatalog(base, { sync = false } = {}) {
     }
     if (syncResult?.errorCode) status.append(` (${syncResult.errorCode})`);
     const price = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const mileage = new Intl.NumberFormat("pt-BR");
     const list = node("ul");
     for (const item of items) {
       const row = node("li");
@@ -1074,7 +1075,11 @@ async function openWebsiteCatalog(base, { sync = false } = {}) {
       link.href = item.url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      row.append(link, paragraph(`${item.price == null ? "Sob consulta" : price.format(item.price)} · ${item.description}`));
+      const hasMileage = Number.isSafeInteger(item.mileageKm) && item.mileageKm >= 0 && item.mileageKm <= 9_999_999;
+      const hasYear = Number.isSafeInteger(item.year) && item.year >= 1886 && item.year <= 2100;
+      const facts = !hasMileage && !hasYear ? "Quilometragem e ano não informados"
+        : `${hasMileage ? mileage.format(item.mileageKm) + " km" : "Quilometragem não informada"} - ${hasYear ? item.year : "Ano não informado"}`;
+      row.append(link, paragraph(facts), paragraph(`${item.price == null ? "Sob consulta" : price.format(item.price)} · ${item.description || ""}`));
       if (item.imageUrl) {
         const photo = nodeWithText("a", "Ver foto");
         photo.href = item.imageUrl;

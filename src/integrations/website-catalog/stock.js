@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WEBSITE_CATALOG_HTML_MAX_LENGTH } from "../../core/catalog-limits.js";
+import { vehicleMileageKm, vehicleYear } from "../../core/vehicle-facts.js";
 import { websiteVehicleDescription } from "./description.js";
 
 export const WEBSITE_CATALOG_TYPE = "website_catalog";
@@ -14,9 +15,9 @@ const stockVehicle = z.object({
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   titulo: z.string().trim().min(1).max(160),
   modelo: z.string().trim().max(160).nullish(),
-  ano: z.number().int().min(1886).max(2100),
+  ano: z.unknown().optional(),
   preco: z.number().min(0).max(1_000_000_000),
-  km: z.number().int().nonnegative().max(9_999_999),
+  km: z.unknown().optional(),
   cambio: z.string().trim().max(60),
   combustivel: z.string().trim().max(60),
   cor: z.string().trim().max(60),
@@ -57,9 +58,19 @@ export function parseWebsiteStock(html) {
   const products = websiteVehicles(html).map((vehicle) => {
     const category = vehicle.carroceria || vehicle.categoria || vehicle.detalhes?.carroceria || vehicle.detalhes?.categoria;
     const imageUrls = vehicle.imagens.map(stockPhoto).filter(Boolean);
+    const mileageKm = vehicleMileageKm(vehicle.km), year = vehicleYear(vehicle.ano);
+    const vehicleFactsSources = { ...(mileageKm === undefined ? {} : { mileageKm: "stock.km" }), ...(year === undefined ? {} : { year: "stock.ano" }) };
+    const vehicleFactsWarnings = [
+      ...(mileageKm === undefined ? [factWarning("mileageKm", "stock.km", vehicle.km)] : []),
+      ...(year === undefined ? [factWarning("year", "stock.ano", vehicle.ano)] : []),
+    ];
     return {
       id: `turim:${vehicle.id}`,
       name: vehicle.titulo,
+      ...(mileageKm === undefined ? {} : { mileageKm }),
+      ...(year === undefined ? {} : { year }),
+      vehicleFactsSources,
+      ...(vehicleFactsWarnings.length ? { vehicleFactsWarnings } : {}),
       ...(vehicle.modelo ? { model: vehicle.modelo } : {}),
       price: vehicle.preco > 0 ? Math.round(vehicle.preco * 100) / 100 : null,
       ...(category ? { category } : {}),
@@ -72,14 +83,26 @@ export function parseWebsiteStock(html) {
   return { profile: WEBSITE_CATALOG_TYPE, schemaVersion: SNAPSHOT_VERSION, products };
 }
 
+function factWarning(field, source, value) {
+  return { field, source, code: value == null || value === "" ? "missing" : "invalid" };
+}
+
 export function parseWebsiteVehicleDetails(html, product) {
   const entries = [...html.matchAll(/^[\t ]*window\.VEICULOS[\t ]*=[\t ]*(\[[^\r\n]*\]);[\t ]*\r?$/gmu)];
   let raw;
   try { raw = entries.length === 1 ? JSON.parse(entries[0][1]) : null; } catch { /* checked below */ }
-  const parsed = z.array(z.object({ id: z.number().int().positive(), descricao: z.string().max(WEBSITE_CATALOG_HTML_MAX_LENGTH).nullish() })).max(MAX_ITEMS).safeParse(raw);
+  const parsed = z.array(z.object({ id: z.number().int().positive(), ano: z.unknown().optional(), descricao: z.string().max(WEBSITE_CATALOG_HTML_MAX_LENGTH).nullish() })).max(MAX_ITEMS).safeParse(raw);
   const matches = parsed.success ? parsed.data.filter((vehicle) => `turim:${vehicle.id}` === product.id) : [];
   if (matches.length !== 1) throw stockError("WEBSITE_CATALOG_INVALID_DETAILS");
-  return { ...product, ...websiteVehicleDescription(matches[0].descricao, product.name) };
+  const detail = matches[0], year = vehicleYear(detail.ano);
+  const vehicleFactsWarnings = [...(product.vehicleFactsWarnings || [])];
+  if (year === undefined) vehicleFactsWarnings.push(factWarning("year", "vehicle_details.ano", detail.ano));
+  else if (product.year !== undefined && product.year !== year && product.vehicleFactsSources?.year === "stock.ano") {
+    vehicleFactsWarnings.push({ field: "year", source: "vehicle_details.ano", code: "year_mismatch", otherSource: "stock.ano" });
+  }
+  return { ...product, ...websiteVehicleDescription(detail.descricao, product.name),
+    ...(year === undefined ? {} : { year, vehicleFactsSources: { ...product.vehicleFactsSources, year: "vehicle_details.ano" } }),
+    ...(vehicleFactsWarnings.length ? { vehicleFactsWarnings } : {}) };
 }
 
 async function fetchWebsiteHtml(url, { fetchImpl, signal }) {

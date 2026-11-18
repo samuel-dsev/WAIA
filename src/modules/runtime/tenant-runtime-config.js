@@ -1,5 +1,6 @@
 import { MODULE_KEYS } from "../../core/contracts.js";
 import { WEBSITE_CATALOG_TEXT_MAX_LENGTH } from "../../core/catalog-limits.js";
+import { websiteVehicleFacts } from "../../core/vehicle-facts.js";
 import { parseFlowDefinition } from "../flows/index.js";
 
 const MODULE_SET = new Set(MODULE_KEYS);
@@ -86,6 +87,7 @@ function parseCatalogItem(value, path, website = false) {
     id: stringId(value.id, `${path}.id`),
     name: requiredText(value.name, `${path}.name`, { max: 160 }),
     description: optionalText(value.description, `${path}.description`, { max: website ? WEBSITE_CATALOG_TEXT_MAX_LENGTH : 500 }),
+    ...(website ? websiteVehicleFacts(value) : {}),
     ...(website && value.introduction != null ? { introduction: optionalText(value.introduction, `${path}.introduction`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
     ...(website && value.details != null ? { details: optionalText(value.details, `${path}.details`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
     price: value.price == null ? undefined : finiteAmount(value.price, `${path}.price`),

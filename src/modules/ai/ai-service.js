@@ -141,7 +141,7 @@ export class MultiTenantAiService {
       const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
       const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
-        items: websiteCatalog.items.map(({ imageUrl, imageUrls, introduction, details, ...item }) => item),
+        items: websiteCatalog.items.map(({ imageUrl, imageUrls, introduction, details, vehicleFactsSources, vehicleFactsWarnings, ...item }) => item),
       } } : safeContext;
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(modelContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;

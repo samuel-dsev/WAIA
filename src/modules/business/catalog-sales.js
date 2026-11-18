@@ -1,5 +1,5 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
-import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification } from "./website-catalog-interaction.js";
+import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification, WEBSITE_CATALOG_LIST_FORMAT_VERSION } from "./website-catalog-interaction.js";
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -73,7 +73,8 @@ export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
 
 export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Apresente o estoque aqui na conversa. Não escreva endereço do site, link ou instrução para abrir o estoque fora do WhatsApp. Se faltar ficha ou foto, ofereça conferência com a equipe.
-- Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, modelo e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
+- Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, quilometragem, ano e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
+- mileageKm é a quilometragem confirmada do resumo e year é o ano validado, preferindo os detalhes. Para perguntas sobre quilometragem e ano, use esses campos numéricos do modelo identificado. Campo ausente não é zero; não substitua por números encontrados no título, descrição ou texto do cliente. Se faltar o dado, ofereça confirmação com a equipe. A lista e suas medidas são montadas pelo sistema.
 - Use products com os IDs exatos quando o cliente pedir FOTOS de um ou mais veículos específicos (até três por turno), mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque. A primeira foto leva somente o título e o primeiro parágrafo de apresentação da descrição do anúncio; não acrescente preço, campos do resumo, equipamentos ou endereço nessa legenda. A continuidade fica na legenda da última imagem. Dois modelos diferentes pedidos juntos não são versões ambíguas: envie ambos. Só esclareça quando realmente houver várias unidades possíveis para o mesmo nome, usando productIds vazio.
 - Pedidos de mais informações, ficha, equipamentos, opcionais, diferenciais, preço ou disponibilidade usam details em UMA resposta textual, sem reenviar fotos. Use a descrição sincronizada do anúncio em catalog.items[].description, que inclui a introdução e o restante do texto do veículo; envie os equipamentos, diferenciais e valor publicado quando forem o pedido, sem repetir desnecessariamente a introdução. Não deduza equipamentos a partir do nome ou do resumo antigo. Rodapés de contato/localização do anúncio não fazem parte da descrição do veículo; endereço da loja somente se o cliente solicitar. Se a descrição não trouxer o dado, peça confirmação da equipe.
 - Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
@@ -121,7 +122,7 @@ export function websiteCatalogPage(catalog, query = { ...EMPTY_FILTERS }, seen =
   if (!selected.length) return { text: "Já mostrei as opções dessa busca. Quer mudar a faixa de preço ou o modelo?" };
   const text = websiteCatalogListText(selected);
   const productIds = selected.map((item) => item.id);
-  return { text, messages: [{ text, buttons: [], websiteInteraction: { step: "list", productIds } }],
+  return { text, messages: [{ text, buttons: [], catalogListFormatVersion: WEBSITE_CATALOG_LIST_FORMAT_VERSION, websiteInteraction: { step: "list", productIds } }],
     catalogBrowse: { filters: query, priorSeenProductIds: seen.filter((id) => candidates.some((item) => item.id === id)).slice(0, 100) } };
 }
 

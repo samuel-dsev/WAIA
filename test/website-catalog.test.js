@@ -76,8 +76,9 @@ test("pedidos por faixa da Turim montam lista em texto e suprimem redirecionamen
   assert.equal(budget.catalogBrowse.filters.maxPrice, 60_000);
   const outgoing = createWhatsAppReplyPayload({ to: "test-recipient", ...budget.messages[0] });
   assert.equal(outgoing.type, "text");
-  assert.match(outgoing.text.body, /Modelo 1\*\nModelo: Versão 1\nValor: R\$\s59\.900,00\n\n\*Modelo 2\*/u);
-  assert.doesNotMatch(outgoing.text.body, /21\.345|Automático|Prata/u);
+  assert.match(outgoing.text.body, /Modelo 1\*\n21\.345 km - 2020\nValor: R\$\s59\.900,00\n\n\*Modelo 2\*/u);
+  assert.doesNotMatch(outgoing.text.body, /Modelo:|Automático|Prata/u);
+  assert.equal(budget.messages[0].catalogListFormatVersion, 2);
   assert.match(outgoing.text.body, /Gostou de algum\?.+fotos dele/u);
   assert.doesNotMatch(outgoing.text.body, /turimautos\.com|Modelo 4/u);
   const photoRequest = await turn("tenho em mente um Onix, tem fotos dele?");
@@ -102,7 +103,7 @@ test("PostgreSQL: troca de estoque, indisponibilidade, isolamento e tentativa co
 }, async () => {
   assert.ok(process.env.DATABASE_URL && process.env.DATABASE_MIGRATOR_URL);
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: "-c app.is_platform_admin=true" });
   const company = { id: randomUUID() }, neighbor = { id: randomUUID() };
   try {
     await owner.query("INSERT INTO empresas (id, slug, nome, nome_exibicao, status) SELECT id, id::text, 'Teste', 'Teste', 'ativa' FROM unnest($1::uuid[]) id",

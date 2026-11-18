@@ -5,14 +5,49 @@ import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
 import { loadTradeInEvaluationSession } from "./trade-in-session.js";
 import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../ai/inbound-content.js";
-import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState } from "./reply-batch.js";
+import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState, websiteListFormatMetadata } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
-import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt } from "../business/website-catalog-interaction.js";
+import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt, normalizeWebsiteListFormatVersion } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
+
+async function canDispatchWebsiteReply(client, empresaId, part) {
+  const productId = part.catalogProductId;
+  const websiteCard = /^turim:[1-9]\d*$/u.test(productId);
+  const redirect = hasWebsiteCatalogLink(part.text);
+  const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
+  const listFormatVersion = normalizeWebsiteListFormatVersion(part.catalogListFormatVersion);
+  if (part.catalogListFormatVersion !== undefined && (listFormatVersion === null || interaction?.step !== "list")) return false;
+  if (!websiteCard && !redirect && !interaction) return true;
+  const catalog = await loadWebsiteCatalog(client, empresaId);
+  if (!catalog) return !websiteCard && !interaction;
+  if (redirect) return false;
+  const live = await client.query(
+    `SELECT 1 FROM empresas e JOIN configuracoes_revisoes r
+       ON r.empresa_id = e.id AND r.config_version = e.configuracao_ativa_versao
+      WHERE e.id = $1 AND e.configuracao_runtime_modo = 'versionado'
+        AND e.versao_configuracao = e.configuracao_ativa_versao
+        AND r.configuracao_compilada #> '{configuration,modules}' ? 'catalog'`, [empresaId],
+  );
+  if (!live.rowCount) return false;
+  const trustedItem = (id) => catalog.items.find((candidate) => candidate.id === id && candidate.active !== false && candidate.availability !== "unavailable");
+  if (interaction) {
+    const items = interaction.productIds.map(trustedItem);
+    if (items.some((item) => !item)) return false;
+    if (interaction.step === "list") {
+      return part.text === websiteCatalogSelectionPrompt || part.text === websiteCatalogListText(items, { formatVersion: listFormatVersion });
+    }
+  }
+  if (!websiteCard) return true;
+  const item = trustedItem(productId);
+  if (!item?.imageUrl) return false;
+  if (Number.isInteger(part.catalogPhotoIndex)) return matchesWebsiteGalleryPart(item, part.catalogPhotoIndex, part);
+  const current = productMessage(item);
+  return current.text === part.text && current.imageUrl === part.imageUrl;
+}
 
 const TYPE_FROM_DATABASE = Object.freeze({
   texto: "text",
@@ -248,6 +283,7 @@ export class PostgresJobHandlerRepository {
   prepareReply({ empresaId, message, reply, origin }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
       if (reply.messages != null) return prepareReplyBatch(client, { empresaId, message, reply, origin });
+      const listFormatMetadata = websiteListFormatMetadata(reply);
       const sequence = (await client.query(
         `UPDATE conversas SET next_sequence = next_sequence + 1
           WHERE empresa_id = $1 AND id = $2
@@ -269,6 +305,7 @@ export class PostgresJobHandlerRepository {
           reply.buttons?.length ? "interativo" : "texto", reply.text,
           origin === "ai" ? "ia" : "fluxo_deterministico", sequence, message.correlationId,
           message.id, JSON.stringify({ buttons: reply.buttons || [], ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
+            ...listFormatMetadata,
             ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
             ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
@@ -278,13 +315,13 @@ export class PostgresJobHandlerRepository {
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
         ],
       )).rows[0];
-      if (row) return { id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, inboundTurnSequence: row.outbound_payload?.inboundTurnSequence, status: row.status };
+      if (row) return { ...websiteListFormatMetadata(row.outbound_payload || {}), id: row.id, text: row.corpo, buttons: row.outbound_payload?.buttons || [], sendNotBefore: row.outbound_payload?.sendNotBefore || null, inboundTurnSequence: row.outbound_payload?.inboundTurnSequence, status: row.status };
       const existing = (await client.query(
         `SELECT id, corpo, outbound_payload, external_message_id, status
            FROM mensagens WHERE empresa_id = $1 AND source_message_id = $2 AND direcao = 'saida'`,
         [empresaId, message.id],
       )).rows[0];
-      return { id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, inboundTurnSequence: existing.outbound_payload?.inboundTurnSequence, externalMessageId: existing.external_message_id, status: existing.status };
+      return { ...websiteListFormatMetadata(existing.outbound_payload || {}), id: existing.id, text: existing.corpo, buttons: existing.outbound_payload?.buttons || [], sendNotBefore: existing.outbound_payload?.sendNotBefore || null, inboundTurnSequence: existing.outbound_payload?.inboundTurnSequence, externalMessageId: existing.external_message_id, status: existing.status };
     });
   }
 
@@ -321,7 +358,8 @@ export class PostgresJobHandlerRepository {
       if (!row || row.external_message_id) return { allowed: false };
       if (['started','uncertain'].includes(row.outbound_payload?.dispatchState)) return { allowed: false, uncertain: true };
       if (!['processando','enfileirada'].includes(row.status)) return { allowed: false };
-      if (!await this.canSendBotReplyInTransaction(client, { empresaId, messageId })) {
+      if (!await this.canSendBotReplyInTransaction(client, { empresaId, messageId })
+        || !await canDispatchWebsiteReply(client, empresaId, { ...row.outbound_payload, text: row.corpo })) {
         await client.query("UPDATE mensagens SET status='ignorada_duplicidade' WHERE empresa_id=$1 AND id=$2", [empresaId, replyId]);
         return { allowed: false };
       }
@@ -336,39 +374,8 @@ export class PostgresJobHandlerRepository {
       WHERE empresa_id=$1 AND id=$2 AND external_message_id IS NULL AND outbound_payload->>'dispatchState'='started'`, [empresaId, replyId]));
   }
 
-  async canSendWebsiteReply({ empresaId, part }) {
-    const productId = part.catalogProductId;
-    const websiteCard = /^turim:[1-9]\d*$/u.test(productId);
-    const redirect = hasWebsiteCatalogLink(part.text);
-    const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
-    if (!websiteCard && !redirect && !interaction) return true;
-    return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const catalog = await loadWebsiteCatalog(client, empresaId);
-      if (!catalog) return !websiteCard && !interaction;
-      if (redirect) return false;
-      const live = await client.query(
-        `SELECT 1 FROM empresas e JOIN configuracoes_revisoes r
-           ON r.empresa_id = e.id AND r.config_version = e.configuracao_ativa_versao
-          WHERE e.id = $1 AND e.configuracao_runtime_modo = 'versionado'
-            AND e.versao_configuracao = e.configuracao_ativa_versao
-            AND r.configuracao_compilada #> '{configuration,modules}' ? 'catalog'`, [empresaId],
-      );
-      if (!live.rowCount) return false;
-      const trustedItem = (id) => catalog.items.find((candidate) => candidate.id === id && candidate.active !== false && candidate.availability !== "unavailable");
-      if (interaction) {
-        const items = interaction.productIds.map(trustedItem);
-        if (items.some((item) => !item)) return false;
-        if (interaction.step === "list") {
-          return part.text === websiteCatalogSelectionPrompt || part.text === websiteCatalogListText(items);
-        }
-      }
-      if (!websiteCard) return true;
-      const item = trustedItem(productId);
-      if (!item?.imageUrl) return false;
-      if (Number.isInteger(part.catalogPhotoIndex)) return matchesWebsiteGalleryPart(item, part.catalogPhotoIndex, part);
-      const current = productMessage(item);
-      return current.text === part.text && current.imageUrl === part.imageUrl;
-    });
+  canSendWebsiteReply({ empresaId, part }) {
+    return withTenantTransaction(this.pool, { empresaId }, ({ client }) => canDispatchWebsiteReply(client, empresaId, part));
   }
 
   cancelPreparedReply({ empresaId, messageId }) {

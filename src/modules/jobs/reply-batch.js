@@ -1,12 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { createWhatsAppReplyPayload } from "../whatsapp/outbound.js";
 import { normalizeCatalogBrowseState } from "../business/catalog-sales.js";
-import { normalizeWebsiteInteraction } from "../business/website-catalog-interaction.js";
+import { normalizeWebsiteInteraction, normalizeWebsiteListFormatVersion } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
 const maxReplyParts = 303; // Até três veículos com 100 fotos e a pergunta em texto.
+
+export function websiteListFormatMetadata(part) {
+  if (part.catalogListFormatVersion === undefined) return {};
+  if (normalizeWebsiteListFormatVersion(part.catalogListFormatVersion) === null
+    || normalizeWebsiteInteraction(part.websiteInteraction)?.step !== "list" || part.imageUrl) throw invalid();
+  return { catalogListFormatVersion: part.catalogListFormatVersion };
+}
 
 export function replyFromRow(row) {
   return row && {
@@ -14,6 +21,7 @@ export function replyFromRow(row) {
     ...(row.outbound_payload?.imageUrl ? { imageUrl: row.outbound_payload.imageUrl } : {}),
     ...(row.outbound_payload?.catalogProductId ? { catalogProductId: row.outbound_payload.catalogProductId } : {}),
     ...(row.outbound_payload?.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(row.outbound_payload.websiteInteraction) } : {}),
+    ...websiteListFormatMetadata(row.outbound_payload || {}),
     ...(row.outbound_payload?.tradeInEvaluation ? { tradeInEvaluation: normalizeTradeInEvaluation(row.outbound_payload.tradeInEvaluation) } : {}),
     ...(row.outbound_payload?.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
     ...(Number.isInteger(row.outbound_payload?.catalogPhotoIndex) ? { catalogPhotoIndex: row.outbound_payload.catalogPhotoIndex } : {}),
@@ -84,6 +92,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
       buttons: part.buttons || [], ...(payload.type === "image" ? { imageUrl: payload.image.link } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(websiteInteraction ? { websiteInteraction } : {}),
+      ...websiteListFormatMetadata(part),
       ...(tradeInEvaluation ? { tradeInEvaluation } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}) };
   });
@@ -108,6 +117,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
       ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(part.websiteInteraction ? { websiteInteraction: part.websiteInteraction } : {}),
+      ...(part.catalogListFormatVersion === undefined ? {} : { catalogListFormatVersion: part.catalogListFormatVersion }),
       ...(part.tradeInEvaluation ? { tradeInEvaluation: part.tradeInEvaluation } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}),
       ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),
