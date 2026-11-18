@@ -98,6 +98,23 @@ test("ficha de simulação preserva dados e distingue os modelos com fotos do ú
   assert.equal(reply.websiteInteraction.step, "closed");
 });
 
+test("dados de financiamento aceito concluem ficha mesmo quando a IA classifica a continuação como none", async () => {
+  const card = { status: "qualified", name: "Ana", summary: "Ana forneceu CPF e nascimento para a simulação do Onix que já aceitou.", qualification: "Dados coletados para análise da equipe." };
+  const { service } = setup(async () => response("none", [items[0].id], "Recebi os dados e a equipe dará continuidade.", card),
+    [{ type: "text", direction: "inbound", body: "Sou Ana, quero simular o Onix." }]);
+  const current = { ...catalog, financingSession: { productIds: [items[0].id], status: "pending" }, photoHistoryProductIds: items.map((item) => item.id) };
+  const reply = await service.reply(request("000.000.000-00\n01/01/1990", current));
+  assert.equal(reply.source, "ai");
+  assert.ok(reply.leadQualification);
+  assert.equal(reply.websiteInteraction.step, "closed");
+  assert.deepEqual(reply.websiteInteraction.productIds, [items[0].id]);
+  assert.match(reply.leadQualification.summary, /Últimos modelos com fotos/u);
+  const unaccepted = await service.reply(request("000.000.000-00\n01/01/1990", catalog));
+  assert.equal(unaccepted.leadQualification, undefined);
+  const photos = await service.reply({ ...request("", current), turnMessages: [{ id: "photo", type: "image", text: "Sou Ana", mediaStored: true }] });
+  assert.equal(photos.leadQualification, undefined);
+});
+
 test("troca e localização exigem parágrafos distintos sem criar mensagens extras", async () => {
   const { service } = setup(async (call) => {
     assert.ok(call.text.format.schema.properties.text.pattern);

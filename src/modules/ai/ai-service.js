@@ -159,7 +159,7 @@ export class MultiTenantAiService {
       ].filter(Boolean).join("\n");
       const evaluationTurnInstructions = evaluationEnabled ? tradeInTurnInstructions(safeContext.tradeInEvaluation, request.turnMessages) : "";
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
-        + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "")
+        + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. O recebimento de dados para uma simulação já aceita continua usando finance com os IDs da pendência, mesmo sem repetir o pedido na mensagem atual. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "")
         + (evaluationEnabled ? "\nNa avaliação, nome informado e pedido/aceite presencial permitem concluir no mesmo turno, sem nova confirmação de cadastro. text responde às perguntas atuais e pode agradecer e informar contato futuro de um vendedor. Encerre sem pergunta de continuidade ou confirmação de cadastro, interesse ou telefone. Se apenas recebeu fotos e uma dúvida de localização, mantenha collect_photos e collecting, sem anunciar contato de vendedor. Sempre preencha tradeInEvaluation ao tratar de avaliação. Não afirme reserva de horário, envio da ficha ou notificação ao grupo/equipe, nem repita CPF/nascimento. Preserve os dados da ficha em summary com no máximo 1600 caracteres." : "")
         + (evaluationTurnInstructions ? "\n" + evaluationTurnInstructions : "")
         + (turnGuidance ? "\n" + turnGuidance : "");
@@ -317,9 +317,21 @@ export class MultiTenantAiService {
           }
           const websitePresentation = websiteCatalog && ["browse", "more", "products", "choose"].includes(structured.catalogAction);
           const selectedIds = Array.isArray(structured.productIds) ? structured.productIds : [];
+          const pendingFinanceIds = websiteCatalog?.financingSession?.status === "pending"
+            ? websiteCatalog.financingSession.productIds || (websiteCatalog.financingSession.productId ? [websiteCatalog.financingSession.productId] : []) : [];
+          const completesPendingFinance = websiteCatalog && !websiteDetails && !evaluationProposal
+            && structured.catalogAction === "none" && structured.leadQualification?.status === "qualified"
+            && !request.turnMessages?.some((part) => part.type === "image")
+            && pendingFinanceIds.length > 0 && pendingFinanceIds.length <= 3
+            && selectedIds.every((id) => pendingFinanceIds.includes(id));
+          if (completesPendingFinance) {
+            structured.catalogAction = "finance";
+            structured.productIds = [...pendingFinanceIds];
+          }
+          const financingIds = completesPendingFinance ? pendingFinanceIds : selectedIds;
           financingVehicles = websiteCatalog && !websiteDetails && structured.catalogAction === "finance"
-            && selectedIds.length > 0 && selectedIds.length <= 3 && new Set(selectedIds).size === selectedIds.length
-            ? selectedIds.map((id) => websiteCatalog.items.find((item) => item.id === id && item.active !== false && item.availability !== "unavailable")) : [];
+            && financingIds.length > 0 && financingIds.length <= 3 && new Set(financingIds).size === financingIds.length
+            ? financingIds.map((id) => websiteCatalog.items.find((item) => item.id === id && item.active !== false && item.availability !== "unavailable")) : [];
           if (financingVehicles.some((item) => !item || !hasWebsiteFinancingConsent(websiteCatalog, request.message, item.id, promptHistory))) financingVehicles = [];
           let mayQualify = !websiteCatalog && !currentEvaluation || financingVehicles.length > 0 || evaluationQualifies && !websitePresentation && !websiteDetails;
           const prematureCollection = websiteCatalog && !financingVehicles.length && !websitePresentation
