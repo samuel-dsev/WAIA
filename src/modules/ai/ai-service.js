@@ -12,7 +12,7 @@ import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesRepl
 import { loadConversationContext } from "./conversation-context.js";
 import { hasWebsiteFinancingConsent, websiteReferenceClarification } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, hasTradeInEvaluationConsent,
-  mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
+  mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
@@ -147,7 +147,7 @@ export class MultiTenantAiService {
       const selectionFormat = evaluationEnabled ? tradeInEvaluationFormat(baseFormat) : baseFormat;
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
         + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "")
-        + (evaluationEnabled ? "\nNa avaliação, nome informado e pedido/aceite presencial permitem concluir no mesmo turno, sem nova confirmação de cadastro. text responde às perguntas atuais e pode agradecer e informar contato futuro de um vendedor. Não afirme reserva de horário, envio da ficha ou notificação ao grupo/equipe, nem repita CPF/nascimento. Preserve os dados da ficha em summary com no máximo 1600 caracteres." : "");
+        + (evaluationEnabled ? "\nNa avaliação, nome informado e pedido/aceite presencial permitem concluir no mesmo turno, sem nova confirmação de cadastro. text responde às perguntas atuais e pode agradecer e informar contato futuro de um vendedor. Encerre sem pergunta de continuidade ou confirmação de cadastro, interesse ou telefone. Se apenas recebeu fotos e uma dúvida de localização, mantenha collect_photos e collecting, sem anunciar contato de vendedor. Sempre preencha tradeInEvaluation ao tratar de avaliação. Não afirme reserva de horário, envio da ficha ou notificação ao grupo/equipe, nem repita CPF/nascimento. Preserve os dados da ficha em summary com no máximo 1600 caracteres." : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
@@ -271,7 +271,9 @@ export class MultiTenantAiService {
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
-          const evaluationProposal = evaluationEnabled ? normalizeTradeInEvaluation(structured.tradeInEvaluation) : null;
+          const evaluationProposal = evaluationEnabled ? normalizeTradeInEvaluation(declinesTradeInEvaluation(request.message)
+            && safeContext.tradeInEvaluation?.session ? { step: "declined", interestName: safeContext.tradeInEvaluation.session.interestName || null,
+              interestSource: safeContext.tradeInEvaluation.session.interestSource || "unknown" } : structured.tradeInEvaluation) : null;
           delete structured.tradeInEvaluation;
           const evaluationConsent = evaluationEnabled && hasTradeInEvaluationConsent(safeContext.tradeInEvaluation, request.message, promptHistory, request.turnMessages, evaluationProposal?.step);
           evaluationState = evaluationProposal && (!["collect_photos", "visit_requested", "human_review_requested"].includes(evaluationProposal.step) || evaluationConsent)
@@ -320,6 +322,7 @@ export class MultiTenantAiService {
             leadQualification = mayQualify ? parseQualification(card, { configVersion: config.version,
               evidence: qualificationEvidence }) : null;
             if (leadQualification && evaluationQualifies) {
+              structured.text = evaluationAnswerWithoutFollowUp(structured.text);
               if (announcesEvaluationDelivery(structured.text) || announcesEvaluationBooking(structured.text) || structured.text.includes("?")
                 || /\b\d{3}\.?\d{3}\.?\d{3}[- ]?\d{2}\b/u.test(structured.text)) {
                 if (attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }

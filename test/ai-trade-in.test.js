@@ -91,6 +91,16 @@ test("interesse explícito prevalece sobre anúncio e nome já informado não é
   assert.doesNotMatch(reply.text, /Como posso te chamar/u);
 });
 
+test("pergunta de localização durante coleta de fotos não autoriza visita nem ficha", async () => {
+  const { ai } = setup(async () => output("Ficamos em Taubaté. Gostaria de solicitar uma avaliação presencial?", state("visit_requested"), card),
+    [{ type: "text", direction: "inbound", body: "Sou Ana. Vou enviar fotos do meu HB20" }]);
+  const reply = await ai.reply(request("Qual cidade fica essa loja?", state("collect_photos")));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.tradeInEvaluation, undefined);
+  assert.match(reply.text, /Taubaté/u);
+});
+
 test("encerramento de avaliação não duplica promessa nem repete CPF no texto público", async () => {
   let calls = 0;
   const { ai } = setup(async () => output(++calls === 1 ? "Nosso vendedor entrará em contato. CPF 000.000.000-00." : "A loja fica em Taubaté.",
@@ -113,4 +123,24 @@ test("encerramento natural válido da IA é aproveitado sem exigir texto vazio n
   assert.equal(reply.text, text);
   assert.equal(factory.requests.length, 1);
   assert.equal(reply.tradeInEvaluation.step, "completed");
+});
+
+test("ficha validada remove pergunta extra mantendo endereço e encerramento natural", async () => {
+  const text = "Ficamos na Av. Central, 30, Taubaté. Obrigada, Ana! Um vendedor entrará em contato. Posso ajudar em mais alguma coisa?";
+  const { ai, factory } = setup(async () => output(text, state("visit_requested"), card),
+    [{ type: "text", direction: "inbound", body: "Sou Ana, quero avaliação presencial do meu HB20" }]);
+  const reply = await ai.reply(request("Pode continuar a avaliação", state("visit_requested")));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.text, text.replace(" Posso ajudar em mais alguma coisa?", ""));
+  assert.equal(factory.requests.length, 1);
+  assert.equal(reply.tradeInEvaluation.step, "completed");
+});
+
+test("recusa explícita encerra a pendência mesmo quando o modelo omite metadata", async () => {
+  const { ai } = setup(async () => output("Tudo bem, podemos falar do Onix.", null),
+    [{ type: "text", direction: "inbound", body: "Sou Ana, quero avaliação presencial do meu HB20" }]);
+  const reply = await ai.reply(request("Não quero mais a avaliação. Quero saber do Onix.", state("visit_requested")));
+  assert.equal(reply.source, "ai");
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.tradeInEvaluation.step, "declined");
 });

@@ -20,6 +20,14 @@ test("aceite de avaliação acompanha a oferta atual e não aceita lista, reconh
   assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, "[Imagem recebida]", [], [{ type: "image" }], "visit_requested"), false);
   assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, "[Imagem recebida]", [], [{ type: "image" }], "human_review_requested"), false);
   assert.equal(hasTradeInEvaluationConsent({ session: { ...state("collect_photos"), visitAccepted: true } }, "Sou Ana", [], [], "visit_requested"), true);
+  for (const message of ["Qual cidade fica essa loja?", "Sim, qual endereço da loja?", "A avaliação é presencial?", "Onde fica a loja?"]) {
+    assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, message, [], [], "visit_requested"), false, message);
+  }
+  assert.equal(hasTradeInEvaluationConsent(context, "Qual cidade fica essa loja?", history, [], "visit_requested"), false);
+  assert.equal(hasTradeInEvaluationConsent(context, "Sim, qual endereço da loja?", history, [], "visit_requested"), true);
+  for (const message of ["Quero agendar uma avaliação presencial. Qual endereço?", "Prefiro levar o carro", "Vou até a loja para a avaliação", "Pode marcar a avaliação"]) {
+    assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, message, [], [], "visit_requested"), true, message);
+  }
   assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, "A equipe já avaliou?", [], [], "human_review_requested"), false);
   assert.equal(hasTradeInEvaluationConsent({ session: state("collect_photos") }, "Não quero que o vendedor ligue", [], [], "human_review_requested"), false);
   assert.equal(mayQualifyTradeInEvaluation(state("collect_photos"), true), false);

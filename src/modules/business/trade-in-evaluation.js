@@ -18,6 +18,7 @@ export function tradeInEvaluationFormat(base) {
   const format = structuredClone(base);
   format.schema.properties.tradeInEvaluation = {
     type: ["object", "null"], additionalProperties: false,
+    description: "Estado de avaliação obrigatório ao oferecer fotos/visita, receber fotos, aceitar, continuar ou recusar avaliação. Null somente quando não tratar desse assunto.",
     properties: {
       step: { type: "string", enum: STEPS.filter((step) => step !== "completed") },
       interestName: { type: ["string", "null"] },
@@ -36,8 +37,8 @@ export const TRADE_IN_EVALUATION_INSTRUCTIONS = [
   "O sim curto se refere à oferta efetivamente enviada mais recente. Não converta aceite de fotos/lista em visita ou financiamento. tradeInEvaluation.session preserva a pendência confirmada. Fotos, dúvidas ou mudança de assunto suspendem a coleta sem apagar dados nem presumir desistência. Use declined somente para recusa explícita da avaliação; falta de fotos não é recusa. Uma pergunta sobre localização não constitui pedido de avaliação.",
   "As mensagens de imagem fornecem somente metadados de recebimento e legenda escrita pelo cliente. Não há análise visual: não identifique marca, modelo, placa, estado, danos ou valor pela imagem. Se o arquivo estiver indisponível, explique o problema e permita alternativa. Não chame foto de carro de comprovante.",
   "Separe o veículo de troca do veículo de interesse. Em quero o Onix e tenho um HB20 para trocar, interesse é Onix e troca é HB20. interestName descreve só o interesse de compra, nunca o carro de troca. Use interestSource=customer apenas para escolha explícita do cliente, com a forma do nome que ele escreveu; ad para modelo identificável no anúncio e ainda não escolhido; unknown e interestName=null quando desconhecido. O anúncio não comprova intenção. Uma escolha recente prevalece e possível interesse não precisa ser dito ao cliente.",
-  "tradeInEvaluation é null quando não atualizar esse assunto. Quando houver atualização, retorne step, interestName e interestSource. O sistema valida aceite, acrescenta o rótulo de interesse na ficha e só conclui após a confirmação de envio. Não use finance para avaliação; use none/details conforme a solicitação. Preserve a simulação pendente quando houver.",
-  "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text responde às dúvidas atuais e pode encerrar naturalmente agradecendo pelo nome e informando que um vendedor entrará em contato para combinar os detalhes, seguindo a referência de encerramento. Não peça nova confirmação de cadastro. O sistema completa o encerramento quando faltar, sem duplicá-lo. Nunca afirme que enviou a ficha ou notificou o grupo/equipe e não repita CPF/nascimento no texto público.",
+  "Sempre preencha tradeInEvaluation ao oferecer avaliação por fotos ou presencial, receber fotos ou tratar de uma avaliação pendente; null não registra a oferta e impede o aceite curto seguinte. Quando oferecer as duas alternativas, use offer_visit; o próximo pedido explícito de fotos deve usar collect_photos. Recusa explícita usa declined mesmo quando atender um pedido de galeria na mesma resposta. Quando houver atualização, retorne step, interestName e interestSource. O sistema valida aceite, acrescenta o rótulo de interesse na ficha e só conclui após a confirmação de envio. Não use finance para avaliação; use none/details conforme a solicitação. Preserve a simulação pendente quando houver.",
+  "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text responde às dúvidas atuais e pode encerrar naturalmente agradecendo pelo nome e informando que um vendedor entrará em contato para combinar os detalhes, seguindo a referência de encerramento. Encerre sem pergunta: não peça nova confirmação de cadastro/telefone/interesse nem pergunte se pode ajudar em algo mais. O sistema completa o encerramento quando faltar, sem duplicá-lo. Nunca afirme que enviou a ficha ou notificou o grupo/equipe e não repita CPF/nascimento no texto público.",
 ].join("\n");
 
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
@@ -45,8 +46,15 @@ export function hasTradeInEvaluationConsent(context, message, history, turnMessa
   const last = history.findLast((part) => part.role === "assistant")?.content || "";
   if (targetStep === "visit_requested" && session?.step !== "visit_requested" && !session?.visitAccepted) {
     const offeredVisit = session?.step === "offer_visit" && session.direct === true && /\bavalia[cç][aã]o\b[^?]*\?\s*$/iu.test(last);
-    const explicitVisit = /\b(?:agendar|agende|agendamento|marcar|marque|presencial|pessoalmente|levar|visita|loja)\b/u.test(answer);
-    if (!offeredVisit && !explicitVisit || turnMessages.length > 0 && turnMessages.every((part) => part.type === "image") && !explicitVisit) return false;
+    const clauses = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?\n]/u);
+    const explicitVisit = clauses.some((part) => !/\b(?:nao|talvez|se eu)\b/u.test(part)
+      && (/^\s*(?:agende|marque|agendar|marcar)\b/u.test(part)
+        || /\b(?:quero|gostaria|prefiro|preciso|vou|irei|vamos|pode|posso|poderia)\b.{0,100}\b(?:agendar|marcar|presencial|pessoalmente|levar|visitar)\b/u.test(part)
+        || /\b(?:vou|irei|vamos|quero ir|gostaria de ir)\b.{0,60}\bloja\b/u.test(part)));
+    const locationQuestion = /\b(?:qual (?:a |e a |o |e o )?(?:cidade|endereco)|onde fica|onde e|localizacao)\b/u.test(answer);
+    const separateAcceptance = clauses.some((part) => /^\s*(?:sim|pode sim|pode ser|claro|com certeza|vamos sim)\s*$/u.test(part));
+    if (!offeredVisit && !explicitVisit || locationQuestion && !explicitVisit && !separateAcceptance
+      || turnMessages.length > 0 && turnMessages.every((part) => part.type === "image") && !explicitVisit) return false;
   }
   if (targetStep === "human_review_requested" && session?.step !== "human_review_requested" && !session?.humanReviewAccepted) {
     const humanClause = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?]/u).findLast((part) => /\b(?:vendedor|atendente|equipe|humano|pessoa)\b/u.test(part));
@@ -54,7 +62,7 @@ export function hasTradeInEvaluationConsent(context, message, history, turnMessa
       || !/\b(?:quero|gostaria|preciso|pode(?:m)?|chame|chamar|falar|contato|encaminh[ae])\b/u.test(humanClause)) return false;
   }
   const evaluationClause = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?]/u).findLast((part) => /\bavalia(?:r|cao)\b/u.test(part));
-  if (evaluationClause && /\b(?:nao quero|desisti|cancel[ae])\b/u.test(evaluationClause)) return false;
+  if (declinesTradeInEvaluation(message)) return false;
   if (/^(?:nao(?: quero)?|desisti|cancela|cancele)[.! ]*$/u.test(answer)) return false;
   if (ACCEPTED.includes(session?.step)) return true;
   if (evaluationClause && /\b(?:quero|gostaria|preciso|vamos|pode(?:mos)?|poderia)\b.{0,100}\bavalia(?:r|cao)\b/u.test(evaluationClause)) return true;
@@ -64,6 +72,17 @@ export function hasTradeInEvaluationConsent(context, message, history, turnMessa
   const acknowledgements = String(message).split("\n").map(normalized).every((part) => /^(?:entendi|certo|ta|tudo bem)?[.! ]*$/u.test(part));
   return ["offer_photos", "offer_visit"].includes(session?.step) && session.direct === true && question
     && !acknowledgements && !/^(?:nao\b|talvez\b)|\b(?:nao sei|ainda nao|depois|mais tarde)\b/u.test(answer);
+}
+
+export function declinesTradeInEvaluation(message) {
+  const clause = normalized(message).split(/\b(?:mas|porem|so que)\b|[,;.!?]/u).findLast((part) => /\bavalia(?:r|cao)\b/u.test(part));
+  return Boolean(clause && /\b(?:nao quero|desisti|cancel[ae])\b/u.test(clause));
+}
+
+export function evaluationAnswerWithoutFollowUp(answer) {
+  // With name and evaluation consent already validated, a trailing question is
+  // unnecessary. Preserve the actual answers and use the closing reference.
+  return String(answer || "").replace(/(?:^|(?<=[.!?\n]))\s*(?:posso|podemos|pode(?:ria)?|gostaria|quer|qual|como|mais alguma)[^.!?\n]*\?\s*$/iu, "").trim();
 }
 
 export function mayQualifyTradeInEvaluation(state, consent) {
