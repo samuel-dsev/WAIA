@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { websiteVehicleDescription } from "./description.js";
 
 export const WEBSITE_CATALOG_TYPE = "website_catalog";
 export const WEBSITE_CATALOG_URL = "https://turimautos.com/estoque";
@@ -6,7 +7,7 @@ export const WEBSITE_CATALOG_MAX_AGE_MS = 10 * 60_000;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_ITEMS = 100;
 const SITE_ORIGIN = new URL(WEBSITE_CATALOG_URL).origin;
-const mileage = new Intl.NumberFormat("pt-BR");
+const SNAPSHOT_VERSION = 2;
 
 const stockVehicle = z.object({
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -39,7 +40,7 @@ function stockPhoto(value) {
   return url.href;
 }
 
-export function parseWebsiteStock(html) {
+function websiteVehicles(html) {
   const entries = [...html.matchAll(/^[\t ]*window\.VEICULOS[\t ]*=[\t ]*(\[[^\r\n]*\]);[\t ]*\r?$/gmu)];
   if (entries.length !== 1) throw stockError("WEBSITE_CATALOG_STOCK_NOT_FOUND");
   let raw;
@@ -48,7 +49,11 @@ export function parseWebsiteStock(html) {
   if (!parsed.success || new Set(parsed.data.map((vehicle) => vehicle.id)).size !== parsed.data.length) {
     throw stockError("WEBSITE_CATALOG_INVALID_STOCK");
   }
-  const products = parsed.data.map((vehicle) => {
+  return parsed.data;
+}
+
+export function parseWebsiteStock(html) {
+  const products = websiteVehicles(html).map((vehicle) => {
     const category = vehicle.carroceria || vehicle.categoria || vehicle.detalhes?.carroceria || vehicle.detalhes?.categoria;
     const imageUrls = vehicle.imagens.map(stockPhoto).filter(Boolean);
     return {
@@ -56,9 +61,6 @@ export function parseWebsiteStock(html) {
       name: vehicle.titulo,
       ...(vehicle.modelo ? { model: vehicle.modelo } : {}),
       price: vehicle.preco > 0 ? Math.round(vehicle.preco * 100) / 100 : null,
-      description: [
-        `Ano ${vehicle.ano}`, `${mileage.format(vehicle.km)} km`, vehicle.cambio, vehicle.combustivel, vehicle.cor,
-      ].filter(Boolean).join(" · "),
       ...(category ? { category } : {}),
       url: `${SITE_ORIGIN}/veiculo?id=${vehicle.id}`,
       ...(imageUrls.length ? { imageUrl: imageUrls[0], imageUrls } : {}),
@@ -66,12 +68,22 @@ export function parseWebsiteStock(html) {
       active: true,
     };
   });
-  return { profile: WEBSITE_CATALOG_TYPE, schemaVersion: 1, products };
+  return { profile: WEBSITE_CATALOG_TYPE, schemaVersion: SNAPSHOT_VERSION, products };
 }
 
-export async function fetchWebsiteStock({ fetchImpl = fetch, signal } = {}) {
+export function parseWebsiteVehicleDetails(html, product) {
+  const entries = [...html.matchAll(/^[\t ]*window\.VEICULOS[\t ]*=[\t ]*(\[[^\r\n]*\]);[\t ]*\r?$/gmu)];
+  let raw;
+  try { raw = entries.length === 1 ? JSON.parse(entries[0][1]) : null; } catch { /* checked below */ }
+  const parsed = z.array(z.object({ id: z.number().int().positive(), descricao: z.string().max(20_000).nullish() })).max(MAX_ITEMS).safeParse(raw);
+  const matches = parsed.success ? parsed.data.filter((vehicle) => `turim:${vehicle.id}` === product.id) : [];
+  if (matches.length !== 1) throw stockError("WEBSITE_CATALOG_INVALID_DETAILS");
+  return { ...product, ...websiteVehicleDescription(matches[0].descricao, product.name) };
+}
+
+async function fetchWebsiteHtml(url, { fetchImpl, signal }) {
   const timeout = AbortSignal.timeout(10_000);
-  const response = await fetchImpl(WEBSITE_CATALOG_URL, {
+  const response = await fetchImpl(url, {
     redirect: "error", headers: { Accept: "text/html", "Cache-Control": "no-cache" },
     signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
   });
@@ -90,7 +102,24 @@ export async function fetchWebsiteStock({ fetchImpl = fetch, signal } = {}) {
     if (size > MAX_BYTES) throw stockError("WEBSITE_CATALOG_RESPONSE_TOO_LARGE");
     chunks.push(chunk);
   }
-  return parseWebsiteStock(Buffer.concat(chunks, size).toString("utf8"));
+  return Buffer.concat(chunks, size).toString("utf8");
+}
+
+export async function fetchWebsiteStock({ fetchImpl = fetch, signal } = {}) {
+  const total = AbortSignal.timeout(45_000);
+  const options = { fetchImpl, signal: signal ? AbortSignal.any([total, signal]) : total };
+  const snapshot = parseWebsiteStock(await fetchWebsiteHtml(WEBSITE_CATALOG_URL, options));
+  let next = 0;
+  // Preserve stock order, cap load on the fixed public origin, and publish the
+  // coherent snapshot only after every advert has been matched to its own ID.
+  await Promise.all(Array.from({ length: Math.min(4, snapshot.products.length) }, async () => {
+    while (next < snapshot.products.length) {
+      const index = next++;
+      const product = snapshot.products[index];
+      snapshot.products[index] = parseWebsiteVehicleDetails(await fetchWebsiteHtml(product.url, options), product);
+    }
+  }));
+  return snapshot;
 }
 
 export function websiteCatalogFromCache(row, now = Date.now()) {
@@ -98,7 +127,7 @@ export function websiteCatalogFromCache(row, now = Date.now()) {
   const age = now - timestamp;
   const snapshot = row?.cache_snapshot;
   const healthy = row?.status === "saudavel" && age >= 0 && age <= WEBSITE_CATALOG_MAX_AGE_MS
-    && snapshot?.profile === WEBSITE_CATALOG_TYPE && snapshot.schemaVersion === 1
+    && snapshot?.profile === WEBSITE_CATALOG_TYPE && snapshot.schemaVersion === SNAPSHOT_VERSION
     && Array.isArray(snapshot.products) && snapshot.products.length <= MAX_ITEMS;
   return {
     items: healthy ? snapshot.products : [],

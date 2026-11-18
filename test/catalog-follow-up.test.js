@@ -131,3 +131,17 @@ test("troca e localização exigem parágrafos distintos sem criar mensagens ext
   assert.equal(reply.text.split("\n\n").length, 3);
   assert.equal(reply.messages, undefined);
 });
+
+test("troca isolada não instrui localização e duas perguntas diferentes não criam um parágrafo de endereço", async () => {
+  const { service } = setup(async (call) => {
+    assert.match(call.instructions, /localização da loja SOMENTE se o cliente solicitar/u);
+    assert.doesNotMatch(call.instructions, /A resposta sobre troca, a localização e o convite final/u);
+    return response("none", [], "Sim, aceitamos veículo na troca, sujeito à avaliação.\n\nTambém trabalhamos com financiamento.\n\nGostaria de começar a avaliação por fotos?");
+  }, []);
+  for (const message of ["Aceita veículo na troca?", "Aceita veículo na troca?\nTrabalha com financiamento?"]) {
+    const reply = await service.reply(request(message));
+    assert.equal(reply.source, "ai");
+    assert.equal(reply.messages, undefined);
+    assert.doesNotMatch(reply.text, /Taubaté|Desembargador|endereço/u);
+  }
+});

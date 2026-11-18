@@ -73,8 +73,9 @@ export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
 
 export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Apresente o estoque aqui na conversa. Não escreva endereço do site, link ou instrução para abrir o estoque fora do WhatsApp. Se faltar ficha ou foto, ofereça conferência com a equipe.
-- Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, modelo, descrição e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
-- Use products com os IDs exatos quando o cliente pedir detalhes, ficha ou fotos de um ou mais veículos específicos (até três por turno), mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque. Dois modelos diferentes pedidos juntos não são versões ambíguas: envie ambos. Para um veículo, oferece a simulação em texto separado. Só esclareça quando realmente houver várias unidades possíveis para o mesmo nome, usando productIds vazio. Uma pergunta só de preço ou disponibilidade usa details em texto.
+- Use browse para pedidos de opções por faixa de valor ou categoria, inclusive de quem veio de anúncio. O sistema responde com uma lista de nome, modelo e preço, e pergunta qual veículo interessou e se o cliente quer ver as fotos. Use more para a próxima página dos mesmos filtros. Uma preferência sem pedido de opções, como "procuro um carro até 60 mil", pede none e uma pergunta útil.
+- Use products com os IDs exatos quando o cliente pedir FOTOS de um ou mais veículos específicos (até três por turno), mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque. A primeira foto leva somente o título e o primeiro parágrafo de apresentação da descrição do anúncio; não acrescente preço, campos do resumo, equipamentos ou endereço nessa legenda. A continuidade fica na legenda da última imagem. Dois modelos diferentes pedidos juntos não são versões ambíguas: envie ambos. Só esclareça quando realmente houver várias unidades possíveis para o mesmo nome, usando productIds vazio.
+- Pedidos de mais informações, ficha, equipamentos, opcionais, diferenciais, preço ou disponibilidade usam details em UMA resposta textual, sem reenviar fotos. Use a descrição sincronizada do anúncio em catalog.items[].description, que inclui a introdução e o restante do texto do veículo; envie os equipamentos, diferenciais e valor publicado quando forem o pedido, sem repetir desnecessariamente a introdução. Não deduza equipamentos a partir do nome ou do resumo antigo. Rodapés de contato/localização do anúncio não fazem parte da descrição do veículo; endereço da loja somente se o cliente solicitar. Se a descrição não trouxer o dado, peça confirmação da equipe.
 - Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
 - Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. Nesse caso, use finance, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. A entrada por anúncio não comprova aceite de simulação.
 - Ao confirmar que a loja trabalha com financiamento, comece com “Sim, nós trabalhamos com financiamento”.
@@ -96,7 +97,7 @@ export function asksForVehiclePhoto(message) {
 
 export function asksForWebsiteVehicleDetails(message) {
   const text = normalize(message);
-  return asksForVehiclePhoto(text) || /\b(?:tem|teria|quero|gostaria de ver|me (?:manda|envia|mostra)) (?:mais |a |os )?(?:detalhes|informacoes|ficha)\b/u.test(text);
+  return asksForVehiclePhoto(text) || /\b(?:mais (?:detalhes|informacoes)|saber mais|(?:tem|teria|quero|gostaria de ver|me (?:manda|envia|mostra)) (?:mais |a |os )?(?:detalhes|informacoes|ficha|equipamentos|opcionais|diferenciais))\b/u.test(text);
 }
 
 function filteredProducts(products, query) {
@@ -149,6 +150,17 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
   const clarification = website && websiteReferenceClarification(catalog, message, value.productIds);
   if (clarification) return clarification;
+  if (website && action === "products" && !asksForVehiclePhoto(message) && asksForWebsiteVehicleDetails(message) && value.productIds.length) {
+    // A request for more information must not resend a gallery even if the
+    // model kept the old products classification. Every fact still comes from
+    // the selected advert, not from a guessed equipment list or stock summary.
+    const body = value.productIds.map((id) => {
+      const item = byId.get(id);
+      return `*${item.name}*\n\n${item.details || item.description || "A descrição adicional não está disponível. Posso confirmar com a equipe?"}`;
+    }).join("\n\n");
+    return { text: body.length <= 4096 ? body : body.slice(0, 4095).replace(/[\uD800-\uDBFF]$/u, "") + "…",
+      websiteInteraction: { step: "discussion", productIds: value.productIds } };
+  }
   if (action === "interest") {
     const handoff = catalog.interestHandoff;
     if (website || leadQualificationEnabled || handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
@@ -162,7 +174,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     return { text: "Não consegui confirmar essa categoria no estoque publicado. Posso verificar com a equipe?" };
   }
   if (website && (action === "products" || action === "choose" && value.productIds.length > 1
-    || ["none", "details", "choose"].includes(action) && asksForWebsiteVehicleDetails(message))) {
+    || ["none", "details", "choose"].includes(action) && asksForVehiclePhoto(message))) {
     if (value.productIds.length) return websiteGalleriesReply(value.productIds.map((id) => byId.get(id)));
     return { text: /\b(?:qual versao|qual veiculo|qual modelo)\b/u.test(normalize(text)) ? text : websiteStockUnconfirmed };
   }

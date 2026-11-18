@@ -141,7 +141,7 @@ export class MultiTenantAiService {
       const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
       const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
-        items: websiteCatalog.items.map(({ imageUrl, imageUrls, ...item }) => item),
+        items: websiteCatalog.items.map(({ imageUrl, imageUrls, introduction, details, ...item }) => item),
       } } : safeContext;
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(modelContext)}\nTENANT_DATA_END`;
       const salesMode = safeContext.catalog?.salesMode === true;
@@ -155,7 +155,7 @@ export class MultiTenantAiService {
       }
       const turnGuidance = [
         alternativesAccepted ? "OFERTA ATUAL ACEITA: a última pergunta enviada ofereceu modelos/opções semelhantes e o cliente aceitou. Use browse para apresentar somente a lista do estoque, com filtros coerentes com o histórico. Não use finance/products, não pergunte para qual modelo quer simulação e não peça dados de financiamento. Uma oferta antiga de simulação não muda esse aceite." : "",
-        paragraphReply ? "FORMATAÇÃO DESTE TURNO: responda a cada pergunta em seu próprio parágrafo. Separe os parágrafos por uma linha em branco (\\n\\n), mantendo uma única mensagem. A resposta sobre troca, a localização e o convite final de avaliação ficam em três parágrafos distintos." : "",
+        paragraphReply ? "FORMATAÇÃO DESTE TURNO: responda a cada pergunta realmente feita em seu próprio parágrafo. Separe os parágrafos por uma linha em branco (\\n\\n), mantendo uma única mensagem e um último parágrafo para o convite. Não crie um assunto nem inclua localização para preencher parágrafos: endereço/cidade somente quando solicitado pelo cliente." : "",
         photoHistoryLine ? "Na ficha de simulação, preserve os dados coletados e demais solicitações. Diferencie os modelos com fotos no histórico dos modelos que o cliente escolheu simular. O sistema acrescenta dados literais conferidos nas mensagens e a linha dos últimos modelos com fotos; redija o relato de summary em até 750 caracteres para reservar espaço, sem apagar os dados fornecidos." : "",
       ].filter(Boolean).join("\n");
       const evaluationTurnInstructions = evaluationEnabled ? tradeInTurnInstructions(safeContext.tradeInEvaluation, request.turnMessages) : "";

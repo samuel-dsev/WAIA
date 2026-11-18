@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchWebsiteStock, parseWebsiteStock, WEBSITE_CATALOG_URL, websiteCatalogFromCache } from "../src/integrations/website-catalog/stock.js";
+import { fetchWebsiteStock, parseWebsiteStock, parseWebsiteVehicleDetails, WEBSITE_CATALOG_URL, websiteCatalogFromCache } from "../src/integrations/website-catalog/stock.js";
 import { WebsiteCatalogIntegration } from "../src/integrations/website-catalog/integration.js";
 import { catalogSalesFormat, parseCatalogSalesReply } from "../src/modules/business/catalog-sales.js";
 import { loadWebsiteCatalog } from "../src/tenants/postgres-config-loader.js";
@@ -16,16 +16,21 @@ const page = (...vehicles) => `<html>\n<script>\n  window.VEICULOS = ${JSON.stri
 
 test("lê a fonte fixa, mantém IDs, preços e fotos, sem avaliar o script", async () => {
   const snapshot = await fetchWebsiteStock({ fetchImpl: async (url, options) => {
-    assert.equal(url, WEBSITE_CATALOG_URL);
     assert.equal(options.redirect, "error");
-    return new Response(page(car(2, 0), car(1, 59_900)), { headers: { "Content-Type": "text/html; charset=UTF-8" } });
+    const id = url === WEBSITE_CATALOG_URL ? null : Number(new URL(url).searchParams.get("id"));
+    assert.ok(id === null || [1, 2].includes(id));
+    return new Response(id === null ? page(car(2, 0), car(1, 59_900))
+      : page({ id, descricao: `<p>Modelo ${id}</p><p>Apresentação do anúncio ${id}.</p><p>Equipamentos</p><ul><li>Ar-condicionado</li></ul>` }),
+    { headers: { "Content-Type": "text/html; charset=UTF-8" } });
   } });
   const [onRequest, priced] = snapshot.products;
   assert.equal(onRequest.price, null);
   assert.equal(onRequest.availability, "on_request");
   assert.equal(priced.id, "turim:1");
   assert.equal(priced.model, "Versão 1");
-  assert.match(priced.description, /21\.345 km · Automático/u);
+  assert.match(priced.description, /Apresentação do anúncio 1\./u);
+  assert.match(priced.details, /Ar-condicionado/u);
+  assert.doesNotMatch(priced.description, /21\.345|Automático|Prata/u);
   assert.equal(priced.url, "https://turimautos.com/veiculo?id=1");
   assert.equal(priced.imageUrl, "https://turimautos.com/storage/veiculos/a.jpg");
   assert.equal(priced.category, undefined);
@@ -71,7 +76,8 @@ test("pedidos por faixa da Turim montam lista em texto e suprimem redirecionamen
   assert.equal(budget.catalogBrowse.filters.maxPrice, 60_000);
   const outgoing = createWhatsAppReplyPayload({ to: "test-recipient", ...budget.messages[0] });
   assert.equal(outgoing.type, "text");
-  assert.match(outgoing.text.body, /Modelo 1\*\nModelo: Versão 1\nAno 2020 · 21\.345 km · Automático[^\n]*\nValor: R\$\s59\.900,00\n\n\*Modelo 2\*/u);
+  assert.match(outgoing.text.body, /Modelo 1\*\nModelo: Versão 1\nValor: R\$\s59\.900,00\n\n\*Modelo 2\*/u);
+  assert.doesNotMatch(outgoing.text.body, /21\.345|Automático|Prata/u);
   assert.match(outgoing.text.body, /Gostou de algum\?.+fotos dele/u);
   assert.doesNotMatch(outgoing.text.body, /turimautos\.com|Modelo 4/u);
   const photoRequest = await turn("tenho em mente um Onix, tem fotos dele?");

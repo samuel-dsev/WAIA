@@ -1,4 +1,4 @@
-import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
+import { availableCatalogProducts } from "./catalog-messages.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
@@ -57,7 +57,7 @@ function choiceQuestion(step, item, text) {
 
 function listEntry(item) {
   const price = item.price == null ? "Sob consulta" : MONEY.format(item.price);
-  return [`*${item.name}*`, `Modelo: ${item.model || item.name}`, item.description, `Valor: ${price}`].filter(Boolean).join("\n");
+  return [`*${item.name}*`, `Modelo: ${item.model || item.name}`, `Valor: ${price}`].join("\n");
 }
 
 export function websiteCatalogListText(items) {
@@ -82,7 +82,7 @@ function photoUrls(item) {
 export function websiteGalleryPart(item, index) {
   const urls = photoUrls(item);
   if (!urls[index]) return null;
-  const text = index === 0 ? productMessage(item).text : "";
+  const text = index === 0 ? [...(item.introduction || `🚗 *${item.name}*`)].slice(0, 1024).join("") : "";
   return { text, buttons: [], imageUrl: urls[index], catalogProductId: item.id, catalogPhotoIndex: index };
 }
 
@@ -112,7 +112,7 @@ function closeGallery(messages, closing) {
 
 export function websiteGalleryReply(item) {
   const messages = photoUrls(item).map((_, index) => websiteGalleryPart(item, index));
-  if (!messages.length) return choiceQuestion("gallery", item, `${productMessage(item).text}\n\nA ficha está sem fotos no momento. ${galleryQuestion}`);
+  if (!messages.length) return choiceQuestion("gallery", item, `${item.introduction || `🚗 *${item.name}*`}\n\nA ficha está sem fotos no momento. ${galleryQuestion}`);
   return closeGallery(messages, financingOffer(item));
 }
 
@@ -121,7 +121,7 @@ export function websiteGalleriesReply(items) {
   // Put unavailable-photo notices before the actual galleries. The final
   // invitation belongs to the last image payload, so it cannot overtake it.
   const messages = [
-    ...items.filter((item) => !photoUrls(item).length).map((item) => ({ text: `${productMessage(item).text}\n\nA ficha está sem fotos no momento.`, buttons: [] })),
+    ...items.filter((item) => !photoUrls(item).length).map((item) => ({ text: `${item.introduction || `🚗 *${item.name}*`}\n\nA ficha está sem fotos no momento.`, buttons: [] })),
     ...items.filter((item) => photoUrls(item).length).flatMap((item) => photoUrls(item).map((_, index) => websiteGalleryPart(item, index))),
   ];
   return closeGallery(messages, { text: websiteGalleryClosing, buttons: [],
