@@ -43,6 +43,21 @@ test("troca e endereço no turno recebem uma resposta, com oferta e sem qualific
   assert.equal(reply.tradeInEvaluation.step, "offer_visit");
 });
 
+test("oferta escrita sem metadata é preservada para interpretar o próximo aceite", async () => {
+  const text = "Aceitamos veículo na troca mediante avaliação. Ficamos em Taubaté. Posso ajudar você a agendar uma avaliação presencial do seu veículo?";
+  const { ai } = setup(async () => output(text, null));
+  const offer = await ai.reply(request("Aceita veículo na troca? Qual cidade fica essa loja?", null));
+  assert.equal(offer.source, "ai");
+  assert.equal(offer.text, text);
+  assert.equal(offer.tradeInEvaluation.step, "offer_visit");
+  assert.equal(offer.leadQualification, undefined);
+  const next = setup(async () => output("Como posso te chamar?", state("visit_requested")),
+    [{ type: "text", direction: "outbound", status: "sent", body: text }]);
+  const accepted = await next.ai.reply(request("Pode sim", { ...offer.tradeInEvaluation, direct: true }));
+  assert.equal(accepted.tradeInEvaluation.step, "visit_requested");
+  assert.equal(accepted.leadQualification, undefined);
+});
+
 test("aceite presencial com nome aproveita anúncio, preserva resposta pública e fecha uma ficha de avaliação", async () => {
   const history = [{ type: "text", direction: "outbound", status: "sent", body: "Você gostaria de solicitar uma avaliação presencial?" }];
   const { ai } = setup(async () => output("A loja fica em Taubaté.", state("visit_requested"), card), history);

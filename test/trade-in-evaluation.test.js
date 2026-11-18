@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeTradeInEvaluation, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery } from "../src/modules/business/trade-in-evaluation.js";
+import { normalizeTradeInEvaluation, tradeInOfferFromAnswer, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery } from "../src/modules/business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../src/modules/ai/inbound-content.js";
 import { loadConversationContext } from "../src/modules/ai/conversation-context.js";
 import { requireAiRequest } from "../src/modules/ai/contracts.js";
 
 const state = (step, interestName = null, interestSource = "unknown") => ({ step, interestName, interestSource });
+test("registro da oferta escrita não confunde galeria ou dúvida com consentimento", () => {
+  assert.deepEqual(tradeInOfferFromAnswer("Podemos iniciar a avaliação por fotos. Gostaria de enviar as fotos do seu veículo?"), state("offer_photos"));
+  assert.deepEqual(tradeInOfferFromAnswer("Podemos agendar uma avaliação presencial. Gostaria de solicitar essa avaliação?", state("collect_photos", "Onix", "customer")), state("offer_visit", "Onix", "customer"));
+  for (const text of ["Gostaria de ver fotos do Onix?", "Qual é sua dúvida sobre avaliação presencial?", "A avaliação é presencial.", "Quer fazer uma simulação?"]) assert.equal(tradeInOfferFromAnswer(text), null, text);
+});
 test("aceite de avaliação acompanha a oferta atual e não aceita lista, reconhecimento ou recusa", () => {
   const history = [{ role: "assistant", content: "Você gostaria de solicitar uma avaliação presencial do seu veículo?" }];
   const context = { session: { ...state("offer_visit"), direct: true } };

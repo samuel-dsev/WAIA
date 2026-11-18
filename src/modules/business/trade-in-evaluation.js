@@ -52,6 +52,21 @@ export function tradeInTurnInstructions(context, turnMessages = []) {
     + "Somente um pedido explícito de visita, atendimento humano ou recusa neste turno muda esse percurso. Não deduza características pelas imagens.";
 }
 
+export function tradeInOfferFromAnswer(text, session) {
+  const answer = normalized(text);
+  const question = answer.match(/(?:^|[.!?])([^.!?]*\?)\s*$/u)?.[1] || "";
+  if (!/\b(?:gostaria|quer|deseja|posso|podemos|prefere|vamos|que tal)\b/u.test(question)) return null;
+  const evaluation = /\bavalia(?:r|cao)\b/u.test(answer);
+  const visit = /\bavalia(?:r|cao)\b/u.test(question) && /\b(?:presencial|agendar|agendamento|marcar|visita|loja)\b/u.test(answer);
+  const photos = /\bfotos\b/u.test(question) && (evaluation || /\bseu (?:carro|veiculo)\b/u.test(question))
+    || /\bavalia(?:r|cao)\b/u.test(question) && /\bfotos\b/u.test(answer);
+  if (!visit && !photos) return null;
+  // This records only the offer in the assistant's own answer. Customer consent
+  // is still validated separately against the sent turn and conversation.
+  return { step: visit ? "offer_visit" : "offer_photos", interestName: session?.interestName || null,
+    interestSource: session?.interestSource || "unknown" };
+}
+
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
   const answer = normalized(message), session = context?.session;
   const last = history.findLast((part) => part.role === "assistant")?.content || "";

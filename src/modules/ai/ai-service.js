@@ -11,7 +11,7 @@ import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRU
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
 import { hasWebsiteFinancingConsent, websiteReferenceClarification } from "../business/website-catalog-interaction.js";
-import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, tradeInTurnInstructions, hasTradeInEvaluationConsent,
+import { normalizeTradeInEvaluation, tradeInEvaluationFormat, TRADE_IN_EVALUATION_INSTRUCTIONS, tradeInTurnInstructions, tradeInOfferFromAnswer, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
@@ -276,7 +276,8 @@ export class MultiTenantAiService {
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           const evaluationProposal = evaluationEnabled ? normalizeTradeInEvaluation(declinesTradeInEvaluation(request.message)
             && safeContext.tradeInEvaluation?.session ? { step: "declined", interestName: safeContext.tradeInEvaluation.session.interestName || null,
-              interestSource: safeContext.tradeInEvaluation.session.interestSource || "unknown" } : structured.tradeInEvaluation) : null;
+              interestSource: safeContext.tradeInEvaluation.session.interestSource || "unknown" } : structured.tradeInEvaluation
+              ?? tradeInOfferFromAnswer(structured.text, safeContext.tradeInEvaluation?.session)) : null;
           delete structured.tradeInEvaluation;
           const evaluationConsent = evaluationEnabled && hasTradeInEvaluationConsent(safeContext.tradeInEvaluation, request.message, promptHistory, request.turnMessages, evaluationProposal?.step);
           evaluationState = evaluationProposal && (!["collect_photos", "visit_requested", "human_review_requested"].includes(evaluationProposal.step) || evaluationConsent)
