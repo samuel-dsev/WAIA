@@ -220,7 +220,7 @@ export class MultiTenantAiService {
         return { response, text };
       };
       let { response, text } = await requestResponse();
-      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff;
+      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff, validatedCatalogReply;
       if (intakeOnly) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const structured = JSON.parse(text);
@@ -322,11 +322,22 @@ export class MultiTenantAiService {
           if (!leadQualification && !qualificationIssue && !structured.text.trim() && !catalogFormat) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           delete structured.leadQualification;
           parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
+          if (websiteCatalog && salesMode && !leadQualification && !qualificationIssue) {
+            try {
+              validatedCatalogReply = parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, message: request.message });
+            } catch (error) {
+              if (error.code !== "AI_INVALID_CATALOG_SELECTION" || attempt > 0) throw error;
+              this.logger.warn?.("ai_catalog_recheck", { empresaId: request.empresaId, conversationId: request.conversationId,
+                correlationId: request.correlationId, code: "AI_CATALOG_RECHECK" });
+              ({ response, text } = await requestResponse(true));
+              continue;
+            }
+          }
           break;
         }
       }
-      const baseReply = !leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, message: request.message })
-        : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText };
+      const baseReply = validatedCatalogReply || (!leadQualification && catalogFormat && !qualificationIssue ? salesMode ? parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, message: request.message })
+        : parseCatalogSelection(parsedText, safeContext.catalog, { message: request.message }) : { text: parsedText });
       if (websiteCatalog) baseReply.text = baseReply.text.replace(/^Sim,\s+a Turim Autos trabalha com financiamento\b/iu, "Sim, nós trabalhamos com financiamento");
       // The validated card carries the collected data. Financing state must not
       // replace its summary or operational qualification with generic prose.

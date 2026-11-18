@@ -249,6 +249,29 @@ test("simulação dos dois e aceite com referência plural não caem no início 
   assert.doesNotMatch(ambiguous.text, /CPF|nascimento/u);
 });
 
+test("detalhes inválidos são reavaliados com o mesmo contexto antes de devolver contingência", async () => {
+  let calls = 0;
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e aceite de simulação." })], responder: async (call) => {
+    assert.equal(call.input.at(-1).content, "quero saber mais sobre os modelos que vc me passou");
+    return { output_text: JSON.stringify({ text: ++calls === 1 ? "" : "O ECOSPORT FREESTYLE e o KA SE PLUS 1.5 têm câmbio automático. Quer comparar algum detalhe?",
+      catalogAction: "details", productIds: ["turim:1", "turim:2"],
+      filters: { category: null, minPrice: null, maxPrice: null },
+      leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }), usage: { input_tokens: 10, output_tokens: 2 } };
+  } });
+  const reply = await ai.service.reply(request("tenant-a", { message: "quero saber mais sobre os modelos que vc me passou", context: { catalog: {
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true,
+    items: [{ id: "turim:1", name: "ECOSPORT FREESTYLE" }, { id: "turim:2", name: "KA SE PLUS 1.5" }],
+    interaction: { step: "gallery", productIds: ["turim:1", "turim:2"], direct: true },
+  } } }));
+  assert.equal(calls, 2);
+  assert.equal(reply.source, "ai");
+  assert.deepEqual(reply.websiteInteraction.productIds, ["turim:1", "turim:2"]);
+  assert.equal(reply.leadQualification, undefined);
+  assert.equal(reply.messages, undefined);
+  assert.equal(reply.usage.totalTokens, 24);
+});
+
 test("simulação preserva ficha completa e dados coletados até o texto da notificação", async () => {
   const summary = "Solicita simulação do HB20 Sense 1.0 e do Onix Joy.\nDados coletados:\nNome: Ana Teste\nCidade: Taubaté\nCPF: 000.000.000-00\nNascimento: 01/01/1990\nEntrada: R$ 10.000,00\nTroca: sem veículo para troca.";
   const qualification = "Aceitou simulação para HB20 Sense; forneceu os dados solicitados e pretende dar R$ 10.000,00 de entrada, sem troca. Equipe deve analisar as condições.";
