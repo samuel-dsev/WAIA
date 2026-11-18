@@ -1,11 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeTradeInEvaluation, tradeInOfferFromAnswer, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery } from "../src/modules/business/trade-in-evaluation.js";
+import { normalizeTradeInEvaluation, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent, mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, announcesEvaluationBooking, announcesEvaluationDelivery } from "../src/modules/business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../src/modules/ai/inbound-content.js";
 import { loadConversationContext } from "../src/modules/ai/conversation-context.js";
 import { requireAiRequest } from "../src/modules/ai/contracts.js";
 
 const state = (step, interestName = null, interestSource = "unknown") => ({ step, interestName, interestSource });
+test("reparo de aceite curto não promove reconhecimento, dúvida, recusa ou alternativa ambígua", () => {
+  const proposal=state("offer_visit"),context={session:{...proposal,direct:true}};
+  const history=[{role:"assistant",content:"Gostaria de solicitar uma avaliação presencial?"}];
+  for(const text of ["Entendi","Qual cidade fica essa loja?","Não quero","Talvez","Sou Ana"]) assert.deepEqual(reconcileTradeInEvaluation(proposal,context,text,history,[]),proposal,text);
+  assert.deepEqual(reconcileTradeInEvaluation(proposal,{session:{...proposal,direct:false}},"Pode sim",history,[]),proposal);
+  assert.deepEqual(reconcileTradeInEvaluation(null,context,"Pode sim",[{role:"assistant",content:"Prefere enviar fotos ou agendar uma avaliação presencial?"}],[]),null);
+  assert.deepEqual(reconcileTradeInEvaluation(null,context,"Pode sim",history,[]),state("visit_requested"));
+});
 test("registro da oferta escrita não confunde galeria ou dúvida com consentimento", () => {
   assert.deepEqual(tradeInOfferFromAnswer("Podemos iniciar a avaliação por fotos. Gostaria de enviar as fotos do seu veículo?"), state("offer_photos"));
   assert.deepEqual(tradeInOfferFromAnswer("Podemos agendar uma avaliação presencial. Gostaria de solicitar essa avaliação?", state("collect_photos", "Onix", "customer")), state("offer_visit", "Onix", "customer"));

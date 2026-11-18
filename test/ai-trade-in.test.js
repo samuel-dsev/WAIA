@@ -51,11 +51,19 @@ test("oferta escrita sem metadata é preservada para interpretar o próximo acei
   assert.equal(offer.text, text);
   assert.equal(offer.tradeInEvaluation.step, "offer_visit");
   assert.equal(offer.leadQualification, undefined);
-  const next = setup(async () => output("Como posso te chamar?", state("visit_requested")),
+  const next = setup(async () => output("Como posso te chamar?", state("offer_visit")),
     [{ type: "text", direction: "outbound", status: "sent", body: text }]);
   const accepted = await next.ai.reply(request("Pode sim", { ...offer.tradeInEvaluation, direct: true }));
   assert.equal(accepted.tradeInEvaluation.step, "visit_requested");
   assert.equal(accepted.leadQualification, undefined);
+});
+
+test("metadata repetido na oferta de fotos aceita muda apenas para coleta, sem ficha", async () => {
+  const { ai } = setup(async () => output("Pode enviar as fotos do seu veículo.", state("offer_photos")),
+    [{ type: "text", direction: "outbound", status: "sent", body: "Gostaria de enviar fotos do seu veículo para avaliação?" }]);
+  const reply = await ai.reply(request("Entendi\nPode sim", { ...state("offer_photos"), direct: true }));
+  assert.equal(reply.tradeInEvaluation.step, "collect_photos");
+  assert.equal(reply.leadQualification, undefined);
 });
 
 test("aceite presencial com nome aproveita anúncio, preserva resposta pública e fecha uma ficha de avaliação", async () => {

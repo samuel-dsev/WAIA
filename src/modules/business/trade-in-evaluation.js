@@ -67,6 +67,23 @@ export function tradeInOfferFromAnswer(text, session) {
     interestSource: session?.interestSource || "unknown" };
 }
 
+export function reconcileTradeInEvaluation(proposal, context, message, history, turnMessages) {
+  const session = context?.session;
+  const target = session?.step === "offer_visit" ? "visit_requested" : session?.step === "offer_photos" ? "collect_photos" : null;
+  if (!target || session.direct !== true || proposal && proposal.step !== session.step) return proposal;
+  const parts = String(message || "").split("\n").map(normalized).filter(Boolean);
+  const approval = (part) => /^(?:sim|pode(?: sim| ser)?|quero(?: sim)?|claro|vamos(?: sim)?|bora|com certeza|gostaria(?: sim)?)[.! ]*$/u.test(part);
+  const acknowledgement = (part) => /^(?:entendi|certo|ta|tudo bem)[.! ]*$/u.test(part);
+  const last = normalized(history.findLast((part) => part.role === "assistant")?.content);
+  const ambiguousAlternatives = /\bou\b/u.test(last) && /\bfotos\b/u.test(last) && /\b(?:presencial|agendar|visita)\b/u.test(last);
+  if (ambiguousAlternatives || !parts.some(approval) || !parts.every((part) => approval(part) || acknowledgement(part))
+    || !hasTradeInEvaluationConsent(context, message, history, turnMessages, target)) return proposal;
+  // Repair omitted/repeated offer metadata only for an unambiguous short
+  // acceptance of the latest sent offer. Never infer a completed handoff.
+  return { step: target, interestName: proposal?.interestName || session.interestName || null,
+    interestSource: proposal?.interestName ? proposal.interestSource : session.interestSource || "unknown" };
+}
+
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
   const answer = normalized(message), session = context?.session;
   const last = history.findLast((part) => part.role === "assistant")?.content || "";
