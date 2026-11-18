@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WEBSITE_CATALOG_HTML_MAX_LENGTH } from "../../core/catalog-limits.js";
 import { websiteVehicleDescription } from "./description.js";
 
 export const WEBSITE_CATALOG_TYPE = "website_catalog";
@@ -75,7 +76,7 @@ export function parseWebsiteVehicleDetails(html, product) {
   const entries = [...html.matchAll(/^[\t ]*window\.VEICULOS[\t ]*=[\t ]*(\[[^\r\n]*\]);[\t ]*\r?$/gmu)];
   let raw;
   try { raw = entries.length === 1 ? JSON.parse(entries[0][1]) : null; } catch { /* checked below */ }
-  const parsed = z.array(z.object({ id: z.number().int().positive(), descricao: z.string().max(20_000).nullish() })).max(MAX_ITEMS).safeParse(raw);
+  const parsed = z.array(z.object({ id: z.number().int().positive(), descricao: z.string().max(WEBSITE_CATALOG_HTML_MAX_LENGTH).nullish() })).max(MAX_ITEMS).safeParse(raw);
   const matches = parsed.success ? parsed.data.filter((vehicle) => `turim:${vehicle.id}` === product.id) : [];
   if (matches.length !== 1) throw stockError("WEBSITE_CATALOG_INVALID_DETAILS");
   return { ...product, ...websiteVehicleDescription(matches[0].descricao, product.name) };

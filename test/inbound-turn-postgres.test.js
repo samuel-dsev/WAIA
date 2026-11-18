@@ -69,7 +69,9 @@ test("PostgreSQL: turno durável reúne mensagens, invalida envio antigo e mant�
     const dependencies = { repository: handlers,
       conversationService: new ConversationService({ repository: new PostgresConversationRepository(pool) }),
       tenantDefinitionRepository: { async load() { return {
-        runtime: { empresaId, identity: { name: "Teste" }, enabledModules: ["ai_freeform"], menu: { text: "Menu", options: [] } },
+        runtime: { empresaId, identity: { name: "Teste" }, enabledModules: ["catalog", "ai_freeform"], menu: { text: "Menu", options: [] },
+          catalog: { source: { type: "website_catalog", status: "healthy" }, items: [{ id: "turim:1", name: "Modelo 1",
+            description: "Descrição completa do anúncio. ".repeat(180).trim(), introduction: "Título e apresentação do anúncio.", details: "Câmbio manual; ar-condicionado." }] } },
         ai: { enabled: true, prompt: "Responda à solicitação atual", responseDelayEnabled: false },
         routing: { fallbackAction: "ai_freeform.reply" },
       }; } },
@@ -85,6 +87,9 @@ test("PostgreSQL: turno durável reúne mensagens, invalida envio antigo e mant�
     assert.equal((await createWorkerHandlers(dependencies).process_inbound_message(reference)).replied, true);
     assert.equal(generated.length, 1); assert.equal(sent.length, 1);
     assert.equal(generated[0].messageId, last.messageId);
+    assert.ok(generated[0].context.catalog.items[0].description.length > 5000);
+    assert.equal(generated[0].context.catalog.items[0].introduction, "Título e apresentação do anúncio.");
+    assert.equal(generated[0].context.catalog.items[0].details, "Câmbio manual; ar-condicionado.");
     assert.deepEqual(generated[0].turnMessages.map((part) => part.text), ["Pode continuar a simulação do primeiro", "E gostaria de saber o horário"]);
     assert.equal((await createWorkerHandlers(dependencies).process_inbound_message(reference)).reason, "inbound_turn_already_answered");
     assert.equal((await createWorkerHandlers(dependencies).process_inbound_message({ ...reference, messageId: last.messageId })).resumed, true);

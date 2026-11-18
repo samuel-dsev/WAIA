@@ -1,4 +1,5 @@
 import { MODULE_KEYS } from "../../core/contracts.js";
+import { WEBSITE_CATALOG_TEXT_MAX_LENGTH } from "../../core/catalog-limits.js";
 import { parseFlowDefinition } from "../flows/index.js";
 
 const MODULE_SET = new Set(MODULE_KEYS);
@@ -79,12 +80,14 @@ function parseMenuOption(value, path, enabledModules) {
   };
 }
 
-function parseCatalogItem(value, path) {
+function parseCatalogItem(value, path, website = false) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} deve ser um objeto.`);
   return {
     id: stringId(value.id, `${path}.id`),
     name: requiredText(value.name, `${path}.name`, { max: 160 }),
-    description: optionalText(value.description, `${path}.description`, { max: 500 }),
+    description: optionalText(value.description, `${path}.description`, { max: website ? WEBSITE_CATALOG_TEXT_MAX_LENGTH : 500 }),
+    ...(website && value.introduction != null ? { introduction: optionalText(value.introduction, `${path}.introduction`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
+    ...(website && value.details != null ? { details: optionalText(value.details, `${path}.details`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
     price: value.price == null ? undefined : finiteAmount(value.price, `${path}.price`),
     active: value.active !== false,
     ...(value.sku != null ? { sku: requiredText(value.sku, `${path}.sku`, { max: 100 }) } : {}),
@@ -169,7 +172,7 @@ export function parseTenantRuntimeConfig(input) {
   const options = list(input.menu?.options, "menu.options", (option, path) => parseMenuOption(option, path, enabledSet), { max: 30 });
   unique(options, (option) => option.id, "menu.options");
 
-  const items = list(input.catalog?.items, "catalog.items", parseCatalogItem);
+  const items = list(input.catalog?.items, "catalog.items", (item, path) => parseCatalogItem(item, path, input.catalog?.source?.type === "website_catalog"));
   const events = list(input.events?.items, "events.items", parseEvent);
   const services = list(input.appointments?.services, "appointments.services", parseService);
   const flows = list(input.flows?.definitions, "flows.definitions", (definition) => parseFlowDefinition(definition), { max: 100 });
