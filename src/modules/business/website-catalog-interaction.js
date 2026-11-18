@@ -1,7 +1,7 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const STEPS = ["list", "gallery", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
+const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
 const listQuestion = "Gostou de algum? Se sim, gostaria de ver as fotos dele? Me diga qual modelo chamou sua atenção.";
 export const websiteCatalogSelectionPrompt = "Qual modelo chamou sua atenção?";
 const galleryQuestion = "Você gostou desse veículo?";
@@ -10,11 +10,23 @@ const normalize = (text) => String(text || "").normalize("NFD").replace(/\p{M}/g
 export function normalizeWebsiteInteraction(value) {
   if (!value || !STEPS.includes(value.step) || !Array.isArray(value.productIds)
     || value.productIds.length < 1 || value.productIds.length > 100
-    || (value.step !== "list" && value.step !== "gallery" && value.productIds.length !== 1)
-    || (value.step === "gallery" && value.productIds.length > 3)
+    || (["photo_offer", "finance_offer"].includes(value.step) && value.productIds.length !== 1)
+    || (value.step !== "list" && value.productIds.length > 3)
     || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => typeof id !== "string" || !/^turim:[1-9]\d*$/u.test(id))) return null;
   return { step: value.step, productIds: [...value.productIds] };
+}
+
+/** Rebuild from confirmed sends, so restarts and unrelated photo/detail replies
+ * cannot lose accepted vehicles. Cancelling one keeps the others pending. */
+export function pendingWebsiteFinancingSession(states) {
+  let productIds = [];
+  for (const value of states) {
+    const state = normalizeWebsiteInteraction(value);
+    if (state?.step === "finance_accepted") productIds = state.productIds;
+    else if (["closed", "declined"].includes(state?.step)) productIds = productIds.filter((id) => !state.productIds.includes(id));
+  }
+  return productIds.length ? { productIds, ...(productIds.length === 1 ? { productId: productIds[0] } : {}), status: "pending" } : null;
 }
 
 function choiceQuestion(step, item, text) {
@@ -91,17 +103,22 @@ function negative(message) {
 export function hasWebsiteFinancingConsent(catalog, message, productId, history) {
   const answer = normalize(message);
   if (/\b(?:nao quero|nao (?:vou|preciso)|cancel[ae]|desisti)\b/u.test(answer)) return false;
-  if (catalog.financingSession?.productId === productId
-    || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds[0] === productId) return true;
+  if (catalog.financingSession?.productIds?.includes(productId) || catalog.financingSession?.productId === productId
+    || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds.includes(productId)) return true;
   if (/\b(?:quero|gostaria|vamos|preciso|aceito|pode(?: me)?|poderia)\b.{0,60}\b(?:simular|simulacao|financiar|financiamento)\b/u.test(answer)) return true;
   const last = history.findLast((item) => item.role === "assistant")?.content || "";
   const offer = catalog.interaction?.step === "finance_offer" && catalog.interaction.direct
     && catalog.interaction.productIds[0] === productId;
   // A short acceptance needs a current financing question, never an older offer.
-  const currentQuestion = /\b(?:gostaria|quer|deseja|posso|podemos|vamos)\b[^?]*\b(?:simula[cç][aã]o|simular)\b[^?]*\?\s*$/iu.test(last);
-  const replies = String(message).split("\n").map(normalize).filter((part) => !/^(?:entendi|certo|ta|tudo bem)[.! ]*$/u.test(part));
-  return (offer || currentQuestion) && replies.length > 0
-    && replies.every((part) => /^(?:sim|pode(?: sim| fazer| mandar)?|claro|quero|ok|vamos|com certeza|por favor)[,.! ]*(?:por favor[.! ]*)?$/u.test(part));
+  const currentQuestion = /\b(?:gostaria|quer|deseja|posso|podemos|vamos)\b[^?]*\b(?:simula[cç][aã]o|simular|financiamento|financiar)\b[^?]*\?\s*$/iu.test(last);
+  // The model has classified finance and resolved the selected IDs using the
+  // whole transcript. This guard checks the current offer, not a vocabulary of
+  // allowed answers: "quero sim, dos dois" and a selection such as "deles" are
+  // valid contextual answers too. An acknowledgement alone authorizes nothing.
+  const acknowledgementOnly = String(message).split("\n").map(normalize)
+    .every((part) => /^(?:entendi|certo|ta|tudo bem)?[.! ]*$/u.test(part));
+  const uncertain = negative(message) || /\b(?:talvez|nao sei|ainda nao|depois|mais tarde)\b/u.test(answer);
+  return (offer || currentQuestion) && !acknowledgementOnly && !uncertain;
 }
 
 function financingOffer(item) {

@@ -35,3 +35,22 @@ test("turno comporta muitas mensagens sem reduzir seu número nem cortar o conte
   assert.ok(request.message.length > 8000);
   assert.ok(request.message.endsWith(parts.at(-1).text));
 });
+
+test("retomada após 24 horas e novo serviço mantém os modelos e os dados desde a primeira mensagem", async () => {
+  const first = new Date("2026-11-17T01:01:00Z");
+  const now = new Date(first.getTime() + 24 * 60 * 60 * 1000);
+  const rows = [
+    { id: "models", sequence: 1, type: "text", direction: "outbound", status: "sent",
+      body: "Quer saber mais sobre ECOSPORT FREESTYLE ou KA SE PLUS 1.5?", createdAt: first },
+    { id: "data", sequence: 2, type: "text", direction: "inbound", body: "Meu nome é Ana Teste. Entrada de 10 mil.", createdAt: first },
+    { id: "return", sequence: 3, type: "text", direction: "inbound", body: "Quero fazer a simulação dos dois", createdAt: now },
+  ];
+  const request = requireAiRequest({ empresaId: "tenant-a", conversationId: "chat-a", correlationId: "c",
+    messageId: "return", message: rows[2].body });
+  for (const at of [new Date(first.getTime() + 6 * 60 * 1000), now, new Date(now.getTime() + 60 * 1000)]) {
+    const service = { async getHistory() { return structuredClone(rows); } };
+    const context = await loadConversationContext(service, request, at);
+    assert.deepEqual(context.input.map((item) => item.content), rows.slice(0, 2).map((item) => item.body));
+    assert.ok(context.evidence.includes(rows[1].body));
+  }
+});

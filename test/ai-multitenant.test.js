@@ -216,8 +216,34 @@ test("catálogo só produz ficha de lead depois do aceite vinculado à simulaç�
   assert.match(named.leadQualification.summary, /Tracker 2\.0/u);
 });
 
+test("simulação dos dois e aceite com referência plural não caem no início genérico", async () => {
+  const productIds = ["turim:1", "turim:2"];
+  const items = [{ id: productIds[0], name: "ECOSPORT FREESTYLE" }, { id: productIds[1], name: "KA SE PLUS 1.5" }];
+  const histories = { "tenant-a": [
+    { type: "text", direction: "outbound", status: "sent", body: "Quer saber mais sobre ECOSPORT FREESTYLE ou KA SE PLUS 1.5?" },
+  ] };
+  const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
+    leadQualificationCriteria: "Nome e aceite de simulação." })], histories, responder: async () => ({
+    output_text: JSON.stringify({ text: "Vamos simular os dois. Qual é o seu nome?", catalogAction: "finance", productIds,
+      filters: { category: null, minPrice: null, maxPrice: null },
+      leadQualification: { status: "collecting", name: null, summary: null, qualification: null } }), usage: {},
+  }) });
+  const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items,
+    interaction: { step: "gallery", productIds, direct: true } };
+  const first = await ai.service.reply(request("tenant-a", { message: "quero fazer a simulação de financiamento dos dois", context: { catalog } }));
+  assert.deepEqual(first.websiteInteraction, { step: "finance_accepted", productIds });
+  assert.equal(ai.clientFactory.requests.length, 1, "A seleção de dois modelos é válida na primeira inferência.");
+  histories["tenant-a"].push({ type: "text", direction: "outbound", status: "sent",
+    body: "Você gostaria de fazer a simulação de financiamento para algum desses modelos?" });
+  const accepted = await ai.service.reply(request("tenant-a", { message: "quero sim, dos dois", context: { catalog } }));
+  assert.deepEqual(accepted.websiteInteraction, first.websiteInteraction);
+  assert.equal(ai.clientFactory.requests.length, 2);
+  assert.doesNotMatch(accepted.text, /Você prefere conhecer/u);
+  assert.equal(accepted.leadQualification, undefined);
+});
+
 test("simulação preserva ficha completa e dados coletados até o texto da notificação", async () => {
-  const summary = "Solicita simulação do HB20 Sense 1.0.\nDados coletados:\nNome: Ana Teste\nCidade: Taubaté\nCPF: 000.000.000-00\nNascimento: 01/01/1990\nEntrada: R$ 10.000,00\nTroca: sem veículo para troca.";
+  const summary = "Solicita simulação do HB20 Sense 1.0 e do Onix Joy.\nDados coletados:\nNome: Ana Teste\nCidade: Taubaté\nCPF: 000.000.000-00\nNascimento: 01/01/1990\nEntrada: R$ 10.000,00\nTroca: sem veículo para troca.";
   const qualification = "Aceitou simulação para HB20 Sense; forneceu os dados solicitados e pretende dar R$ 10.000,00 de entrada, sem troca. Equipe deve analisar as condições.";
   const history = [{ id: "dados", type: "text", direction: "inbound", body: "Ana Teste, de Taubaté. CPF 000.000.000-00, nascimento 01/01/1990. Tenho R$ 10.000,00 de entrada e não tenho troca." }];
   const ai = setup({ configs: [config("tenant-a", { allowedContextKeys: ["catalog"], leadQualificationEnabled: true,
@@ -225,21 +251,22 @@ test("simulação preserva ficha completa e dados coletados até o texto da noti
     histories: { "tenant-a": history }, responder: async (call) => {
       assert.match(call.instructions, /Dados coletados:/u);
       assert.ok(call.input.some((item) => item.content.includes("000.000.000-00")));
-      return { output_text: JSON.stringify({ text: "", catalogAction: "finance", productIds: ["turim:1"],
+      return { output_text: JSON.stringify({ text: "", catalogAction: "finance", productIds: ["turim:1", "turim:2"],
         filters: { category: null, minPrice: null, maxPrice: null },
         leadQualification: { status: "qualified", name: "Ana Teste", summary, qualification } }), usage: {} };
     } });
   const reply = await ai.service.reply(request("tenant-a", { message: "Pode continuar a simulação do HB20 Sense", context: { catalog: {
-    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "HB20 Sense 1.0" }],
-    financingSession: { productId: "turim:1", status: "pending" },
+    source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [{ id: "turim:1", name: "HB20 Sense 1.0" }, { id: "turim:2", name: "Onix Joy" }],
+    financingSession: { productIds: ["turim:1", "turim:2"], status: "pending" },
   } } }));
   assert.equal(reply.leadQualification.summary, summary);
   assert.equal(reply.leadQualification.qualification, qualification);
   assert.equal(reply.text, "A equipe dará continuidade por aqui.");
   assert.doesNotMatch(reply.text, /000\.000|1990|10\.000/u);
   assert.equal(reply.websiteInteraction.step, "closed");
+  assert.deepEqual(reply.websiteInteraction.productIds, ["turim:1", "turim:2"]);
   const delivered = notificationText({ companyName: "Loja fictícia", phone: "5511000000001", ...reply.leadQualification });
-  for (const value of ["Nome: Ana Teste", "Dados coletados:", "Taubaté", "000.000.000-00", "01/01/1990", "R$ 10.000,00", "sem veículo para troca.", qualification]) assert.ok(delivered.includes(value));
+  for (const value of ["HB20 Sense 1.0", "Onix Joy", "Nome: Ana Teste", "Dados coletados:", "Taubaté", "000.000.000-00", "01/01/1990", "R$ 10.000,00", "sem veículo para troca.", qualification]) assert.ok(delivered.includes(value));
   assert.match(delivered, /^NOVO LEAD QUALIFICADO — Loja fictícia\n\nNome: Ana Teste\nResumo do caso:/u);
 });
 

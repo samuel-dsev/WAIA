@@ -78,10 +78,11 @@ export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
 - Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. Nesse caso, use finance, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. A entrada por anúncio não comprova aceite de simulação.
 - Ao confirmar que a loja trabalha com financiamento, comece com “Sim, nós trabalhamos com financiamento”.
-- Use finance com um único ID APENAS para aceite contextual ou pedido explícito de simulação daquele veículo, ou para retomar uma simulação já aceita em catalog.financingSession. Uma resposta curta só aceita simulação se responder à última pergunta enviada sobre simulação. Se a última pergunta ofereceu opções semelhantes, "Entendi" seguido de "Pode sim" usa browse e envia apenas a lista. Ofertas antigas não autorizam coleta de dados. Não peça CPF, nascimento ou dados para simulação sem esse aceite.
+- Resolva referências pelo histórico completo, pelas mensagens citadas e pelo assunto mais recente, sem exigir que o cliente repita o nome: "os dois", "ambos", "eles", "deles", "dele", "esse", "o primeiro", "o outro" e outras formas naturais apontam aos modelos discutidos. catalog.interaction.productIds registra o último conjunto discutido; catalog.financingSession.productIds preserva os modelos de uma simulação pendente. A escolha explícita mais recente prevalece sobre esses auxiliares. Em "dele", use o único referente claro; se houver dois referentes igualmente possíveis, pergunte brevemente qual dos dois, citando seus nomes. Nunca substitua uma referência resolvida por uma pergunta genérica de início de atendimento.
+- Use finance com os IDs exatos dos veículos confirmados (de um a três) APENAS para aceite contextual ou pedido explícito de simulação, ou para retomar uma simulação já aceita em catalog.financingSession. "Quero fazer a simulação dos dois" seleciona ambos e "quero sim, dos dois" após a oferta de simulação também. Colete os dados comuns uma única vez e registre todos os modelos na mesma ficha para análise da equipe, sem forçar a escolha de apenas um. Uma resposta curta só aceita simulação se responder à última pergunta enviada sobre simulação. Se a última pergunta ofereceu opções semelhantes, "Entendi" seguido de "Pode sim" usa browse e envia apenas a lista. Ofertas antigas não autorizam coleta de dados. Não peça CPF, nascimento ou dados para simulação sem esse aceite.
 - Em finance, text contém a continuação natural conforme os critérios publicados; mantenha collecting enquanto houver dados faltando ou outro pedido pendente. Para fotos, comparação ou dúvidas durante a coleta, use a ação desse pedido e collecting, preservando a simulação pendente; nunca conclua só porque o cliente informou o nome. Use none para respostas comuns; não use finance para dúvidas sobre se a loja aceita financiamento.
-- Ao concluir finance, preencha summary e qualification com a ficha completa e os dados coletados para a simulação, conforme a triagem estruturada. Identifique o veículo escolhido em productIds também no resumo. Nunca reduza a ficha a "confirmou interesse em simular" nem descarte dados já informados, como os campos pessoais previstos no roteiro, cidade, entrada e troca.
-- Use finance_decline com um único ID quando o cliente recusar ou cancelar a simulação desse veículo. Responda naturalmente em text e mantenha collecting. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação.
+- Ao concluir finance, preencha summary e qualification com a ficha completa e os dados coletados para a simulação, conforme a triagem estruturada. Identifique todos os veículos escolhidos em productIds também no resumo. Nunca reduza a ficha a "confirmou interesse em simular" nem descarte dados já informados, como os campos pessoais previstos no roteiro, cidade, entrada e troca.
+- Use finance_decline com os IDs da simulação recusada ou cancelada. Responda naturalmente em text e mantenha collecting. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação. Em none/details, inclua em productIds os modelos efetivamente discutidos quando estiverem identificados, para preservar o foco mesmo numa resposta textual sem galeria.
 - Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.`;
 
 export function asksForVehiclePhoto(message) {
@@ -163,11 +164,11 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     return { text: /\b(?:qual versao|qual veiculo|qual modelo)\b/u.test(normalize(text)) ? text : websiteStockUnconfirmed };
   }
   if (website && action === "finance") {
-    if (value.productIds.length !== 1 || !text) throw invalid();
+    if (!value.productIds.length || !text) throw invalid();
     return { text };
   }
   if (website && action === "finance_decline") {
-    if (value.productIds.length !== 1 || !text) throw invalid();
+    if (!value.productIds.length || !text) throw invalid();
     return { text, websiteInteraction: { step: "declined", productIds: value.productIds } };
   }
   if (website && action === "choose") return chooseWebsiteVehicle(catalog, value.productIds.length === 1 ? byId.get(value.productIds[0]) : null, message);
@@ -175,10 +176,12 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   if (action === "none" || action === "details") {
     // During lead collection, known product IDs/valid filters may describe the prior
     // choice. A conversational reply never sends those cards or concludes interest.
-    const collectingContext = action === "none" && leadQualificationEnabled;
+    const collectingContext = action === "none" && (leadQualificationEnabled || website);
     if (!text || !collectingContext && (action === "none" && value.productIds.length
       || query.category !== null || query.minPrice !== null || query.maxPrice !== null)) throw invalid();
-    return { text };
+    return { text, ...(website && value.productIds.length ? {
+      websiteInteraction: { step: "discussion", productIds: value.productIds },
+    } : {}) };
   }
   if (action === "products" && !value.productIds.length) {
     if (!text) throw invalid();

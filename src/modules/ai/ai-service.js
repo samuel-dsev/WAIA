@@ -129,7 +129,7 @@ export class MultiTenantAiService {
         : suppliedContext;
       const websiteCatalog = safeContext.catalog?.source?.type === "website_catalog" ? safeContext.catalog : null;
       const websiteDetails = websiteCatalog && asksForWebsiteVehicleDetails(request.message);
-      let financingVehicle = null;
+      let financingVehicles = [];
       const transcript = await loadConversationContext(this.conversationService, request, occurredAt);
       const promptHistory = transcript.input;
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
@@ -141,7 +141,7 @@ export class MultiTenantAiService {
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
       const selectionFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
       const recheckInstructions = (intakeOnly ? LEAD_INTAKE_RECHECK_INSTRUCTIONS : QUALIFICATION_RECHECK_INSTRUCTIONS)
-        + (websiteCatalog ? "\nReavalie o aceite contextual de simulação: se a última pergunta oferecia lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting." : "");
+        + (websiteCatalog ? "\nReavalie o pedido no histórico: simulação explícita dos dois modelos e aceite após uma oferta atual de simulação usam finance com ambos os IDs. Se o aceite curto responde à oferta de lista ou fotos, não use finance, não colete CPF/nascimento e não conclua financiamento. Responda ao pedido atual e mantenha collecting enquanto faltarem dados." : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
@@ -265,22 +265,28 @@ export class MultiTenantAiService {
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           const websitePresentation = websiteCatalog && ["browse", "more", "products", "choose"].includes(structured.catalogAction);
-          financingVehicle = websiteCatalog && !websiteDetails && structured.catalogAction === "finance" && structured.productIds?.length === 1
-            ? websiteCatalog.items.find((item) => item.id === structured.productIds[0] && item.active !== false && item.availability !== "unavailable") : null;
-          if (financingVehicle && !hasWebsiteFinancingConsent(websiteCatalog, request.message, financingVehicle.id, promptHistory)) financingVehicle = null;
-          let mayQualify = !websiteCatalog || Boolean(financingVehicle);
-          const prematureCollection = websiteCatalog && !financingVehicle && !websitePresentation
+          const selectedIds = Array.isArray(structured.productIds) ? structured.productIds : [];
+          financingVehicles = websiteCatalog && !websiteDetails && structured.catalogAction === "finance"
+            && selectedIds.length > 0 && selectedIds.length <= 3 && new Set(selectedIds).size === selectedIds.length
+            ? selectedIds.map((id) => websiteCatalog.items.find((item) => item.id === id && item.active !== false && item.availability !== "unavailable")) : [];
+          if (financingVehicles.some((item) => !item || !hasWebsiteFinancingConsent(websiteCatalog, request.message, item.id, promptHistory))) financingVehicles = [];
+          let mayQualify = !websiteCatalog || financingVehicles.length > 0;
+          const prematureCollection = websiteCatalog && !financingVehicles.length && !websitePresentation
             && (/\b(?:informe|envie|manda?|passe|diga|preciso|me fale|qual(?: é)?)\b[^.!?\n]{0,100}\b(?:cpf|nascimento)\b/iu.test(structured.text)
               || /\b(?:cpf|nascimento)\b[^.!?\n]{0,80}(?:por favor|\?)/iu.test(structured.text));
-          if (prematureCollection || websiteCatalog && structured.catalogAction === "finance" && !financingVehicle) {
+          if (prematureCollection || websiteCatalog && structured.catalogAction === "finance" && !financingVehicles.length) {
             if (attempt === 0) {
               ({ response, text } = await requestResponse(true));
               continue;
             }
             structured.catalogAction = "none";
-            structured.productIds = [];
-            structured.text = "Você prefere conhecer as opções disponíveis ou tirar uma dúvida sobre algum modelo?";
-            financingVehicle = null;
+            const focusIds = selectedIds.length > 0 && selectedIds.length <= 3 ? selectedIds : websiteCatalog.interaction?.productIds || [];
+            const focus = focusIds.length <= 3 ? websiteCatalog.items.filter((item) => focusIds.includes(item.id)) : [];
+            structured.productIds = focus.map((item) => item.id);
+            structured.text = focus.length
+              ? "Sobre " + focus.map((item) => item.name).join(" e ") + ", você quer fazer uma simulação ou tirar outra dúvida?"
+              : "Para quais modelos você quer a simulação?";
+            financingVehicles = [];
             mayQualify = false;
           }
           try {
@@ -289,7 +295,7 @@ export class MultiTenantAiService {
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
             qualificationIssue = error.validationReason;
-            structured.text = financingVehicle && ["NAME", "NAME_EVIDENCE"].includes(qualificationIssue)
+            structured.text = financingVehicles.length && ["NAME", "NAME_EVIDENCE"].includes(qualificationIssue)
               ? "Qual é o seu primeiro nome?" : qualificationContinuation(structured.text, qualificationIssue);
           }
           if (!websitePresentation && !leadQualification && !qualificationIssue && announcesQualificationClosing(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING)) {
@@ -317,8 +323,8 @@ export class MultiTenantAiService {
       if (websiteCatalog) baseReply.text = baseReply.text.replace(/^Sim,\s+a Turim Autos trabalha com financiamento\b/iu, "Sim, nós trabalhamos com financiamento");
       // The validated card carries the collected data. Financing state must not
       // replace its summary or operational qualification with generic prose.
-      const financingState = qualifies && financingVehicle && !baseReply.messages && !baseReply.websiteInteraction
-        ? { websiteInteraction: { step: leadQualification ? "closed" : "finance_accepted", productIds: [financingVehicle.id] } } : {};
+      const financingState = qualifies && financingVehicles.length && !baseReply.messages && !baseReply.websiteInteraction
+        ? { websiteInteraction: { step: leadQualification ? "closed" : "finance_accepted", productIds: financingVehicles.map((item) => item.id) } } : {};
       const reply = leadQualification ? { text: config.leadQualificationClosing || QUALIFICATION_CLOSING, leadQualification, ...financingState }
         : nonLeadHandoff ? { text: config.nonLeadHandoffMessage, nonLeadHandoff } : { ...baseReply, ...financingState };
       const usage = providerUsage;

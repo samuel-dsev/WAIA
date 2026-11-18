@@ -8,7 +8,7 @@ import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
-import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, websiteCatalogListText, websiteCatalogSelectionPrompt } from "../business/website-catalog-interaction.js";
+import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
 const TYPE_FROM_DATABASE = Object.freeze({
@@ -190,14 +190,14 @@ export class PostgresJobHandlerRepository {
 
   financingSession({ empresaId, conversationId, messageId }) {
     return withTenantTransaction(this.pool, { empresaId }, async ({ client }) => {
-      const row = (await client.query(`SELECT m.outbound_payload->'websiteInteraction' AS state
+      const { rows } = await client.query(`SELECT m.outbound_payload->'websiteInteraction' AS state
         FROM mensagens m JOIN mensagens anchor ON anchor.empresa_id=m.empresa_id AND anchor.conversa_id=m.conversa_id AND anchor.id=$3
         WHERE m.empresa_id=$1 AND m.conversa_id=$2 AND m.direcao='saida' AND m.sequence<anchor.sequence
-          AND m.redacted_at IS NULL AND m.external_message_id IS NOT NULL AND m.status IN ('enviada','entregue','lida')
+          AND m.redacted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>now())
+          AND m.external_message_id IS NOT NULL AND m.status IN ('enviada','entregue','lida')
           AND m.outbound_payload#>>'{websiteInteraction,step}' IN ('finance_accepted','closed','declined')
-        ORDER BY m.sequence DESC LIMIT 1`, [empresaId, conversationId, messageId])).rows[0];
-      const state = normalizeWebsiteInteraction(row?.state);
-      return state?.step === "finance_accepted" ? { productId: state.productIds[0], status: "pending" } : null;
+        ORDER BY m.sequence`, [empresaId, conversationId, messageId]);
+      return pendingWebsiteFinancingSession(rows.map((row) => row.state));
     });
   }
 

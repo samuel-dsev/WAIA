@@ -49,7 +49,7 @@ test("PostgreSQL: turno durável reúne mensagens, invalida envio antigo e mant�
     const photoRequest = await inbound("Quero ver as fotos antes");
     const photoScope = { ...scope, messageId: photoRequest.messageId };
     assert.deepEqual((await handlers.inboundTurn(photoScope)).messages.map((part) => part.text), ["Quero ver as fotos antes"]);
-    assert.deepEqual(await handlers.financingSession(photoScope), { productId: "turim:1", status: "pending" });
+    assert.deepEqual(await handlers.financingSession(photoScope), { productId: "turim:1", productIds: ["turim:1"], status: "pending" });
     const items = [1, 2].map((id) => ({ id: `turim:${id}`, name: `Modelo ${id}`,
       imageUrls: Array.from({ length: 100 }, (_, i) => `https://turimautos.com/storage/veiculos/car-${id}-${i}.jpg`) }));
     const gallery = await handlers.prepareReply({ empresaId, origin: "ai",
@@ -59,7 +59,7 @@ test("PostgreSQL: turno durável reúne mensagens, invalida envio antigo e mant�
     await handlers.markReplySent({ empresaId, replyId: gallery.messages[0].id, externalMessageId: `wamid.${randomUUID()}` });
     await handlers.markReplySent({ empresaId, replyId: gallery.messages.at(-1).id, externalMessageId: `wamid.${randomUUID()}` });
     const resume = await inbound("Pode continuar a simulação do primeiro");
-    assert.deepEqual(await handlers.financingSession({ ...scope, messageId: resume.messageId }), { productId: "turim:1", status: "pending" });
+    assert.deepEqual(await handlers.financingSession({ ...scope, messageId: resume.messageId }), { productId: "turim:1", productIds: ["turim:1"], status: "pending" });
     assert.deepEqual((await handlers.websiteInteraction({ ...scope, messageId: resume.messageId })).productIds, ["turim:1", "turim:2"]);
     // Execute the worker with the real repositories, including the oldest job
     // answering the newest message and restart/deduplication afterwards.
