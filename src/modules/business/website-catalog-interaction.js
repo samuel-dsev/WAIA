@@ -29,6 +29,27 @@ export function pendingWebsiteFinancingSession(states) {
   return productIds.length ? { productIds, ...(productIds.length === 1 ? { productId: productIds[0] } : {}), status: "pending" } : null;
 }
 
+export function websiteReferenceClarification(catalog, message, selectedIds = []) {
+  const answer = normalize(message);
+  if (!/\b(?:ele|ela|dele|dela|nele|nela|desse|dessa|esse|essa|este|esta|daquele|daquela)\b/u.test(answer)
+    || /\b(?:eles|elas|deles|delas|esses|essas|ambos|ambas|os dois|as duas|primeiro|primeira|segundo|segunda|terceiro|terceira|outro|outra|ultimo|ultima)\b/u.test(answer)
+    || catalog.quotedProductId) return null;
+  const focus = normalizeWebsiteInteraction(catalog.interaction);
+  const ids = focus && catalog.interaction.direct && focus.productIds.length > 1 && focus.productIds.length <= 3
+    ? focus.productIds : Array.isArray(selectedIds) ? selectedIds : [];
+  const candidates = availableCatalogProducts(catalog).filter((item) => ids.includes(item.id));
+  if (candidates.length < 2) return null;
+  const words = new Set(answer.replace(/[^\p{L}\p{N}]+/gu, " ").split(" "));
+  const named = candidates.filter((item) => normalize(item.name).split(/[^\p{L}\p{N}]+/u)
+    .some((word) => word.length >= 3 && words.has(word)));
+  // An explicit distinguishing name or a quoted card resolves the singular.
+  // With multiple equal referents, never turn "dele" into consent for both or
+  // silently select one. The model still resolves all unambiguous references.
+  if (named.length === 1) return null;
+  return { text: "Você se refere a " + candidates.map((item) => item.name).join(" ou ") + "?",
+    websiteInteraction: { step: "discussion", productIds: candidates.map((item) => item.id) } };
+}
+
 function choiceQuestion(step, item, text) {
   return { text, websiteInteraction: { step, productIds: [item.id] } };
 }

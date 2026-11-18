@@ -240,6 +240,13 @@ test("simulação dos dois e aceite com referência plural não caem no início 
   assert.equal(ai.clientFactory.requests.length, 2);
   assert.doesNotMatch(accepted.text, /Você prefere conhecer/u);
   assert.equal(accepted.leadQualification, undefined);
+  // Even a provider claiming qualification cannot authorize a singular target
+  // when the immediately preceding context contains two equal referents.
+  const ambiguous = await ai.service.reply(request("tenant-a", { message: "Quero fazer a simulação dele", context: { catalog } }));
+  assert.equal(ambiguous.leadQualification, undefined);
+  assert.equal(ambiguous.websiteInteraction.step, "discussion");
+  assert.ok(items.every((item) => ambiguous.text.includes(item.name)));
+  assert.doesNotMatch(ambiguous.text, /CPF|nascimento/u);
 });
 
 test("simulação preserva ficha completa e dados coletados até o texto da notificação", async () => {

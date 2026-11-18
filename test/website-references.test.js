@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeWebsiteInteraction, pendingWebsiteFinancingSession, hasWebsiteFinancingConsent } from "../src/modules/business/website-catalog-interaction.js";
+import { normalizeWebsiteInteraction, pendingWebsiteFinancingSession, hasWebsiteFinancingConsent, websiteReferenceClarification } from "../src/modules/business/website-catalog-interaction.js";
 import { parseCatalogSalesReply } from "../src/modules/business/catalog-sales.js";
 
 const ids = ["turim:1", "turim:2"];
@@ -8,6 +8,23 @@ const items = [{ id: ids[0], name: "ECOSPORT FREESTYLE" }, { id: ids[1], name: "
 const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items };
 const output = (catalogAction, productIds, text = "Vamos continuar com esses modelos.") => JSON.stringify({
   text, catalogAction, productIds, filters: { category: null, minPrice: null, maxPrice: null },
+});
+
+test("singular ambíguo com dois modelos pede nomes concretos, sem converter em plural nem adivinhar", () => {
+  const focused = { ...catalog, interaction: { step: "discussion", productIds: ids, direct: true } };
+  for (const message of ["Quero fazer a simulação dele", "Quero financiar ele", "Tem fotos desse?", "Quanto custa esse?"]) {
+    for (const selection of [ids, [ids[0]], [ids[1]], []]) {
+      const reply = websiteReferenceClarification(focused, message, selection);
+      assert.ok(items.every((item) => reply.text.includes(item.name)));
+      assert.deepEqual(reply.websiteInteraction.productIds, ids);
+    }
+    assert.deepEqual(parseCatalogSalesReply(output("finance", ids), focused, { message }), websiteReferenceClarification(focused, message, ids));
+  }
+  for (const message of ["Quero simular os dois", "Fotos deles", "Quero simular esse ECOSPORT", "Quero simular o segundo", "Quero simular o outro"]) {
+    assert.equal(websiteReferenceClarification(focused, message, ids), null, message);
+  }
+  assert.equal(websiteReferenceClarification({ ...focused, quotedProductId: ids[1] }, "Quero simular esse", [ids[1]]), null);
+  assert.equal(websiteReferenceClarification({ ...catalog, interaction: { step: "discussion", productIds: [ids[1]], direct: true } }, "Quero simular ele", [ids[1]]), null);
 });
 
 test("referências textuais mantêm os IDs discutidos sem reenviar galerias", () => {

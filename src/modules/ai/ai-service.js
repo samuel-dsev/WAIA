@@ -10,7 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
-import { hasWebsiteFinancingConsent } from "../business/website-catalog-interaction.js";
+import { hasWebsiteFinancingConsent, websiteReferenceClarification } from "../business/website-catalog-interaction.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
@@ -264,6 +264,13 @@ export class MultiTenantAiService {
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
+          const clarification = websiteCatalog && websiteReferenceClarification(websiteCatalog, request.message, structured.productIds);
+          if (clarification) {
+            structured.text = clarification.text;
+            structured.productIds = clarification.websiteInteraction.productIds;
+            structured.catalogAction = "none";
+            structured.leadQualification = { status: "collecting", name: null, summary: null, qualification: null };
+          }
           const websitePresentation = websiteCatalog && ["browse", "more", "products", "choose"].includes(structured.catalogAction);
           const selectedIds = Array.isArray(structured.productIds) ? structured.productIds : [];
           financingVehicles = websiteCatalog && !websiteDetails && structured.catalogAction === "finance"

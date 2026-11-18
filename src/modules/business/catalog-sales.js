@@ -1,5 +1,5 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
-import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply } from "./website-catalog-interaction.js";
+import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification } from "./website-catalog-interaction.js";
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -146,6 +146,8 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     || !Array.isArray(value.productIds) || value.productIds.length > 3 || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => !byId.has(id))) throw invalid();
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
+  const clarification = website && websiteReferenceClarification(catalog, message, value.productIds);
+  if (clarification) return clarification;
   if (action === "interest") {
     const handoff = catalog.interestHandoff;
     if (website || leadQualificationEnabled || handoff?.enabled !== true || typeof handoff.message !== "string" || !handoff.message.trim()
