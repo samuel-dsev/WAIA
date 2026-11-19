@@ -68,7 +68,7 @@ const TYPE_FROM_DATABASE = Object.freeze({
   sistema: "system",
 });
 
-const MEDIA_POLICY_ERRORS = new Set(["META_MEDIA_TOO_LARGE", "META_MEDIA_MIME_NOT_ALLOWED", "META_MEDIA_MIME_MISMATCH"]);
+const MEDIA_POLICY_ERRORS = new Set(["META_MEDIA_TOO_LARGE", "META_MEDIA_MIME_NOT_ALLOWED", "META_MEDIA_MIME_MISMATCH", "YCLOUD_MEDIA_REFERENCE_INVALID", "YCLOUD_MEDIA_REFERENCE_MISSING"]);
 
 function fromDatabase(value) {
   return TYPE_FROM_DATABASE[value] || value;
@@ -116,6 +116,7 @@ export class PostgresJobHandlerRepository {
         adReferral: normalizeAdReferral(row.outbound_payload?.adReferral),
         replyToExternalMessageId: row.outbound_payload?.replyToExternalMessageId || null,
         mediaId: row.media_external_id || null,
+        providerMedia: row.outbound_payload?.providerMedia || null,
         mediaStorageKey: row.media_storage_key || null,
         mediaMimeType: row.media_mime_type || null,
         mediaSizeBytes: row.media_size_bytes == null ? null : Number(row.media_size_bytes),
@@ -161,6 +162,7 @@ export class PostgresJobHandlerRepository {
                 media_size_bytes = $6,
                 media_sha256 = $7,
                 media_stored_at = now(),
+                outbound_payload = outbound_payload - 'providerMedia',
                 updated_at = now()
           WHERE empresa_id = $1 AND id = $2 AND media_external_id = $3
             AND direcao = 'entrada' AND tipo IN ('imagem', 'documento')

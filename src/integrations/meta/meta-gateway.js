@@ -6,6 +6,8 @@ import {
 } from "../common.js";
 import { createWhatsAppReplyPayload } from "../../modules/whatsapp/outbound.js";
 import { createYCloudClient } from "../ycloud/client.js";
+import { normalizeYCloudMediaReference } from "../ycloud/media-reference.js";
+import { createHash } from "node:crypto";
 
 function requiredText(value, field, max = 4096) {
   const text = String(value || "").trim();
@@ -181,15 +183,21 @@ export function createMetaGateway({
 
   async function downloadMedia(context, {
     mediaId,
+    providerMedia,
     maxBytes = 10 * 1024 * 1024,
     allowedMimeTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"],
   } = {}) {
     const scoped = await resolve(context);
     const { tenant, credentials } = scoped;
     if (!credentials) throw new IntegrationError("Integração Meta não configurada.", { code: "META_NOT_CONFIGURED", retryable: false });
-    if (credentials.provider === "ycloud") throw new IntegrationError("Anexos YCloud ainda não suportados.", { code: "YCLOUD_MEDIA_NOT_SUPPORTED", retryable: false });
     const id = requiredText(mediaId, "mediaId", 512);
-    const metadata = await request(context, id, { operation: "resolve_media" }, scoped);
+    const ycloudMedia = credentials.provider === "ycloud" ? normalizeYCloudMediaReference(providerMedia) : null;
+    if (credentials.provider === "ycloud" && !ycloudMedia) throw new IntegrationError("Referência privada da mídia indisponível.", { code: "YCLOUD_MEDIA_REFERENCE_MISSING", retryable: false });
+    if (ycloudMedia && (ycloudMedia.mediaId !== id || ycloudMedia.wabaId !== String(credentials.wabaId))) {
+      throw new IntegrationError("Mídia de outra conexão recusada.", { code: "YCLOUD_MEDIA_REFERENCE_INVALID", retryable: false });
+    }
+    const metadata = ycloudMedia ? { mime_type: ycloudMedia.mimeType, url: ycloudMedia.url }
+      : await request(context, id, { operation: "resolve_media" }, scoped);
     const mimeType = normalizedMime(metadata.mime_type);
     const declaredSize = metadata.file_size == null ? null : Number(metadata.file_size);
     const allowed = new Set(allowedMimeTypes.map(normalizedMime));
@@ -199,7 +207,7 @@ export function createMetaGateway({
     if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
       throw new IntegrationError("A mídia excede o limite permitido.", { code: "META_MEDIA_TOO_LARGE", retryable: false });
     }
-    if (!allowedMediaUrl(metadata.url)) {
+    if (!ycloudMedia && !allowedMediaUrl(metadata.url)) {
       throw new IntegrationError("URL de mídia recusada.", { code: "META_MEDIA_URL_INVALID", retryable: false });
     }
     const controller = new AbortController();
@@ -209,7 +217,7 @@ export function createMetaGateway({
         method: "GET",
         redirect: "error",
         signal: controller.signal,
-        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        headers: ycloudMedia ? { "X-API-Key": credentials.accessToken } : { Authorization: `Bearer ${credentials.accessToken}` },
       });
       if (!response.ok) {
         throw new IntegrationError("A Meta recusou o download da mídia.", {
@@ -223,6 +231,9 @@ export function createMetaGateway({
         throw new IntegrationError("Tipo de mídia divergente.", { code: "META_MEDIA_MIME_MISMATCH", retryable: false });
       }
       const data = await limitedBody(response, maxBytes);
+      if (ycloudMedia?.sha256 && createHash("sha256").update(data).digest("base64") !== ycloudMedia.sha256) {
+        throw new IntegrationError("Integridade da mídia divergente.", { code: "MEDIA_INTEGRITY_FAILED", retryable: false });
+      }
       if (Number.isFinite(declaredSize) && declaredSize >= 0 && data.length !== declaredSize) {
         throw new IntegrationError("Tamanho da mídia divergente.", { code: "META_MEDIA_SIZE_MISMATCH" });
       }
@@ -234,7 +245,7 @@ export function createMetaGateway({
           ? error
           : new IntegrationError("A mídia da Meta está indisponível.", { code: "META_MEDIA_UNAVAILABLE" });
       safeIntegrationLog(logger, "warn", "meta_operation_failed", tenant, {
-        integration: "meta",
+        integration: ycloudMedia ? "ycloud" : "meta",
         operation: "download_media",
         status: normalized.status,
         errorCode: normalized.code,

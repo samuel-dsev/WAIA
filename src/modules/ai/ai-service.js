@@ -151,13 +151,16 @@ export class MultiTenantAiService {
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
       const baseFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
       const evaluationFormat = evaluationEnabled ? tradeInEvaluationFormat(baseFormat, photoHandoff) : baseFormat;
-      const selectionFormat = contextualVehicleService ? contextualVehicleServiceFormat(evaluationFormat) : evaluationFormat;
+      const selectionFormat = contextualVehicleService ? contextualVehicleServiceFormat(evaluationFormat, { transcript: [...promptHistory, ...transcript.current] }) : evaluationFormat;
       const paragraphReply = evaluationEnabled && /\b(?:troca|avalia[cç][aã]o)\b/iu.test(request.message)
         && (request.message.match(/\?/gu) || []).length > 1;
       if (paragraphReply && selectionFormat?.schema?.properties?.text) {
         selectionFormat.schema.properties.text.pattern = "[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S[\\s\\S]*";
       }
       const turnGuidance = [
+        contextualVehicleService && websiteCatalog.financingSession?.status === "pending"
+          && hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current])
+          ? "COLETA DE SIMULAÇÃO: CPF e nascimento já constam das respostas originais, inclusive quando enviados em linhas separadas. Não peça esses dados novamente. Se o nome ainda não foi informado, mantenha collecting e pergunte apenas como pode chamar, sem anunciar encerramento ou retorno já encaminhado. Com nome e demais critérios completos, conclua a ficha preservando todos os dados e a entrada declarada." : "",
         alternativesAccepted ? "OFERTA ATUAL ACEITA: a última pergunta enviada ofereceu modelos/opções semelhantes e o cliente aceitou. Use browse para apresentar somente a lista do estoque, com filtros coerentes com o histórico. Não use finance/products, não pergunte para qual modelo quer simulação e não peça dados de financiamento. Uma oferta antiga de simulação não muda esse aceite." : "",
         paragraphReply ? "FORMATAÇÃO DESTE TURNO: responda a cada pergunta realmente feita em seu próprio parágrafo. Separe os parágrafos por uma linha em branco (\\n\\n), mantendo uma única mensagem e um último parágrafo para o convite. Não crie um assunto nem inclua localização para preencher parágrafos: endereço/cidade somente quando solicitado pelo cliente." : "",
         photoHistoryLine ? "Na ficha de simulação, preserve os dados coletados e demais solicitações. Diferencie os modelos com fotos no histórico dos modelos que o cliente escolheu simular. O sistema acrescenta dados literais conferidos nas mensagens e a linha dos últimos modelos com fotos; redija o relato de summary em até 750 caracteres para reservar espaço, sem apagar os dados fornecidos." : "",
@@ -169,7 +172,7 @@ export class MultiTenantAiService {
         + (evaluationTurnInstructions ? "\n" + evaluationTurnInstructions : "")
         + (photoHandoff.photosHandoffEnabled ? "\nEXCEÇÃO DE AVALIAÇÃO POR FOTOS: fotos armazenadas e nome informado permitem concluir em photos_received. Essa regra substitui a orientação anterior de manter coleta por fotos. Reconheça o recebimento, aproveite o nome conhecido e encerre conforme o modelo, sem exigir modelo de compra, visita ou financiamento. Responda antes a qualquer outra pergunta atual." : "")
         + (turnGuidance ? "\n" + turnGuidance : "")
-        + (contextualVehicleService ? "\nReavalie também customerService com evidências literais, a entrada opcional, o aceite específico de contato sobre garantia e o encerramento natural em text. Não use finance para encerrar um pedido de garantia; não exija dados de financiamento nesse encaminhamento. Em browse/more/products, text deve conter a continuidade contextual, sem repetir as fichas. Se não houver unidades ou fotos compatíveis, use none e responda naturalmente." : "");
+        + (contextualVehicleService ? "\nReavalie também customerService com evidências literais, a entrada opcional, o aceite específico de contato sobre garantia e o encerramento natural em text. Se o cliente já aceitou contato sobre garantia e depois informou o nome, preserve o aceite ORIGINAL: warranty.status=accepted, offerEvidence e consentEvidence copiam aquela oferta e aquele aceite completos. Não volte a offered porque a mensagem atual contém somente o nome. Se não houve aceite, mantenha collecting e não anuncie retorno. Não use finance para encerrar um pedido de garantia; não exija dados de financiamento nesse encaminhamento. Em browse/more/products, text deve conter a continuidade contextual, sem repetir as fichas. Se não houver unidades ou fotos compatíveis, use none e responda naturalmente." : "");
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
@@ -237,11 +240,20 @@ export class MultiTenantAiService {
         ...(selectionFormat ? { text: { format: selectionFormat } } : {}),
       };
       const startedAt = performance.now();
-      const requestResponse = async (repair = false, feedback = "") => {
+      const requestResponse = async (repair = false, feedback = "", repairFormat) => {
         const remainingMs = this.timeoutMs - (performance.now() - startedAt);
         if (remainingMs < 1) throw timeoutError();
+        if (repair && contextualVehicleService) {
+          repairFormat = structuredClone(repairFormat || selectionFormat);
+          const fields = repairFormat.schema.properties;
+          // Validate intent/evidence and the card before generating the public closing.
+          const order = ["customerService", "tradeInEvaluation", "leadQualification",
+            ...Object.keys(fields).filter((key) => !["customerService", "tradeInEvaluation", "leadQualification", "text"].includes(key)), "text"];
+          repairFormat.schema.properties = Object.fromEntries(order.filter((key) => fields[key]).map((key) => [key, fields[key]]));
+        }
         const response = await responseWithTimeout(client, repair
-          ? { ...providerRequest, instructions: `${instructions}\n\n${recheckInstructions}${feedback ? `\n\nCORREÇÃO DESTE TURNO: ${feedback}` : ""}` } : providerRequest,
+          ? { ...providerRequest, instructions: `${instructions}\n\n${recheckInstructions}${feedback ? `\n\nCORREÇÃO DESTE TURNO: ${feedback}` : ""}`,
+            ...(repairFormat ? { text: { format: repairFormat } } : {}) } : providerRequest,
         remainingMs, { headers: { "X-Client-Request-Id": repair
           ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
         const usage = normalizeUsage(response);
@@ -446,7 +458,20 @@ export class MultiTenantAiService {
           } catch (error) {
             if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
             if (config.contextualServiceEnabled) {
-              if (attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }
+              if (attempt === 0) {
+                const missingName = ["NAME", "NAME_EVIDENCE"].includes(error.validationReason);
+                const repairFormat = missingName ? structuredClone(selectionFormat) : undefined;
+                if (repairFormat) {
+                  const fields = repairFormat.schema.properties.leadQualification.properties;
+                  fields.status.enum = ["collecting"];
+                  for (const field of ["name", "summary", "qualification"]) fields[field].enum = [null];
+                  repairFormat.schema.properties.text.pattern = "^[^0-9{}\\[\\]:?\\n]{1,200}\\?$";
+                }
+                ({ response, text } = await requestResponse(true, ["NAME", "NAME_EVIDENCE"].includes(error.validationReason)
+                  ? "A ficha não tem nome confirmado nas mensagens originais. Não invente um nome nem conclua. Preserve os dados já recebidos, retorne collecting com name/summary/qualification nulos. Em text, escreva somente uma pergunta curta sobre como pode chamar o cliente, conforme o roteiro. Não repita documentos, valores, campos internos ou instruções; não anuncie encerramento, encaminhamento ou retorno antes de completar a ficha."
+                  : "Corrija a ficha com os dados originais e os critérios publicados, preservando o pedido atual.", repairFormat));
+                continue;
+              }
               throw error;
             }
             if ((evaluationQualifies || financingVehicles.length) && error.validationReason === "SUMMARY" && attempt === 0) {
@@ -593,6 +618,8 @@ export class MultiTenantAiService {
       conversationId: request.conversationId,
       correlationId: request.correlationId,
       code: sanitized.code || fallbackCode,
+      ...(["ENVELOPE", "NAME", "NAME_EVIDENCE", "SUMMARY", "QUALIFICATION", "CONFIG_VERSION"].includes(error?.validationReason)
+        ? { validationReason: error.validationReason } : {}),
       openAiRequestId: error?.requestID || error?._request_id || null,
     });
   }

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { parseWhatsAppWebhook } from "../whatsapp/parser.js";
+import { normalizeYCloudMediaReference } from "../../integrations/ycloud/media-reference.js";
 
 export class YCloudWebhookError extends Error {
   constructor(statusCode, code) {
@@ -76,6 +77,14 @@ export function createYCloudWebhookService({ connectionResolver, credentialVault
         } }],
       }] });
     } catch { reject(400, "YCLOUD_PAYLOAD_INVALID"); }
+    if (inbound && message.type === "image" && message.image?.link) {
+      try {
+        const media = message[message.type];
+        const providerReference = normalizeYCloudMediaReference({ provider: "ycloud", mediaId: media.id,
+          wabaId: String(number.wabaId), url: media.link, mimeType: media.mime_type, sha256: media.sha256 });
+        events = events.map((event) => ({ ...event, media: { ...event.media, providerReference } }));
+      } catch { reject(400, "YCLOUD_PAYLOAD_INVALID"); }
+    }
     await ingestionService.ingestEvents(events, { correlationId });
     await repository.recordValidWebhook({ empresaId: connection.empresaId, appId: connection.id });
     return { accepted: true, eventCount: events.length };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +16,9 @@ import { MemoryAiLedger, MemoryAiSecretResolver, MemoryPricingCatalog, MemoryRes
 import { PostgresGroupNotifierRepository } from "../src/modules/group-notifier/postgres-repository.js";
 import { createGroupNotifierWorker } from "../src/modules/group-notifier/worker.js";
 import { withTenantTransaction } from "../src/infra/postgres/transaction.js";
+import { createMetaGateway } from "../src/integrations/meta/meta-gateway.js";
+import { createYCloudWebhookService } from "../src/modules/meta/ycloud-webhook-service.js";
+import { ycloudMediaReference } from "./support/ycloud-media-fixtures.js";
 
 test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e fotos posteriores sem reativar bot", {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
@@ -44,10 +47,29 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
     const groupId = "9" + Date.now() + String(Math.random()).slice(2, 8) + "@g.us";
     await owner.query("INSERT INTO group_notifier_routes(empresa_id,group_id,group_name,sender_phone,enabled) VALUES($1,$2,'Grupo sintético','+5511000000099',true)", [empresaId, groupId]);
     const webhooks = new PostgresWebhookRepository(pool), repository = new PostgresJobHandlerRepository(pool);
-    const inbound = (text, type = "text", mediaId) => webhooks.withTenantTransaction({ empresaId }, (tx) => webhooks.insertInboundMessage(tx, {
-      empresaId, numeroWhatsappId: numberId, correlationId: randomUUID(), event: { externalMessageId: "wamid." + randomUUID(), senderPhone: "5511000000001",
-        occurredAt: new Date(), messageType: type, text, ...(mediaId ? { media: { externalId: mediaId } } : {}) },
+    const source = new Map([1, 2, 3, 4].map((n) => ["photo-" + n, Buffer.from("imagem sintética " + n)]));
+    const insert = (event) => webhooks.withTenantTransaction({ empresaId }, (tx) => webhooks.insertInboundMessage(tx, {
+      empresaId, numeroWhatsappId: numberId, correlationId: randomUUID(), event,
     }));
+    const inbound = async (text, type = "text", mediaId) => {
+      const event = { externalMessageId: "wamid." + randomUUID(), senderPhone: "5511000000001", occurredAt: new Date(), messageType: type, text };
+      if (type !== "image") return insert(event);
+      let stored;
+      const now = Date.now(), reference = ycloudMediaReference({ mediaId, data: source.get(mediaId) });
+      const ingress = createYCloudWebhookService({ clock: () => now,
+        connectionResolver: { async resolveByWebhookPublicId() { return { id: "synthetic-connection", empresaId, mode: "ycloud", state: "active", appSecretCredentialId: "synthetic-sign",
+          numbers: [{ id: numberId, phoneNumberId: "synthetic-number", wabaId: "waba-a", numeroE164: "+5511000000002", status: "ativo" }] }; } },
+        credentialVault: { async getCredentialForUse() { return "synthetic-signing"; } }, repository: { async recordValidWebhook() {} },
+        ingestionService: { async ingestEvents(events) { stored = await insert(events[0]); } },
+      });
+      const rawBody = Buffer.from(JSON.stringify({ id: "event-" + randomUUID(), apiVersion: "v2", type: "whatsapp.inbound_message.received",
+        whatsappInboundMessage: { id: "ycloud-" + randomUUID(), wamid: event.externalMessageId, wabaId: "waba-a", from: "+5511000000001", to: "+5511000000002",
+          sendTime: new Date(now).toISOString(), type: "image", image: { id: mediaId, link: reference.url, mime_type: reference.mimeType, sha256: reference.sha256, caption: text } } }));
+      const timestamp = Math.floor(now / 1000);
+      await ingress.ingest({ webhookPublicId: "synthetic-webhook-public-id", rawBody,
+        signature: `t=${timestamp},s=${createHmac("sha256", "synthetic-signing").update(`${timestamp}.`).update(rawBody).digest("hex")}` });
+      return stored;
+    };
     const first = await inbound("Quero uma avaliação por fotos do meu HB20 2016.");
     const initialMessage = await repository.inboundMessage({ empresaId, messageId: first.messageId });
     const offer = await repository.prepareReply({ empresaId, message: initialMessage, origin: "ai", reply: {
@@ -55,8 +77,15 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
       tradeInEvaluation: { step: "collect_photos", interestName: null, interestSource: "unknown" },
     } });
     await repository.markReplySent({ empresaId, replyId: offer.id, externalMessageId: "wamid." + offer.id });
-    const source = new Map([1, 2, 3, 4].map((n) => ["photo-" + n, Buffer.from("imagem sintética " + n)]));
     const downloads = [], botMessages = [], groupMessages = [];
+    const gateway = createMetaGateway({ logger: { warn() {} }, credentialResolver: { async resolveMeta(scope) {
+      assert.equal(scope.empresaId, empresaId); assert.equal(scope.numeroWhatsappId, numberId);
+      return { provider: "ycloud", accessToken: "synthetic-key", phoneNumberId: "synthetic-number", wabaId: "waba-a" };
+    } }, fetchImpl: async (url, options) => {
+      const id = new URL(url).pathname.split("/").at(-1); downloads.push(id);
+      assert.deepEqual(options.headers, { "X-API-Key": "synthetic-key" }); assert.equal(options.redirect, "error");
+      return new Response(source.get(id), { headers: { "Content-Type": "image/png" } });
+    } });
     let aiCalls = 0;
     const conversationService = new ConversationService({ repository: new PostgresConversationRepository(pool) });
     const closing = "Obrigado pelas informações, logo um de nossos vendedores vai entrar em contato com o retorno da avaliação e dará continuidade no seu atendimento.";
@@ -72,7 +101,7 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
       pricingCatalog: new MemoryPricingCatalog({ test: { inputPerMillion: 1, outputPerMillion: 1, version: "test" } }), logger: { info() {}, warn() {} } });
     const dependencies = { repository, conversationService, tenantDefinitionRepository: { async load() { return materializeLegacyTenantDefinition(compiled); } },
       aiService, mediaStore, clock: () => new Date(Date.now() + 16_000), logger: { info() {}, warn() {} },
-      metaGateway: { async downloadMedia(_scope, { mediaId }) { downloads.push(mediaId); return { data: source.get(mediaId), mimeType: "image/png" }; },
+      metaGateway: { downloadMedia: gateway.downloadMedia,
         async sendReply(_scope, part) { botMessages.push(part); return { id: "wamid." + randomUUID() }; } } };
     const job = (messageId) => ({ empresaId, messageId, conversationId: first.conversationId });
     const photo1 = await inbound("", "image", "photo-1"), photo2 = await inbound("Meu carro", "image", "photo-2");
@@ -82,6 +111,7 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
       assert.equal(aiCalls, 1); assert.equal(botMessages.length, 1); assert.match(botMessages[0].text, /Recebi as duas fotos/u);
       assert.equal((await owner.query("SELECT 1 FROM qualified_leads WHERE empresa_id=$1", [empresaId])).rowCount, 0);
       assert.equal((await owner.query("SELECT count(*)::int AS n FROM mensagens WHERE empresa_id=$1 AND tipo='imagem' AND media_storage_key IS NOT NULL", [empresaId])).rows[0].n, 2);
+      assert.equal((await owner.query("SELECT 1 FROM mensagens WHERE empresa_id=$1 AND outbound_payload ? 'providerMedia'", [empresaId])).rowCount, 0, "Remover a URL privada após armazenar os bytes.");
     });
     let named, deliveryId;
     await t.test("nome conclui, pausa e registra ficha, resumo e duas imagens na ordem sem duplicar", async () => {

@@ -27,13 +27,14 @@ export function preserveCollectedFinancingData(card, evidence = [], transcript =
       || /\bnao (?:e|eh|use|considere|utilize|quero (?:informar|enviar|usar))\b/u.test(text)) continue;
     const labeledCpf = body.match(/\bcpf\s*(?:(?:é|e|eh)\s*)?[:=-]?\s*(\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2})(?!\d)/iu)?.[1];
     const formattedCpf = body.match(/(?<!\d)(\d{3}\.\d{3}\.\d{3}-\d{2})(?!\d)/u)?.[1];
-    const standaloneCpf = collected.has(body) ? body.match(/^\s*(\d{11})(?:\s+\d{1,2}\/\d{1,2}\/\d{4})?\s*$/u)?.[1] : null;
+    const answerLines = collected.has(body) ? body.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean) : [];
+    const standaloneCpf = answerLines.map((line) => line.match(/^(\d{11})(?:\s+\d{1,2}\/\d{1,2}\/\d{4})?$/u)?.[1]).find(Boolean);
     const suppliedCpf = labeledCpf || formattedCpf || standaloneCpf;
     if (suppliedCpf) cpf = suppliedCpf.replace(/\D/gu, "");
     const date = body.match(/(?<!\d)(\d{1,2})\/(\d{1,2})\/(\d{4})(?!\d)/u);
     if (date && Number(date[1]) >= 1 && Number(date[1]) <= 31 && Number(date[2]) >= 1 && Number(date[2]) <= 12
-      && (/\b(?:nascimento|nasci|nascido|nascida)\b/u.test(text) || collected.has(body)
-        && /^(?:\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2}\s+)?\d{1,2}\/\d{1,2}\/\d{4}$/u.test(body))) {
+      && (/\b(?:nascimento|nasci|nascido|nascida)\b/u.test(text) || answerLines.some((line) =>
+        /^(?:\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2}\s+)?\d{1,2}\/\d{1,2}\/\d{4}$/u.test(line)))) {
       birthDate = date[1].padStart(2, "0") + "/" + date[2].padStart(2, "0") + "/" + date[3];
     }
     const locality = body.match(/\b(?:moro em|resido em|sou de|minha cidade (?:é|e))\s+([\p{L}][\p{L} '-]{1,90}?)(?=\s+(?:e (?:tenho|quero|sou)|mas|com|para)\b|[,.;!?/\n]|$)/iu)?.[1]

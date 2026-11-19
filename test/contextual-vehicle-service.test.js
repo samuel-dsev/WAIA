@@ -111,6 +111,37 @@ test("entrada opcional não adia a ficha após os dados; IA reavalia e escreve o
   assert.doesNotMatch(result.text, /entrada|\?/iu);
 });
 
+test("documentos e entrada em várias linhas pedem nome e depois finalizam a mesma simulação", async () => {
+  const body = "00000000000\n01/01/0001\n15 mil real";
+  const initial = [history("user", "Quero simular o Onix Joy"), history("assistant", "Informe seu CPF e data de nascimento. Se for dar entrada, me informe o valor.")];
+  const downPayment = { status: "amount", amount: "15 mil real", evidence: "15 mil real" };
+  const ask = "Para finalizar, como posso te chamar?";
+  const first = service(async (call) => {
+    assert.match(call.instructions, /inclusive quando enviados em linhas separadas/u);
+    return first.factory.requests.length === 1 ? response("Um vendedor retornará sobre a simulação.", {
+      action: "none", ids: [item.id], downPayment, qualification: { ...lead, name: "Cliente" },
+    }) : (assert.match(call.instructions, /A ficha não tem nome confirmado/u),
+      assert.deepEqual(call.text.format.schema.properties.leadQualification.properties.status.enum, ["collecting"]),
+      assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("Um vendedor retornará."), false),
+      assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test(ask), true),
+       assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("CPF: 00000000000\nComo posso te chamar?"), false),
+       assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("leadQualification.status: qualified\nComo posso te chamar?"), false),
+      response(ask, { action: "finance", ids: [item.id], downPayment }));
+  }, initial);
+  const collectingReply = await first.ai.reply(request(body));
+  assert.equal(collectingReply.source, "ai"); assert.equal(collectingReply.text, ask);
+  assert.equal(collectingReply.leadQualification, undefined); assert.equal(first.factory.requests.length, 2);
+  const second = service(async () => response("Obrigada, Ana! Um vendedor retornará sobre a simulação.", {
+    downPayment, qualification: lead, action: "none", ids: [item.id],
+  }), [...initial, history("user", body), history("assistant", ask)]);
+  const completed = await second.ai.reply(request("Ana Teste"));
+  assert.equal(completed.source, "ai"); assert.equal(completed.leadQualification.name, "Ana Teste");
+  assert.equal(completed.websiteInteraction.step, "closed");
+  assert.match(completed.leadQualification.summary, /000\.000\.000-00/u);
+  assert.match(completed.leadQualification.summary, /01\/01\/0001/u);
+  assert.match(completed.leadQualification.summary, /Valor de entrada: 15 mil real/u);
+});
+
 test("dúvida de garantia oferece contato e só o aceite correspondente permite ficha sem financiar", async () => {
   const question = "O que a garantia de um ano cobre?";
   const offer = "Não tenho os detalhes da cobertura da garantia. Quer que um vendedor entre em contato para explicar?";
@@ -147,7 +178,7 @@ test("aceite com nome usa evidências inteiras da garantia sem relaxar a confer�
   const question = "O que a garantia cobre?", offer = "Não tenho os detalhes. Quer falar com nossa equipe sobre a cobertura da garantia?";
   const consent = "Sou Ana Teste, pode pedir para ele me explicar sim";
   const { ai, factory } = service(async (call) => {
-    assert.match(call.text.format.schema.properties.customerService.properties.warranty.properties.consentEvidence.description, /INTEIRA/u);
+    assert.match(call.text.format.schema.properties.customerService.properties.warranty.anyOf[1].properties.consentEvidence.description, /INTEIRA/u);
     if (factory.requests.length > 1) assert.match(call.instructions, /Corrija customerService usando somente mensagens originais/u);
     return response("Obrigada, Ana! Um vendedor retornará sobre a garantia.", {
       warranty: { status: "accepted", requestEvidence: question, offerEvidence: offer,
@@ -156,6 +187,30 @@ test("aceite com nome usa evidências inteiras da garantia sem relaxar a confer�
   const result = await ai.reply(request(consent));
   assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
   assert.match(result.leadQualification.summary, /cobertura da garantia/u);
+});
+
+test("nome após aceite de garantia não vira evidência de consentimento nem reinicia o encaminhamento", async () => {
+  const question = "Tem garantia?";
+  const offer = "O modelo tem garantia. Se quiser, posso te conectar com um dos nossos vendedores para explicar a cobertura da garantia. Posso ajudar com isso?";
+  const consent = "sim por favor";
+  const nameQuestion = "Ótimo! Para que nossa equipe entre em contato para esclarecer a garantia, como posso te chamar?";
+  const transcript = [history("user", question), history("assistant", offer), history("user", consent), history("assistant", nameQuestion)];
+  const { ai, factory } = service(async (call) => {
+    const fields = call.text.format.schema.properties.customerService.properties.warranty.anyOf[1].properties;
+    assert.deepEqual(fields.offerEvidence.enum, [offer]);
+    assert.deepEqual(fields.consentEvidence.enum, [consent]);
+    assert.match(call.instructions, /o nome atual NÃO é um novo aceite/u);
+    return response("Obrigada, Samuel! Um vendedor retornará sobre a cobertura da garantia.", {
+      warranty: { status: "accepted", requestEvidence: question, offerEvidence: offer, consentEvidence: consent },
+      qualification: { ...lead, name: "Samuel", summary: "Samuel quer retorno do vendedor sobre a cobertura da garantia." },
+    });
+  }, transcript);
+  const result = await ai.reply(request("Samuel"));
+  assert.equal(result.source, "ai"); assert.equal(factory.requests.length, 1); assert.equal(result.leadQualification.name, "Samuel");
+  assert.match(result.leadQualification.summary, /aguarda retorno.*cobertura da garantia/u);
+  assert.throws(() => parseCustomerService({ downPayment: noDownPayment,
+    warranty: { status: "accepted", requestEvidence: question, offerEvidence: nameQuestion, consentEvidence: "Samuel" } },
+    [...transcript.map(part => ({ role: part.direction === "inbound" ? "user" : "assistant", content: part.body })), { role: "user", content: "Samuel" }]), { code: "AI_INVALID_CUSTOMER_SERVICE" });
 });
 
 test("pedido direto de vendedor sobre garantia aproveita nome e possível interesse do anúncio", async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withPlatformTransaction, withTenantTransaction } from "../transaction.js";
 import { normalizeAdReferral } from "../../../modules/whatsapp/ad-referral.js";
+import { normalizeYCloudMediaReference } from "../../../integrations/ycloud/media-reference.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -148,6 +149,7 @@ export class PostgresWebhookRepository {
         event.occurredAt,
         uuidOrNew(correlationId),
         JSON.stringify({ ...(event.adReferral ? { adReferral: normalizeAdReferral(event.adReferral) } : {}),
+          ...(event.media?.providerReference ? { providerMedia: normalizeYCloudMediaReference(event.media.providerReference) } : {}),
           ...(typeof event.replyToExternalMessageId === "string" && event.replyToExternalMessageId.length <= 512 && event.replyToExternalMessageId.trim()
             ? { replyToExternalMessageId: event.replyToExternalMessageId.trim() } : {}) }),
       ],

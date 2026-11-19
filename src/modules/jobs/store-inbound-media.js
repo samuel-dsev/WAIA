@@ -6,7 +6,8 @@ export async function storeInboundMedia({ empresaId, message, metaGateway, media
     throw Object.assign(new Error("Armazenamento privado de mídia não configurado."), { code: "MEDIA_STORAGE_NOT_CONFIGURED", retryable: false });
   }
   const downloaded = await metaGateway.downloadMedia({ empresaId, numeroWhatsappId: message.numeroWhatsappId }, {
-    mediaId: message.mediaId, maxBytes: mediaStore.maxBytes, allowedMimeTypes: [...mediaStore.allowedMimeTypes],
+    mediaId: message.mediaId, ...(message.providerMedia ? { providerMedia: message.providerMedia } : {}),
+    maxBytes: mediaStore.maxBytes, allowedMimeTypes: [...mediaStore.allowedMimeTypes],
   });
   const stored = await mediaStore.put({ empresaId, messageId: message.id, data: downloaded.data, mimeType: downloaded.mimeType });
   try { await repository.markMediaStored({ empresaId, messageId: message.id, mediaId: message.mediaId, stored }); }

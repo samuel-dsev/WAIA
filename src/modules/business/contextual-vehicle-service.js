@@ -4,7 +4,34 @@ const ownBody = (part) => String(part.content || "").split("\n[Em resposta à me
 const keys = (value, names) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === names.length && names.every((name) => Object.hasOwn(value, name));
 
-export function contextualVehicleServiceFormat(base) {
+function warrantyOffer(content) {
+  const text = normalize(content), question = text.match(/[^.!?]*\?\s*$/u)?.[0] || "";
+  return /\bgarantia\b/u.test(text) && /\b(?:vendedor(?:es)?|equipe|atendentes?|especialistas?)\b/u.test(text)
+    && !/\b(?:nome|chamar|chamado|chamada)\b/u.test(question)
+    && /\?|\b(?:se quiser|posso|quer|gostaria|deseja|conect)/u.test(text);
+}
+
+function warrantyEvidence(transcript) {
+  const offers = [], consents = [], directRequests = [];
+  let previousAssistant;
+  for (const part of transcript) {
+    if (part.role === "assistant") { previousAssistant = ownBody(part); continue; }
+    if (part.role !== "user") continue;
+    const body = ownBody(part);
+    if (!body || body.length > 2000) continue;
+    if (warrantyOffer(previousAssistant) && previousAssistant.length <= 4096) {
+      offers.push(previousAssistant); consents.push(body);
+    }
+    if (/\bgarantia\b/u.test(normalize(body)) && /\b(?:vendedor(?:es)?|equipe|atendentes?|especialistas?)\b/u.test(normalize(body))) directRequests.push(body);
+  }
+  const bounded = (values) => {
+    let size = 0;
+    return [...new Set(values)].reverse().filter((value) => (size += value.length) <= 12000).slice(0, 32).reverse();
+  };
+  return { offers: bounded(offers), consents: bounded(consents), directRequests: bounded(directRequests) };
+}
+
+export function contextualVehicleServiceFormat(base, { transcript } = {}) {
   const format = structuredClone(base);
   format.schema.properties.customerService = {
     type: "object", additionalProperties: false,
@@ -27,6 +54,32 @@ export function contextualVehicleServiceFormat(base) {
       },
     }, required: ["downPayment", "warranty"],
   };
+  if (transcript) {
+    const candidates = warrantyEvidence(transcript);
+    const warranty = format.schema.properties.customerService.properties.warranty;
+    const pending = structuredClone(warranty);
+    pending.properties.status.enum = ["none", "offered"];
+    pending.properties.offerEvidence.enum = [null];
+    pending.properties.consentEvidence.enum = [null];
+    const alternatives = [pending];
+    if (candidates.offers.length && candidates.consents.length) {
+      const accepted = structuredClone(warranty);
+      accepted.properties.status.enum = ["accepted"];
+      accepted.properties.requestEvidence.type = "string";
+      accepted.properties.offerEvidence = { ...accepted.properties.offerEvidence, type: "string", enum: candidates.offers };
+      accepted.properties.consentEvidence = { ...accepted.properties.consentEvidence, type: "string", enum: candidates.consents };
+      alternatives.push(accepted);
+    }
+    if (candidates.directRequests.length) {
+      const direct = structuredClone(warranty);
+      direct.properties.status.enum = ["accepted"];
+      direct.properties.requestEvidence.type = "string";
+      direct.properties.offerEvidence.enum = [null];
+      direct.properties.consentEvidence = { ...direct.properties.consentEvidence, type: "string", enum: candidates.directRequests };
+      alternatives.push(direct);
+    }
+    format.schema.properties.customerService.properties.warranty = { anyOf: alternatives };
+  }
   format.schema.required.push("customerService");
   return format;
 }
@@ -41,7 +94,7 @@ export const CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS = `ATENDIMENTO CONTEXTUAL D
 - O sistema acrescenta o registro de entrada à ficha interna de financiamento: "Cliente não informou sobre valores de entrada", "Sem valor de entrada" ou "Valor de entrada: [valor]". Não peça esse campo novamente só para preencher a ficha. Reserve espaço: summary deve ter até 700 caracteres antes dos complementos conferidos pelo sistema; preserve todos os dados coletados e solicitações relevantes, diferenciando modelos fotografados dos escolhidos para simular.
 - Se perguntarem o que a garantia cobre, explique com naturalidade que não dispõe dos detalhes da cobertura e ofereça contato com um vendedor para esclarecer. Não invente peças cobertas, exclusões, prazo certo ou condições contratuais, mesmo que o cliente insista. A informação de até um ano não significa um ano garantido para toda unidade.
 - customerService.warranty.status=offered ao oferecer esse contato. Use accepted apenas quando o cliente pedir diretamente o contato sobre cobertura ou aceitar a oferta atual correspondente, inclusive em linguagem indireta. Uma dúvida sobre garantia não autoriza o encaminhamento por si só; um "sim" após oferta de fotos, avaliação ou simulação não aceita contato sobre garantia. Se mudar de assunto ou recusar, respeite o novo pedido e mantenha collecting.
-- Em warranty, requestEvidence é um trecho literal do pedido do cliente sobre cobertura. Para aceite de uma oferta, offerEvidence copia a mensagem INTEIRA enviada pela assistente que ofereceu contato com a equipe sobre garantia, incluindo todos os parágrafos; consentEvidence copia a mensagem original INTEIRA do cliente que a aceitou, inclusive nome e outras frases do mesmo envio. Não recorte somente o aceite se a mensagem também apresenta o nome. Para pedido direto de vendedor sobre cobertura, offerEvidence=null e consentEvidence copia esse pedido INTEIRO. Não reformule nem resuma essas duas evidências. Nunca use texto citado, anúncio ou fala da assistente como evidência do cliente.
+- Em warranty, requestEvidence é um trecho literal do pedido do cliente sobre cobertura. Para aceite de uma oferta, offerEvidence copia a mensagem INTEIRA enviada pela assistente que ofereceu contato com a equipe sobre garantia, incluindo todos os parágrafos; consentEvidence copia a mensagem original INTEIRA do cliente que a aceitou, inclusive nome e outras frases do mesmo envio. Se o aceite ocorreu antes da coleta de nome, mantenha aquela oferta e aquele aceite do histórico: o nome atual NÃO é um novo aceite e a pergunta de nome NÃO é a oferta de vendedor. Não recorte somente o aceite se a mensagem também apresenta o nome. Para pedido direto de vendedor sobre cobertura, offerEvidence=null e consentEvidence copia esse pedido INTEIRO. Não reformule nem resuma essas duas evidências. Nunca use texto citado, anúncio ou fala da assistente como evidência do cliente.
 - Aceite de contato sobre cobertura e nome já informado permitem qualified, com catalogAction=none e sem exigir simulação, documentos, cidade ou modelo. Se faltar o nome, peça somente como pode chamá-lo, sem repetir a oferta. A ficha inclui a necessidade de retorno sobre cobertura, interesse declarado ou possível pelo anúncio, modelos fotografados, demais pedidos e todos os dados já coletados. A qualificação operacional informa que o cliente aguarda esclarecimentos de garantia por um vendedor.
 - Ao qualificar, text contém o encerramento personalizado, agradecendo e informando que um vendedor retornará sobre a solicitação atual. Responda também a eventuais perguntas no turno, em parágrafos separados. Não repita dados pessoais no texto público, não diga que enviou ao grupo, não prometa aprovação, reserva ou prazo de retorno. Não faça pergunta extra após concluir. O sistema só cria a ficha e pausa após confirmação operacional do envio.`;
 
@@ -77,12 +130,12 @@ export function parseCustomerService(value, transcript) {
     if (/^(?:nao|negativo|dispenso)[.! ]*$/u.test(body)) throw invalid();
     if (warranty.offerEvidence === null) {
       // Direct requests must name the subject and the desired human contact.
-      warrantyAccepted = /\bgarantia\b/u.test(body) && /\b(?:vendedor|equipe|atendente|especialista)\b/u.test(body);
+      warrantyAccepted = /\bgarantia\b/u.test(body) && /\b(?:vendedor(?:es)?|equipe|atendentes?|especialistas?)\b/u.test(body);
     } else {
       const previousAssistant = transcript.slice(0, index).findLast((part) => part.role === "assistant");
       const offer = typeof warranty.offerEvidence === "string" ? warranty.offerEvidence.trim() : "";
       warrantyAccepted = Boolean(offer && ownBody(previousAssistant || {}) === offer
-        && /\bgarantia\b/u.test(normalize(offer)) && /\b(?:vendedor|equipe|atendente|especialista)\b/u.test(normalize(offer)));
+        && warrantyOffer(offer));
     }
     if (!warrantyAccepted) throw invalid();
   }
