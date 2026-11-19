@@ -40,6 +40,79 @@ const request = (message, extra = {}) => ({ empresaId: "test", conversationId: "
   context: { catalog }, ...extra });
 const history = (role, body) => ({ type: "text", direction: role === "user" ? "inbound" : "outbound", status: "sent", body });
 
+test("aceite vago de opções chama IA apenas para esclarecer e repete até escolha clara", async () => {
+  const offer = "O Onix custa R$ 55.900,00.\n\nGostaria de fotos dele? Ou deseja simular um financiamento?";
+  const question = "Você gostaria das fotos, da simulação de financiamento ou das duas opções?";
+  const entries = [history("assistant", offer)];
+  for (const input of ["sim", "pode ser", "sim"]) {
+    const { ai, factory } = service(async (call) => {
+      assert.equal(call.text.format.name, "choice_clarification");
+      assert.deepEqual(call.text.format.schema.required, ["text"]);
+      assert.match(call.instructions, /ESCLARECIMENTO OBRIGATÓRIO DESTE TURNO/u);
+      return { output_text: JSON.stringify({ text: question }), usage: { input_tokens: 10, output_tokens: 10 } };
+    }, entries);
+    const result = await ai.reply(request(input));
+    assert.equal(factory.requests.length, 1); assert.equal(result.source, "ai");
+    assert.equal(result.reason, "clarification_needed"); assert.equal(result.text, question);
+    for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(result[key], undefined);
+    entries.push(history("user", input), history("assistant", question));
+  }
+  const selected = service(async () => response("Informe seu CPF e nascimento.", { action: "finance", ids: [item.id] }), entries);
+  const reply = await selected.ai.reply(request("Simulação", { context: { catalog: { ...catalog, financingSession: null } } }));
+  assert.equal(reply.source, "ai"); assert.equal(reply.websiteInteraction.step, "finance_accepted");
+});
+
+test("contingência de opções usa pergunta original mesmo se IA falhar e não executa efeitos", async () => {
+  const offer = "Você prefere fotos do veículo ou uma simulação?";
+  for (const responder of [async () => { throw Error("falha fictícia"); }, async () => response("Envie CPF.", { action: "finance", ids: [item.id] })]) {
+    const { ai } = service(responder, [history("assistant", offer)], { contingencyMessage: "CONTINGÊNCIA GENÉRICA ANTIGA" });
+    const result = await ai.reply(request("sim"));
+    assert.equal(result.source, "fallback"); assert.ok(result.text.includes(offer));
+    assert.doesNotMatch(result.text, /GENÉRICA|CPF/u);
+    for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(result[key], undefined);
+  }
+});
+
+test("escolher ambas envia fotos e preserva simulação aceita; não escolhe ambas por sim", async () => {
+  const previous = [history("assistant", "Você prefere fotos do Onix, simulação ou as duas?")];
+  const { ai } = service(async () => response("Para a simulação, informe CPF e nascimento.", { action: "products", ids: [item.id] }), previous);
+  const result = await ai.reply(request("as duas", { context: { catalog: { ...catalog, financingSession: null } } }));
+  assert.equal(result.source, "ai"); assert.equal(result.messages.length, 2);
+  assert.equal(result.messages.at(-1).websiteInteraction.step, "finance_accepted");
+  const last = result.messages.at(-1);
+  assert.deepEqual(websiteListFormatMetadata(last), { catalogContinuation: last.text });
+  const recovered = replyFromRow({ corpo: last.text, outbound_payload: last });
+  assert.equal(recovered.websiteInteraction.step, "finance_accepted");
+  assert.equal(result.leadQualification, undefined);
+});
+
+test("contingência da IA diante de resposta inesperada é reavaliada com a pergunta pendente", async () => {
+  const generic = "Não entendi. Você procura qual assunto?";
+  const question = "Você quer fotos, simulação ou as duas?";
+  const { ai, factory } = service(async (call) => factory.requests.length === 1 ? response(generic)
+    : (assert.equal(call.text.format.name, "choice_clarification"), { output_text: JSON.stringify({ text: question }) }),
+  [history("assistant", "Gostaria das fotos ou de uma simulação?")], { contingencyMessage: generic });
+  const result = await ai.reply(request("asdfg"));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai"); assert.equal(result.text, question);
+  assert.equal(result.websiteInteraction, undefined); assert.equal(result.leadQualification, undefined);
+});
+
+test("decisão de esclarecer é tomada antes dos efeitos; reavaliação não ultrapassa duas chamadas", async () => {
+  const offer = "Quer fotos ou simulação?";
+  const first = service(async (call) => first.factory.requests.length === 1
+    ? { ...response("Não compreendi sua escolha."), output_text: JSON.stringify({ ...JSON.parse(response("").output_text), text: "Não compreendi sua escolha.", turnIntent: "clarify" }) }
+    : (assert.equal(call.text.format.name, "choice_clarification"), { output_text: JSON.stringify({ text: "Você prefere fotos, simulação ou ambas?" }) }), [history("assistant", offer)]);
+  const reply = await first.ai.reply(request("asdfg"));
+  assert.equal(reply.source, "ai"); assert.equal(reply.reason, "clarification_needed");
+  assert.equal(first.factory.requests.length, 2); assert.equal(reply.websiteInteraction, undefined);
+  const retry = service(async () => retry.factory.requests.length === 1
+    ? response("Envie CPF.", { action: "products", ids: [item.id] })
+    : { output_text: JSON.stringify({ ...JSON.parse(response("Qual opção?").output_text), turnIntent: "clarify" }) }, [history("assistant", offer)]);
+  const blocked = await retry.ai.reply(request("asdfg"));
+  assert.equal(retry.factory.requests.length, 2); assert.equal(blocked.source, "fallback"); assert.ok(blocked.text.includes(offer));
+  assert.equal(blocked.messages, undefined); assert.equal(blocked.leadQualification, undefined);
+});
+
 test("modo contextual atravessa compilação e envia saudações, aliases, menu e escolhas para IA", async () => {
   const cfg = { schemaVersion: 2, identity: { name: "Loja fictícia" }, modules: ["catalog", "human_handoff", "ai_freeform"],
     menu: { text: "SAUDAÇÃO AUTOMÁTICA ANTIGA", options: [{ id: "endereco", label: "Endereço", action: "catalog.address" }] },

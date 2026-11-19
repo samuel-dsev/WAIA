@@ -26,7 +26,7 @@ async function canDispatchWebsiteReply(client, empresaId, part) {
   if (listFormatVersion === 3 && !validCatalogContinuation(continuation)) return false;
   if (continuation !== undefined && (!validCatalogContinuation(continuation)
     || !(interaction?.step === "list" && listFormatVersion === 3
-      || interaction?.step === "gallery" && websiteCard && interaction.productIds.at(-1) === productId))) return false;
+      || ["gallery", "finance_accepted"].includes(interaction?.step) && websiteCard && interaction.productIds.at(-1) === productId))) return false;
   if (part.catalogListFormatVersion !== undefined && (listFormatVersion === null || interaction?.step !== "list")) return false;
   if (!websiteCard && !redirect && !interaction) return true;
   const catalog = await loadWebsiteCatalog(client, empresaId);

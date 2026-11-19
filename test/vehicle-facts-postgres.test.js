@@ -112,6 +112,26 @@ test("PostgreSQL: fatos do site atravessam sincronização, runtime, fila, retom
       await owner.query("UPDATE mensagens SET outbound_payload=outbound_payload-'catalogContinuation' WHERE id=$1", [prepared.id]);
       assert.equal((await repository.claimBotDispatch({ empresaId, messageId: input.messageId, replyId: prepared.id })).allowed, false);
     });
+    await t.test("escolha de fotos e simulação persiste na última imagem e retoma a coleta após envio", async () => {
+      const input = await inbound(), message = await repository.inboundMessage({ empresaId, messageId: input.messageId });
+      const continuation = "Para a simulação aceita, informe CPF e data de nascimento, por favor.";
+      const reply = parseCatalogSalesReply(JSON.stringify({ text: continuation, catalogAction: "products", productIds: [item.id],
+        filters: { category: null, minPrice: null, maxPrice: null } }), definition.runtime.catalog,
+      { contextualServiceEnabled: true, message: "Quero fotos e simulação" });
+      reply.messages.at(-1).websiteInteraction = { step: "finance_accepted", productIds: [item.id] };
+      const prepared = await repository.prepareReply({ empresaId, message, origin: "ai", reply });
+      const scope = { empresaId, messageId: input.messageId, replyId: prepared.id };
+      const resumed = await new PostgresJobHandlerRepository(pool).preparedReply(scope);
+      assert.equal(resumed.messages.at(-1).websiteInteraction.step, "finance_accepted");
+      assert.equal(resumed.messages.at(-1).catalogContinuation, continuation);
+      assert.equal((await repository.claimBotDispatch(scope)).allowed, true);
+      await repository.markReplySent({ empresaId, replyId: prepared.id, externalMessageId: "wamid." + randomUUID() });
+      const next = await inbound();
+      const state = await new PostgresJobHandlerRepository(pool).financingSession({ empresaId, conversationId: next.conversationId, messageId: next.messageId });
+      assert.deepEqual(state.productIds, [item.id]);
+      assert.equal(state.status, "pending");
+      assert.equal((await repository.claimBotDispatch(scope)).allowed, false);
+    });
     await t.test("alterar km, ano, preço ou remover a unidade impede o envio preparado", async () => {
       for (const field of ["mileageKm", "year", "price", "removed"]) {
         const current = await prepare(), changed = structuredClone(snapshot);

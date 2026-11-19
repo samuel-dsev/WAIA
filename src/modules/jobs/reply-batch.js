@@ -13,7 +13,7 @@ export function websiteListFormatMetadata(part) {
   const continuation = part.catalogContinuation;
   if (continuation !== undefined && (!validCatalogContinuation(continuation)
     || !(part.catalogListFormatVersion === 3 && interaction?.step === "list" && !part.imageUrl
-      || interaction?.step === "gallery" && part.imageUrl && part.catalogProductId === interaction.productIds.at(-1)))) throw invalid();
+      || ["gallery", "finance_accepted"].includes(interaction?.step) && part.imageUrl && part.catalogProductId === interaction.productIds.at(-1)))) throw invalid();
   const metadata = continuation === undefined ? {} : { catalogContinuation: continuation };
   if (part.catalogListFormatVersion === undefined) return metadata;
   if (normalizeWebsiteListFormatVersion(part.catalogListFormatVersion) === null

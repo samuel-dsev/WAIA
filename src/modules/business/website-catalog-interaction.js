@@ -1,5 +1,6 @@
 import { availableCatalogProducts } from "./catalog-messages.js";
 import { vehicleFactsText } from "../../core/vehicle-facts.js";
+import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion } from "../ai/choice-clarification.js";
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
@@ -178,6 +179,8 @@ function negative(message) {
 
 export function hasWebsiteFinancingConsent(catalog, message, productId, history) {
   const answer = normalize(message);
+  if (ambiguousChoiceReply(message, history)) return false;
+  if (lastChoiceQuestion(history) && /^(?:quero |prefiro |as? )?(?:as? )?(?:fotos?|imagens?)(?: sim| por favor)?[.! ]*$/u.test(answer)) return false;
   // Negation of a down payment is not cancellation of an accepted simulation.
   if (/\b(?:nao (?:quero|vou|preciso)(?: mais)?(?: fazer| de)?(?: a| o)? (?:simulacao|simular|financiamento|financiar)|cancel[ae]|desisti)\b/u.test(answer)
     || /^(?:nao quero|nao vou|nao preciso)[.! ]*$/u.test(answer)) return false;
@@ -188,7 +191,8 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
   const offer = catalog.interaction?.step === "finance_offer" && catalog.interaction.direct
     && catalog.interaction.productIds[0] === productId;
   // A short acceptance needs a current financing question, never an older offer.
-  const currentQuestion = /\b(?:gostaria|quer|deseja|posso|podemos|vamos)\b[^?]*\b(?:simula[cç][aã]o|simular|financiamento|financiar)\b[^?]*\?\s*$/iu.test(last);
+  const currentQuestion = /\b(?:gostaria|quer|deseja|posso|podemos|vamos|prefere)\b[^?]*\b(?:simula[cç][aã]o|simular|financiamento|financiar)\b[^?]*\?\s*$/iu.test(last)
+    || /\b(?:simula[cç][aã]o|simular|financiamento|financiar)\b/iu.test(lastChoiceQuestion(history) || "");
   // The model has classified finance and resolved the selected IDs using the
   // whole transcript. This guard checks the current offer, not a vocabulary of
   // allowed answers: "quero sim, dos dois" and a selection such as "deles" are
@@ -201,18 +205,22 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
 
 export function hasWebsitePhotoConsent(message, history) {
   const answer = normalize(message);
+  if (ambiguousChoiceReply(message, history)) return false;
   if (/\bnao\b[^.!?\n]{0,35}\b(?:envie|mande|quero|preciso|mostre)\b[^.!?\n]{0,25}\bfotos?\b/u.test(answer)
     || /^(?:nao|agora nao|dispenso)[.! ]*$/u.test(answer)) return false;
   const requested = answer.split(/\b(?:mas|porem)\b|[;.!?\n]/u).some((part) => /\b(?:fotos?|imagens?)\b/u.test(part)
     && /\b(?:tem|teria|manda(?:r|m|e)?|envia(?:r|m)?|envie|mostra(?:r|m)?|mostre|ver|quero|gostaria|pode|poderia)\b/u.test(part)
     && !/\b(?:nao|sem)\b.{0,35}\b(?:fotos?|imagens?)\b/u.test(part));
   if (requested) return true;
+  if (acceptsAllChoices(message, history) && /\b(?:fotos?|imagens?)\b/iu.test(lastChoiceQuestion(history))) return true;
+  if (/\b(?:fotos?|imagens?)\b/iu.test(lastChoiceQuestion(history) || "")
+    && /^(?:(?:quero|prefiro|gostaria de) )?(?:(?:as? )?(?:fotos?|imagens?)(?: sim| por favor)?|(?:a |o )?(?:primeir[oa]|segund[oa])(?: opcao)?)[.! ]*$/u.test(answer)) return true;
   const last = normalize(history.findLast((part) => part.role === "assistant")?.content);
   const question = last.match(/[^.!?]*\?\s*$/u)?.[0] || "";
   const accepts = /^(?:sim|pode(?: sim| ser| mandar| enviar| mostrar)?|quero(?: sim)?|gostaria(?: sim)?|claro|por favor|com certeza|mande|envie|os dois|as duas|ambos|ambas|esses(?: aqui)?|essas(?: aqui)?|deles|delas)(?:\b|$)/u;
   return /\b(?:fotos?|imagens?)\b/u.test(question)
     && /\b(?:quer|gostaria|posso|deseja|pode|prefere)\b/u.test(question)
-    && !/\b(?:simulacao|financiamento)\b/u.test(question)
+    && (!/\b(?:simulacao|financiamento)\b/u.test(question) || /\b(?:fotos?|imagens?)\b/u.test(answer))
     && answer.split("\n").some((part) => accepts.test(part.trim()))
     && !/\b(?:depois|mais tarde|ainda nao|agora nao)\b/u.test(answer);
 }
