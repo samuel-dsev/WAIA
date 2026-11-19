@@ -8,7 +8,7 @@ import {
 } from "./guardrails.js";
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
-import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, CATALOG_SALES_INSTRUCTIONS, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
+import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, catalogSalesInstructions, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
 import { preserveCollectedFinancingData } from "../group-notifier/collected-financing-data.js";
 import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
@@ -170,7 +170,7 @@ export class MultiTenantAiService {
         + (photoHandoff.photosHandoffEnabled ? "\nEXCEÇÃO DE AVALIAÇÃO POR FOTOS: fotos armazenadas e nome informado permitem concluir em photos_received. Essa regra substitui a orientação anterior de manter coleta por fotos. Reconheça o recebimento, aproveite o nome conhecido e encerre conforme o modelo, sem exigir modelo de compra, visita ou financiamento. Responda antes a qualquer outra pergunta atual." : "")
         + (turnGuidance ? "\n" + turnGuidance : "")
         + (contextualVehicleService ? "\nReavalie também customerService com evidências literais, a entrada opcional, o aceite específico de contato sobre garantia e o encerramento natural em text. Não use finance para encerrar um pedido de garantia; não exija dados de financiamento nesse encaminhamento. Em browse/more/products, text deve conter a continuidade contextual, sem repetir as fichas. Se não houver unidades ou fotos compatíveis, use none e responda naturalmente." : "");
-      const instructions = [buildInstructions(config), catalogFormat ? salesMode ? CATALOG_SALES_INSTRUCTIONS : CATALOG_SELECTION_INSTRUCTIONS : "" ,
+      const instructions = [buildInstructions(config), catalogFormat ? salesMode ? catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
         catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",

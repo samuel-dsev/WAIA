@@ -88,6 +88,17 @@ export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Use finance_decline com os IDs da simulação recusada ou cancelada. Responda naturalmente em text e mantenha collecting. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação. Em none/details, inclua em productIds os modelos efetivamente discutidos quando estiverem identificados, para preservar o foco mesmo numa resposta textual sem galeria.
 - Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.`;
 
+export function catalogSalesInstructions({ contextualServiceEnabled = false } = {}) {
+  if (!contextualServiceEnabled) return CATALOG_SALES_INSTRUCTIONS;
+  return CATALOG_SALES_INSTRUCTIONS.split("\n").filter((line) => ![
+    "- Para products,", "- Para none,", "- O sistema envia a abertura de browse/more",
+  ].some((prefix) => line.startsWith(prefix))).concat([
+    "- No atendimento contextual, products exige pedido explícito de fotos ou aceite da oferta atual. Se apenas escolheu ou gostou de um modelo, responda em text e ofereça fotos, sem enviar a galeria. Escolha somente IDs inequívocos; não envie várias unidades por semelhança de nome.",
+    "- text deve estar preenchido em todas as respostas contextuais. Em browse/more, escreva somente a continuidade após a lista; em products, escreva o convite de simulação que irá na legenda da última imagem. Não deixe text vazio: o sistema monta as fichas factuais, mas a continuidade vem da IA conforme o modelo do roteiro. Não repita os dados das fichas em text.",
+    "- Em none/details, text responde à solicitação e productIds pode preservar os modelos discutidos sem enviar fotos. Filtros ficam null. Não conclua uma ficha apenas por uma escolha de modelo.",
+  ]).join("\n");
+}
+
 export function asksForVehiclePhoto(message) {
   const text = normalize(message).replace(/\s+/gu, " ");
   if (/\b(?:sem|nao (?:quero|mande|envie|mostre)) (?:as? )?(?:fotos?|imagens?)\b/u.test(text)) return false;

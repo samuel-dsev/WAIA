@@ -225,6 +225,8 @@ test("avaliação por fotos reconhece recebimento, pede só nome e conclui após
   const first = service(async (call) => {
     assert.match(call.instructions, /MODELO DE MENSAGEM/u);
     assert.match(call.instructions, /somente quando necessário|somente quando o contexto exigir/u);
+    assert.doesNotMatch(call.instructions, /Em products\/browse\/more, deixe text vazio|Use o roteiro como orientação de objetivos/u);
+    assert.match(call.instructions, /text deve estar preenchido em todas as respostas contextuais/u);
     return response("Recebi as fotos do veículo. Para finalizar, como posso te chamar?", { evaluation });
   }, [], config);
   const reply = await first.ai.reply(request("", { context, turnMessages: [{ id: "image-1", type: "image", text: "", mediaStored: true }] }));
