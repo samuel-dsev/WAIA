@@ -303,7 +303,8 @@ export class MultiTenantAiService {
             try { customerService = parseCustomerService(structured.customerService, [...promptHistory, ...transcript.current]); }
             catch (error) {
               if (error.code !== "AI_INVALID_CUSTOMER_SERVICE" || attempt > 0) throw error;
-              ({ response, text } = await requestResponse(true)); continue;
+              ({ response, text } = await requestResponse(true,
+                "Corrija customerService usando somente mensagens originais. No aceite de contato sobre garantia, offerEvidence deve copiar a mensagem INTEIRA da última assistente que ofereceu esse contato, e consentEvidence deve copiar a mensagem INTEIRA do cliente que aceitou, incluindo nome e todas as frases do mesmo envio; não recorte trechos nem reformule. Em pedido direto, offerEvidence=null e consentEvidence copia o pedido inteiro. Entrada usa apenas valor declarado literalmente. Preserve os dados válidos e os critérios. Se a ficha estiver completa, text encerra conforme o roteiro sem pergunta de continuidade, CPF ou promessa de envio ao grupo.")); continue;
             }
             delete structured.customerService;
           }

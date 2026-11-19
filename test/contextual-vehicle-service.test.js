@@ -143,6 +143,21 @@ test("encerramento de garantia com pergunta recebe correção específica sem pe
   assert.equal(result.leadQualification.name, "Ana Teste"); assert.doesNotMatch(result.text, /\?/u);
 });
 
+test("aceite com nome usa evidências inteiras da garantia sem relaxar a conferência", async () => {
+  const question = "O que a garantia cobre?", offer = "Não tenho os detalhes. Quer falar com nossa equipe sobre a cobertura da garantia?";
+  const consent = "Sou Ana Teste, pode pedir para ele me explicar sim";
+  const { ai, factory } = service(async (call) => {
+    assert.match(call.text.format.schema.properties.customerService.properties.warranty.properties.consentEvidence.description, /INTEIRA/u);
+    if (factory.requests.length > 1) assert.match(call.instructions, /Corrija customerService usando somente mensagens originais/u);
+    return response("Obrigada, Ana! Um vendedor retornará sobre a garantia.", {
+      warranty: { status: "accepted", requestEvidence: question, offerEvidence: offer,
+        consentEvidence: factory.requests.length === 1 ? "pode pedir para ele me explicar sim" : consent }, qualification: lead });
+  }, [history("user", question), history("assistant", offer)]);
+  const result = await ai.reply(request(consent));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
+  assert.match(result.leadQualification.summary, /cobertura da garantia/u);
+});
+
 test("pedido direto de vendedor sobre garantia aproveita nome e possível interesse do anúncio", async () => {
   const message = "Sou Ana Teste e quero falar com um vendedor sobre o que a garantia cobre.";
   const { ai } = service(async () => response("Obrigada, Ana! Um vendedor retornará sobre a cobertura.", {
