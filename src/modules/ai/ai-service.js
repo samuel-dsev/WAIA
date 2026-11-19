@@ -352,7 +352,8 @@ export class MultiTenantAiService {
           const selectedIds = Array.isArray(structured.productIds) ? structured.productIds : [];
           const pendingFinanceIds = websiteCatalog?.financingSession?.status === "pending"
             ? websiteCatalog.financingSession.productIds || (websiteCatalog.financingSession.productId ? [websiteCatalog.financingSession.productId] : []) : [];
-          const completesPendingFinance = !config.contextualServiceEnabled && websiteCatalog && !websiteDetails && !evaluationProposal
+          const completesPendingFinance = websiteCatalog && !websiteDetails && !evaluationProposal
+            && (!config.contextualServiceEnabled || hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current]))
             && !customerService?.warrantyAccepted
             && structured.catalogAction === "none" && structured.leadQualification?.status === "qualified"
             && !request.turnMessages?.some((part) => part.type === "image")
