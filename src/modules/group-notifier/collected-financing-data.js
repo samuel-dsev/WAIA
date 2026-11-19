@@ -16,32 +16,52 @@ function collectionBodies(evidence, transcript) {
   return answers;
 }
 
-/** Copy only literal customer-supplied values. This is not document validation
- * or a reason to qualify: the existing consent/name/card gates still apply. */
-export function preserveCollectedFinancingData(card, evidence = [], transcript = []) {
+const cpfPattern = /(?<!\d)(?:\d{11}|\d{3}[.\s]\d{3}[.\s]\d{3}[-\s]\d{2})(?!\d)/gu;
+const datePattern = /(?<!\d)(\d{1,2})([\/.-]|\s+)(\d{1,2})\2(\d{4}|\d{2})(?!\d)/gu;
+const compactDatePattern = /(?<!\d)(\d{2})(\d{2})(\d{4}|\d{2})(?!\d)/gu;
+const unique = (values) => { const candidates = [...new Set(values)]; return candidates.length === 1 ? candidates[0] : undefined; };
+const dateValue = (day, month, year) => Number(day) >= 1 && Number(day) <= 31 && Number(month) >= 1 && Number(month) <= 12
+  ? day.padStart(2, "0") + "/" + month.padStart(2, "0") + "/" + year : null;
+const unrelatedNumbers = (body) => body
+  .replace(/\b(?:telefone|celular|whats(?:app)?|contato)\s*(?:(?:é|e|eh)\s*)?[:=]?\s*[+()\d .-]{7,}/giu, " ")
+  .replace(/\b(?:entrada|valor(?: de entrada)?|r\$)\s*[:=]?\s*(?:r\$\s*)?[\d.,]+(?:\s*(?:mil|reais|real))?/giu, " ")
+  .replace(/(?<!\d)[\d.,]+\s*(?:mil\b|reais\b|real\b|de entrada\b)/giu, " ");
+
+/** Shape and collection context identify fields, never the message position.
+ * Two-digit years remain literal; ambiguous candidates are not guessed. */
+export function collectedFinancingFields(evidence = [], transcript = [], name = "") {
   const collected = collectionBodies(evidence, transcript);
   let cpf, birthDate, city;
   for (const value of evidence) {
     const body = String(value || "").trim(), text = normalized(body);
     if (/^(?:exemplo\s*:|por exemplo\b|como exemplo\b)/u.test(text)
       || /\bnao (?:e|eh|use|considere|utilize|quero (?:informar|enviar|usar))\b/u.test(text)) continue;
-    const labeledCpf = body.match(/\bcpf\s*(?:(?:é|e|eh)\s*)?[:=-]?\s*(\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2})(?!\d)/iu)?.[1];
-    const formattedCpf = body.match(/(?<!\d)(\d{3}\.\d{3}\.\d{3}-\d{2})(?!\d)/u)?.[1];
-    const answerLines = collected.has(body) ? body.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean) : [];
-    const standaloneCpf = answerLines.map((line) => line.match(/^(\d{11})(?:\s+\d{1,2}\/\d{1,2}\/\d{4})?$/u)?.[1]).find(Boolean);
-    const suppliedCpf = labeledCpf || formattedCpf || standaloneCpf;
-    if (suppliedCpf) cpf = suppliedCpf.replace(/\D/gu, "");
-    const date = body.match(/(?<!\d)(\d{1,2})\/(\d{1,2})\/(\d{4})(?!\d)/u);
-    if (date && Number(date[1]) >= 1 && Number(date[1]) <= 31 && Number(date[2]) >= 1 && Number(date[2]) <= 12
-      && (/\b(?:nascimento|nasci|nascido|nascida)\b/u.test(text) || answerLines.some((line) =>
-        /^(?:\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2}\s+)?\d{1,2}\/\d{1,2}\/\d{4}$/u.test(line)))) {
-      birthDate = date[1].padStart(2, "0") + "/" + date[2].padStart(2, "0") + "/" + date[3];
+    const numbers = unrelatedNumbers(body);
+    const labeledCpf = body.match(/\bcpf\s*(?:(?:é|e|eh)\s*)?[:=-]?\s*(\d{11}|\d{3}[.\s]\d{3}[.\s]\d{3}[-\s]\d{2})(?!\d)/iu)?.[1];
+    const suppliedCpfs = [...numbers.matchAll(cpfPattern)].filter((match) => collected.has(body) || /\d{3}\.\d{3}\.\d{3}-\d{2}/u.test(match[0]))
+      .map((match) => match[0].replace(/\D/gu, ""));
+    const suppliedCpf = labeledCpf?.replace(/\D/gu, "") || unique(suppliedCpfs);
+    if (suppliedCpf) cpf = suppliedCpf;
+    const birthLabel = /\b(?:nascimento|nasci|nascido|nascida)\b/iu.exec(numbers);
+    if (collected.has(body) || birthLabel) {
+      const dateText = birthLabel ? numbers.slice(birthLabel.index + birthLabel[0].length).replace(/^\s*[:=]?\s*/u, "").split(/[\n;]/u)[0] : numbers;
+      const dates = [...dateText.matchAll(datePattern)].map((m) => dateValue(m[1], m[3], m[4]));
+      dates.push(...[...dateText.matchAll(compactDatePattern)].map((m) => dateValue(m[1], m[2], m[3])));
+      const suppliedDate = unique(dates.filter(Boolean));
+      if (suppliedDate) birthDate = suppliedDate;
     }
     const locality = body.match(/\b(?:moro em|resido em|sou de|minha cidade (?:é|e))\s+([\p{L}][\p{L} '-]{1,90}?)(?=\s+(?:e (?:tenho|quero|sou)|mas|com|para)\b|[,.;!?/\n]|$)/iu)?.[1]
-      || (text.includes(normalized(card.name)) && /\b(?:sou|me chamo|meu nome)\b/u.test(text)
+      || (text.includes(normalized(name)) && /\b(?:sou|me chamo|meu nome)\b/u.test(text)
         ? body.match(/,\s*de\s+([\p{L}][\p{L} '-]{1,90}?)(?=\s+(?:e (?:tenho|quero|sou)|mas|com|para)\b|[,.;!?/\n]|$)/iu)?.[1] : null);
     if (locality && !/^(?:verdade|novo|fato|passagem|acordo|boa)$/u.test(normalized(locality))) city = locality.trim();
   }
+  return { cpf, birthDate, city };
+}
+
+/** Copy only literal customer-supplied values. This is not document validation
+ * or a reason to qualify: the existing consent/name/card gates still apply. */
+export function preserveCollectedFinancingData(card, evidence = [], transcript = []) {
+  const { cpf, birthDate, city } = collectedFinancingFields(evidence, transcript, card.name);
   const summary = String(card.summary || ""), compactSummary = normalized(summary);
   const summaryCpfs = [...summary.matchAll(/(?<!\d)\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2}(?!\d)/gu)].map((match) => match[0].replace(/\D/gu, ""));
   const lines = [];
@@ -53,6 +73,6 @@ export function preserveCollectedFinancingData(card, evidence = [], transcript =
 
 /** Evidence for a model recheck only; it neither validates documents nor qualifies a lead. */
 export function hasCollectedFinancingDocuments(evidence = [], transcript = []) {
-  const { summary } = preserveCollectedFinancingData({ name: "", summary: "" }, evidence, transcript);
-  return summary.includes("CPF informado: ") && summary.includes("Data de nascimento informada: ");
+  const { cpf, birthDate } = collectedFinancingFields(evidence, transcript);
+  return Boolean(cpf && birthDate);
 }

@@ -142,6 +142,66 @@ test("documentos e entrada em várias linhas pedem nome e depois finalizam a mes
   assert.match(completed.leadQualification.summary, /Valor de entrada: 15 mil real/u);
 });
 
+test("nome conclui a simulação com data curta e campos fora da ordem, sem depender de três mensagens", async () => {
+  for (const bodies of [["00011122233\n01/01/01\n15 mil"], ["15 mil 00011122233 01/01/01"], ["010101", "000 111 222 33 15 mil"]]) {
+    const prior = [history("user", "Quero simular o Onix Joy"), history("assistant", "Informe CPF e data de nascimento. A entrada é opcional."),
+      ...bodies.map(body => history("user", body)), history("assistant", "Como posso te chamar?")];
+    const { ai } = service(async () => response("Obrigada, Ana! Um vendedor retornará sobre a simulação.", {
+      qualification: lead, ids: [item.id], downPayment: { status: "amount", amount: "15 mil", evidence: "15 mil" },
+    }), prior);
+    const result = await ai.reply(request("Ana Teste"));
+    assert.equal(result.source, "ai"); assert.equal(result.websiteInteraction.step, "closed");
+    assert.match(result.leadQualification.summary, /CPF informado: 000\.111\.222-33/u);
+    assert.match(result.leadQualification.summary, /Data de nascimento informada: 01\/01\/01(?:\n|$)/u);
+    assert.match(result.leadQualification.summary, /Valor de entrada: 15 mil/u);
+  }
+});
+
+test("oferta e aceite com parágrafos usam enums sem controles e são conferidos nas mensagens originais inteiras", async () => {
+  const question = "Como funciona a garantia?";
+  const offer = "Não tenho os detalhes da cobertura.\n\nQuer falar com um de nossos vendedores sobre a garantia?";
+  const consent = "Sim, por favor.\nSou Ana Teste.";
+  const line = value => value.replace(/\s+/gu, " ");
+  const { ai } = service(async call => {
+    const fields = call.text.format.schema.properties.customerService.properties.warranty.anyOf[1].properties;
+    assert.deepEqual(fields.offerEvidence.enum, [line(offer)]); assert.deepEqual(fields.consentEvidence.enum, [line(consent)]);
+    assert.doesNotMatch(JSON.stringify(fields.offerEvidence.enum), /\\n/u);
+    return response("Obrigada, Ana! Um vendedor retornará sobre a cobertura da garantia.", {
+      qualification: lead, warranty: { status: "accepted", requestEvidence: question, offerEvidence: line(offer), consentEvidence: line(consent) },
+    });
+  }, [history("user", question), history("assistant", offer)]);
+  const result = await ai.reply(request(consent));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification.name, "Ana Teste");
+  const transcript = [{ role: "user", content: question }, { role: "assistant", content: offer }, { role: "user", content: consent }];
+  assert.throws(() => parseCustomerService({ downPayment: noDownPayment, warranty: { status: "accepted", requestEvidence: question,
+    offerEvidence: line(offer).replace("vendedores", "atendentes"), consentEvidence: line(consent) } }, transcript), { code: "AI_INVALID_CUSTOMER_SERVICE" });
+});
+
+test("interesse após oferta de garantia com parágrafos continua por fotos sem aceitar contato ou criar ficha", async () => {
+  const question = "Como funciona a garantia?", offer = "Até um ano, conforme as condições.\n\nPosso conectar você com nossa equipe para explicar a cobertura da garantia?";
+  const text = "Gostou do Onix Joy? Posso te enviar as fotos dele?";
+  const { ai } = service(async call => {
+    const fields = call.text.format.schema.properties.customerService.properties.warranty.anyOf[1].properties;
+    assert.equal(fields.offerEvidence.enum[0], offer.replace(/\s+/gu, " "));
+    return response(text, { ids: [item.id], warranty: noWarranty });
+  }, [history("user", question), history("assistant", offer)]);
+  const result = await ai.reply(request("gostei do Onix joy"));
+  assert.equal(result.source, "ai"); assert.equal(result.text, text); assert.equal(result.leadQualification, undefined);
+});
+
+test("endereço e garantia no mesmo turno exigem resposta a ambas em parágrafos", async () => {
+  const text = "Ficamos na Rua Teste, 30.\n\nA cobertura depende das condições. Quer falar com nossa equipe sobre a garantia?";
+  const { ai } = service(async call => {
+    assert.match(call.instructions, /Responda a TODAS na ordem recebida/u);
+    assert.match(call.text.format.schema.properties.text.description, /todas as perguntas.*parágrafos/u);
+    return response(text, { warranty: { status: "offered", requestEvidence: "como funciona a garantia?", offerEvidence: null, consentEvidence: null } });
+  });
+  const result = await ai.reply(request("qual o endereço?\ncomo funciona a garantia?", { turnMessages: [
+    { id: "address", type: "text", text: "qual o endereço?" }, { id: "warranty", type: "text", text: "como funciona a garantia?" },
+  ] }));
+  assert.equal(result.source, "ai"); assert.equal(result.text, text); assert.equal(result.leadQualification, undefined);
+});
+
 test("dúvida de garantia oferece contato e só o aceite correspondente permite ficha sem financiar", async () => {
   const question = "O que a garantia de um ano cobre?";
   const offer = "Não tenho os detalhes da cobertura da garantia. Quer que um vendedor entre em contato para explicar?";
@@ -161,16 +221,15 @@ test("dúvida de garantia oferece contato e só o aceite correspondente permite 
   assert.doesNotMatch(result.text, /CPF|nascimento|entrada/u);
 });
 
-test("encerramento de garantia com pergunta recebe correção específica sem perder a ficha", async () => {
+test("encerramento de garantia remove só a pergunta final de continuidade sem perder a ficha", async () => {
   const message = "Sou Ana Teste e quero falar com um vendedor sobre o que a garantia cobre.";
-  const { ai, factory } = service(async (call) => {
-    if (factory.requests.length > 1) assert.match(call.instructions, /O encerramento de uma ficha qualified precisa ser corrigido/u);
-    return response(factory.requests.length === 1 ? "Um vendedor retornará sobre a garantia. Posso ajudar em mais alguma coisa?"
-      : "Obrigada, Ana! Um vendedor retornará sobre a cobertura da garantia.", {
+  const { ai, factory } = service(async () => {
+    return response("Um vendedor retornará sobre a garantia. Enquanto isso, posso ajudar em mais alguma coisa?", {
       warranty: { status: "accepted", requestEvidence: message, offerEvidence: null, consentEvidence: message }, qualification: lead });
   });
   const result = await ai.reply(request(message));
-  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
+  assert.equal(factory.requests.length, 1); assert.equal(result.source, "ai");
+  assert.equal(result.text, "Um vendedor retornará sobre a garantia.");
   assert.equal(result.leadQualification.name, "Ana Teste"); assert.doesNotMatch(result.text, /\?/u);
 });
 

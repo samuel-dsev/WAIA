@@ -137,7 +137,7 @@ export function declinesTradeInEvaluation(message) {
 export function evaluationAnswerWithoutFollowUp(answer) {
   // With name and evaluation consent already validated, a trailing question is
   // unnecessary. Preserve the actual answers and use the closing reference.
-  return String(answer || "").replace(/(?:^|(?<=[.!?\n]))\s*(?:posso|podemos|pode(?:ria)?|gostaria|quer|qual|como|mais alguma)[^.!?\n]*\?\s*$/iu, "").trim();
+  return String(answer || "").replace(/(?:^|(?<=[.!?\n]))\s*(?:(?:enquanto isso|por enquanto|agora|e)\s*,?\s*)?(?:posso|podemos|pode(?:ria)?|gostaria|quer|qual|como|mais alguma)[^.!?\n]*\?\s*$/iu, "").trim();
 }
 
 export function mayQualifyTradeInEvaluation(state, consent, { photosHandoffEnabled = false, storedPhotos = 0 } = {}) {

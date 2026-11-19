@@ -10,7 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, catalogSalesInstructions, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
-import { preserveCollectedFinancingData, hasCollectedFinancingDocuments } from "../group-notifier/collected-financing-data.js";
+import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../group-notifier/collected-financing-data.js";
 import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
 import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
@@ -140,6 +140,7 @@ export class MultiTenantAiService {
       const photoHandoff = { photosHandoffEnabled: config.leadImageHandoffEnabled && evaluationEnabled, storedPhotos: transcript.storedPhotos };
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       const promptHistory = transcript.input;
+      const financingFields = contextualVehicleService ? collectedFinancingFields(qualificationEvidence, [...promptHistory, ...transcript.current]) : null;
       const alternativesAccepted = websiteCatalog && acceptsWebsiteAlternativesOffer(request.message, promptHistory);
       const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
@@ -154,10 +155,16 @@ export class MultiTenantAiService {
       const selectionFormat = contextualVehicleService ? contextualVehicleServiceFormat(evaluationFormat, { transcript: [...promptHistory, ...transcript.current] }) : evaluationFormat;
       const paragraphReply = evaluationEnabled && /\b(?:troca|avalia[cç][aã]o)\b/iu.test(request.message)
         && (request.message.match(/\?/gu) || []).length > 1;
+      const multipleQuestions = contextualVehicleService && (request.message.match(/\?/gu) || []).length > 1;
       if (paragraphReply && selectionFormat?.schema?.properties?.text) {
         selectionFormat.schema.properties.text.pattern = "[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S\\n\\n[\\s\\S]*\\S[\\s\\S]*";
+      } else if (multipleQuestions && selectionFormat?.schema?.properties?.text) {
+        selectionFormat.schema.properties.text.description = "Resposta objetiva a todas as perguntas atuais, em parágrafos separados por assunto, seguida de um único convite pertinente.";
       }
       const turnGuidance = [
+        contextualVehicleService && websiteCatalog.financingSession?.status === "pending"
+          ? "FORMATO DOS DADOS: identifique cada campo pelo conteúdo, nunca pela ordem ou quantidade de mensagens. CPF possui 11 dígitos, com ou sem pontuação/espaços. Nascimento pode ter dia/mês/ano, ano com dois ou quatro dígitos, ou seis/oito dígitos juntos. Preserve ano de dois dígitos como informado, sem inventar século. Diferencie esses campos do valor monetário opcional de entrada; aproveite os dados já recebidos. Campos numéricos conferidos nas mensagens originais: " + JSON.stringify({ cpf: financingFields.cpf, birthDate: financingFields.birthDate }) : "",
+        multipleQuestions ? "PERGUNTAS DESTE TURNO: há mais de uma pergunta nas mensagens atuais. Responda a TODAS na ordem recebida, em parágrafos separados, antes de oferecer o próximo passo. Seja objetivo, sem repetir informações: um parágrafo por assunto e um único convite pertinente no final. Não deixe a primeira pergunta sem resposta ao focar na última; por exemplo, endereço solicitado e garantia precisam das duas respostas. Não acrescente endereço se não foi solicitado." : "",
         contextualVehicleService && websiteCatalog.financingSession?.status === "pending"
           && hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current])
           ? "COLETA DE SIMULAÇÃO: CPF e nascimento já constam das respostas originais, inclusive quando enviados em linhas separadas. Não peça esses dados novamente. Se o nome ainda não foi informado, mantenha collecting e pergunte apenas como pode chamar, sem anunciar encerramento ou retorno já encaminhado. Com nome e demais critérios completos, conclua a ficha preservando todos os dados e a entrada declarada." : "",
@@ -432,7 +439,8 @@ export class MultiTenantAiService {
             leadQualification = mayQualify ? parseQualification(card, { configVersion: config.version,
               evidence: qualificationEvidence }) : null;
             if (leadQualification && config.contextualServiceEnabled) {
-              const closing = structured.text.trim();
+              const closing = evaluationAnswerWithoutFollowUp(structured.text).trim();
+              structured.text = closing;
               if (!closing || closing.includes("?") || hasWebsiteCatalogLink(closing) || /\b\d{3}\.?\d{3}\.?\d{3}[- ]?\d{2}\b/u.test(closing)
                 || announcesEvaluationDelivery(closing) || announcesEvaluationBooking(closing)) {
                 if (attempt === 0) {

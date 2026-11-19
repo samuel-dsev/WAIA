@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preserveCollectedFinancingData, hasCollectedFinancingDocuments } from "../src/modules/group-notifier/collected-financing-data.js";
+import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../src/modules/group-notifier/collected-financing-data.js";
 const collection = (values) => [{ role: "assistant", content: "Por favor, informe seu CPF e data de nascimento." }, ...values.map((content) => ({ role: "user", content }))];
 
 test("ficha mantém relato e acrescenta CPF, nascimento e cidade literalmente informados", () => {
@@ -13,6 +13,36 @@ test("ficha mantém relato e acrescenta CPF, nascimento e cidade literalmente in
   assert.match(result.summary, /Data de nascimento informada: 01\/01\/1990/u);
   assert.equal(result.qualification, card.qualification);
   assert.equal(preserveCollectedFinancingData(result, values, collection(values)), result);
+});
+
+test("documentos reconhecidos pelo conteúdo em qualquer ordem, juntos ou em mensagens distintas", () => {
+  for (const values of [
+    ["00011122233\n01/01/01\n15 mil"], ["00011122233 01/01/01 15 mil"], ["15 mil 01/01/01 00011122233"],
+    ["01/01/01", "15 mil", "00011122233"], ["00011122233", "01/01/01 15 mil"],
+    ["15 mil", "00011122233 01/01/01"], ["000 111 222 33 010101 15 mil"],
+    ["entrada 15 mil; nascimento: 010101; CPF: 000.111.222-33"],
+    ["CPF: 00011122233\nNascimento:\n010101\nEntrada: 15 mil"],
+  ]) {
+    const transcript = collection(values), fields = collectedFinancingFields(values, transcript);
+    assert.equal(fields.cpf, "00011122233", JSON.stringify(values));
+    assert.equal(fields.birthDate, "01/01/01", JSON.stringify(values));
+    assert.equal(hasCollectedFinancingDocuments(values, transcript), true);
+  }
+  for (const value of ["00011122233 01012001 15000", "15000 01-01-2001 00011122233", "01.01.2001 00011122233 R$ 15.000,00"]) {
+    assert.equal(collectedFinancingFields([value], collection([value])).birthDate, "01/01/2001");
+  }
+});
+
+test("não confunde telefone ou valor declarado com CPF/data e preserva campos parciais", () => {
+  for (const value of ["Meu telefone é 11999999999", "entrada 12345678901", "R$ 12345678901", "10102001 reais"]) {
+    const fields = collectedFinancingFields([value], collection([value]));
+    assert.equal(fields.cpf, undefined); assert.equal(fields.birthDate, undefined);
+  }
+  const partial = collectedFinancingFields(["00011122233 15 mil"], collection(["00011122233 15 mil"]));
+  assert.equal(partial.cpf, "00011122233"); assert.equal(partial.birthDate, undefined);
+  assert.equal(collectedFinancingFields(["00011122233 010101"]).cpf, undefined);
+  assert.equal(collectedFinancingFields(["00011122233 010101"]).birthDate, undefined);
+  assert.equal(collectedFinancingFields(["00011122233 020202 010101"], collection(["00011122233 020202 010101"])).birthDate, undefined);
 });
 
 test("cópia de dados não transforma telefone, anúncio, pergunta ou exemplo em documento/localidade", () => {
