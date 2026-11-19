@@ -49,3 +49,9 @@ export function preserveCollectedFinancingData(card, evidence = [], transcript =
   if (birthDate && !summary.includes(birthDate)) lines.push("Data de nascimento informada: " + birthDate);
   return lines.length ? { ...card, summary: summary + "\nDados coletados:\n" + lines.join("\n") } : card;
 }
+
+/** Evidence for a model recheck only; it neither validates documents nor qualifies a lead. */
+export function hasCollectedFinancingDocuments(evidence = [], transcript = []) {
+  const { summary } = preserveCollectedFinancingData({ name: "", summary: "" }, evidence, transcript);
+  return summary.includes("CPF informado: ") && summary.includes("Data de nascimento informada: ");
+}

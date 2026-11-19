@@ -98,6 +98,18 @@ test("ficha distingue entrada omitida, sem entrada e valor literal; não confund
   }
 });
 
+test("entrada opcional não adia a ficha após os dados; IA reavalia e escreve o encerramento", async () => {
+  const { ai, factory } = service(async (call) => factory.requests.length === 1
+    ? response("Você pretende dar algum valor de entrada?", { action: "finance", ids: [item.id] })
+    : (assert.match(call.instructions, /CORREÇÃO DESTE TURNO: CPF e nascimento já foram fornecidos/u),
+      response("Obrigada, Ana! Um vendedor retornará sobre a simulação.", { action: "finance", ids: [item.id], qualification: lead })));
+  const result = await ai.reply(request("Sou Ana Teste. CPF: 000.000.000-00. Nascimento: 01/01/1990."));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
+  assert.equal(result.leadQualification.name, "Ana Teste");
+  assert.match(result.leadQualification.summary, /Cliente não informou sobre valores de entrada/u);
+  assert.doesNotMatch(result.text, /entrada|\?/iu);
+});
+
 test("dúvida de garantia oferece contato e só o aceite correspondente permite ficha sem financiar", async () => {
   const question = "O que a garantia de um ano cobre?";
   const offer = "Não tenho os detalhes da cobertura da garantia. Quer que um vendedor entre em contato para explicar?";

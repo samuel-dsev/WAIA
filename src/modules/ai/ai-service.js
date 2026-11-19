@@ -10,7 +10,7 @@ import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, catalogSalesInstructions, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { loadConversationContext } from "./conversation-context.js";
-import { preserveCollectedFinancingData } from "../group-notifier/collected-financing-data.js";
+import { preserveCollectedFinancingData, hasCollectedFinancingDocuments } from "../group-notifier/collected-financing-data.js";
 import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
 import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
@@ -237,11 +237,11 @@ export class MultiTenantAiService {
         ...(selectionFormat ? { text: { format: selectionFormat } } : {}),
       };
       const startedAt = performance.now();
-      const requestResponse = async (repair = false) => {
+      const requestResponse = async (repair = false, feedback = "") => {
         const remainingMs = this.timeoutMs - (performance.now() - startedAt);
         if (remainingMs < 1) throw timeoutError();
         const response = await responseWithTimeout(client, repair
-          ? { ...providerRequest, instructions: `${instructions}\n\n${recheckInstructions}` } : providerRequest,
+          ? { ...providerRequest, instructions: `${instructions}\n\n${recheckInstructions}${feedback ? `\n\nCORREÇÃO DESTE TURNO: ${feedback}` : ""}` } : providerRequest,
         remainingMs, { headers: { "X-Client-Request-Id": repair
           ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
         const usage = normalizeUsage(response);
@@ -367,6 +367,13 @@ export class MultiTenantAiService {
             && financingIds.length > 0 && financingIds.length <= 3 && new Set(financingIds).size === financingIds.length
             ? financingIds.map((id) => websiteCatalog.items.find((item) => item.id === id && item.active !== false && item.availability !== "unavailable")) : [];
           if (financingVehicles.some((item) => !item || !hasWebsiteFinancingConsent(websiteCatalog, request.message, item.id, promptHistory))) financingVehicles = [];
+          if (attempt === 0 && contextualVehicleService && financingVehicles.length
+            && structured.leadQualification?.status === "collecting" && /\bentrada\b/iu.test(structured.text)
+            && hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current])) {
+            ({ response, text } = await requestResponse(true,
+              "CPF e nascimento já foram fornecidos para a simulação aceita. A entrada é opcional e não pode ser perguntada novamente nem adiar a ficha. Reavalie os critérios com os dados do histórico: se o nome já foi informado, conclua leadQualification como qualified com a ficha completa e o encerramento do roteiro; se faltar somente o nome, pergunte apenas como pode chamar. Sem declaração de entrada, registre Cliente não informou sobre valores de entrada. Responda primeiro a qualquer outra solicitação atual. Não use texto pronto de contingência."));
+            continue;
+          }
           let mayQualify = !websiteCatalog && !currentEvaluation || financingVehicles.length > 0
             || (evaluationQualifies || customerService?.warrantyAccepted) && !websitePresentation && (!websiteDetails || customerService?.warrantyAccepted);
           const prematureCollection = websiteCatalog && !financingVehicles.length && !websitePresentation
