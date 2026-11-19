@@ -422,7 +422,12 @@ export class MultiTenantAiService {
               const closing = structured.text.trim();
               if (!closing || closing.includes("?") || hasWebsiteCatalogLink(closing) || /\b\d{3}\.?\d{3}\.?\d{3}[- ]?\d{2}\b/u.test(closing)
                 || announcesEvaluationDelivery(closing) || announcesEvaluationBooking(closing)) {
-                if (attempt === 0) { leadQualification = undefined; ({ response, text } = await requestResponse(true)); continue; }
+                if (attempt === 0) {
+                  leadQualification = undefined;
+                  ({ response, text } = await requestResponse(true,
+                    "O encerramento de uma ficha qualified precisa ser corrigido: text deve agradecer e informar que um vendedor retornará sobre o pedido atual, conforme o modelo do roteiro. Não acrescente pergunta, pedido de confirmação, convite de continuidade ou dados pessoais. Não afirme nem prometa envio da ficha/anexos ao grupo, reserva ou horário. Preserve a ficha e os dados confirmados, sem voltar a collecting se os critérios já estão completos."));
+                  continue;
+                }
                 throw Object.assign(new Error("Encerramento contextual inválido."), { code: "AI_INVALID_CUSTOMER_SERVICE" });
               }
               contextualClosing = closing;

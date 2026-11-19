@@ -130,6 +130,19 @@ test("dúvida de garantia oferece contato e só o aceite correspondente permite 
   assert.doesNotMatch(result.text, /CPF|nascimento|entrada/u);
 });
 
+test("encerramento de garantia com pergunta recebe correção específica sem perder a ficha", async () => {
+  const message = "Sou Ana Teste e quero falar com um vendedor sobre o que a garantia cobre.";
+  const { ai, factory } = service(async (call) => {
+    if (factory.requests.length > 1) assert.match(call.instructions, /O encerramento de uma ficha qualified precisa ser corrigido/u);
+    return response(factory.requests.length === 1 ? "Um vendedor retornará sobre a garantia. Posso ajudar em mais alguma coisa?"
+      : "Obrigada, Ana! Um vendedor retornará sobre a cobertura da garantia.", {
+      warranty: { status: "accepted", requestEvidence: message, offerEvidence: null, consentEvidence: message }, qualification: lead });
+  });
+  const result = await ai.reply(request(message));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
+  assert.equal(result.leadQualification.name, "Ana Teste"); assert.doesNotMatch(result.text, /\?/u);
+});
+
 test("pedido direto de vendedor sobre garantia aproveita nome e possível interesse do anúncio", async () => {
   const message = "Sou Ana Teste e quero falar com um vendedor sobre o que a garantia cobre.";
   const { ai } = service(async () => response("Obrigada, Ana! Um vendedor retornará sobre a cobertura.", {
