@@ -32,7 +32,7 @@ function warrantyEvidence(transcript) {
   return { offers: bounded(offers), consents: bounded(consents), directRequests: bounded(directRequests) };
 }
 
-export function contextualVehicleServiceFormat(base, { transcript } = {}) {
+export function contextualVehicleServiceFormat(base, { transcript, photoAppraisalEnabled = false } = {}) {
   const format = structuredClone(base);
   format.schema.properties.customerService = {
     type: "object", additionalProperties: false,
@@ -89,7 +89,34 @@ export function contextualVehicleServiceFormat(base, { transcript } = {}) {
     format.schema.properties.customerService.properties.warranty = { anyOf: alternatives };
   }
   format.schema.required.push("customerService");
+  if (photoAppraisalEnabled) {
+    const service = format.schema.properties.customerService;
+    service.properties.tradeInRequest = { type: "object", additionalProperties: false,
+      properties: { status: { type: "string", enum: ["none", "photo_appraisal_requested"] },
+        requestEvidence: { type: ["string", "null"], description: "Trecho literal de UMA mensagem original ou legenda, ATUAL OU HISTÓRICA, pedindo análise/valor/aceitação do próprio veículo como troca ou parte do pagamento. Preserve esse pedido quando o cliente só informa nome depois. Não exige a palavra avaliação. Null em none; nunca use fala da IA, anúncio, citação ou marcador de imagem." } },
+      required: ["status", "requestEvidence"] };
+    service.required.push("tradeInRequest");
+    const fields = format.schema.properties;
+    const order = ["customerService", "tradeInEvaluation", "leadQualification", ...Object.keys(fields).filter((key) => !["customerService", "tradeInEvaluation", "leadQualification", "text"].includes(key)), "text"];
+    format.schema.properties = Object.fromEntries(order.filter((key) => fields[key]).map((key) => [key, fields[key]]));
+  }
   return format;
+}
+
+export const PHOTO_APPRAISAL_REQUEST_INSTRUCTIONS = "PEDIDO DE AVALIAÇÃO EM LINGUAGEM LIVRE: interprete se o cliente está oferecendo seu próprio veículo na troca/entrada e pede saber quanto a loja oferece, aceita ou pode considerar, inclusive na legenda de fotos e sem escrever avaliação. Considere TODO O HISTÓRICO, não somente a mensagem atual. Nesse caso, tradeInRequest.status=photo_appraisal_requested e requestEvidence copia um trecho literal suficiente de UMA mensagem original ou legenda que demonstra o pedido. Depois das fotos, quando o cliente informa apenas o nome ou se apresenta com desculpas, mantenha photo_appraisal_requested e a evidência ORIGINAL do pedido anterior; o nome atual não substitui a evidência e não apaga a solicitação. Não use apenas o nome informado, a saudação, a dúvida genérica se aceita troca ou os marcadores técnicos de imagem como evidência. Fotos do estoque solicitadas pelo cliente não são fotos do carro dele para avaliar. Sem pedido no histórico ou se houve desistência, use none com requestEvidence=null. Com fotos efetivamente armazenadas desse atendimento, use tradeInEvaluation.step=photos_received, reconheça o recebimento e peça somente o nome se faltar. Nome em uma apresentação completa também é válido; com nome e fotos, conclua a ficha conforme o roteiro, preservando os dados e o pedido real. Não atribua valor nem faça análise visual. Responda primeiro a novas dúvidas ou mudança de assunto, sem concluir enquanto houver pedido pendente.";
+
+function originalCustomerBody(part) {
+  const body = ownBody(part);
+  return body.startsWith("[Imagem recebida do cliente;") ? body.split("\nLegenda escrita pelo cliente: ").slice(1).join("\nLegenda escrita pelo cliente: ") : body;
+}
+
+function photoAppraisalRequest(value, transcript) {
+  if (!keys(value, ["status", "requestEvidence"]) || !["none", "photo_appraisal_requested"].includes(value.status)) throw invalid();
+  if (value.status === "none") { if (value.requestEvidence !== null) throw invalid(); return false; }
+  const quote = value.requestEvidence;
+  if (typeof quote !== "string" || quote.trim().length < 8 || quote.length > 2000
+    || !transcript.some((part) => part.role === "user" && evidenceLine(originalCustomerBody(part)).includes(evidenceLine(quote)))) throw invalid();
+  return true;
 }
 
 export const CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS = `ATENDIMENTO CONTEXTUAL DE VEÍCULOS:
@@ -114,8 +141,10 @@ function customerQuote(value, transcript) {
 
 /** The model interprets intent. Runtime accepts only evidence from original
  * customer messages; quotations and assistant suggestions cannot become facts. */
-export function parseCustomerService(value, transcript) {
-  if (!keys(value, ["downPayment", "warranty"])) throw invalid();
+export function parseCustomerService(value, transcript, { photoAppraisalEnabled = false } = {}) {
+  const withRequest = photoAppraisalEnabled && keys(value, ["downPayment", "warranty", "tradeInRequest"]);
+  if (!withRequest && !keys(value, ["downPayment", "warranty"])) throw invalid();
+  const tradeInPhotoRequest = withRequest ? photoAppraisalRequest(value.tradeInRequest, transcript) : false;
   const down = value.downPayment, warranty = value.warranty;
   if (!keys(down, ["status", "amount", "evidence"]) || !["not_informed", "none", "amount"].includes(down.status)) throw invalid();
   if (down.status === "not_informed") {
@@ -152,7 +181,7 @@ export function parseCustomerService(value, transcript) {
     }
     if (!warrantyAccepted) throw invalid();
   }
-  return { downPayment: down, warrantyAccepted };
+  return { downPayment: down, warrantyAccepted, tradeInPhotoRequest };
 }
 
 export function downPaymentLine(down) {

@@ -53,3 +53,9 @@ test("esclarecimento rejeita efeitos extras, JSON inválido ou texto sem pergunt
   }
   assert.deepEqual(parseChoiceClarification(JSON.stringify({ text: "Fotos, simulação ou as duas?" })), { text: "Fotos, simulação ou as duas?" });
 });
+
+test("pergunta de coleta continua pendente quando escrita como frase sem interrogação", () => {
+  const history = [{ role: "assistant", content: "Recebi as fotos. Para continuar, só preciso saber como posso te chamar, por favor." }];
+  assert.equal(lastChoiceQuestion(history), null);
+  assert.equal(ambiguousChoiceReply("Caio, desculpe não me apresentei.", history), null);
+});

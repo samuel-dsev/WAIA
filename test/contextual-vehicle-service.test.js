@@ -19,9 +19,9 @@ const item = { id: "turim:1", name: "Onix Joy", price: 55900, mileageKm: 73000, 
   introduction: "🚗 *ONIX JOY*\n\nUma opção para o dia a dia.", description: "Carro flex." };
 const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [item],
   photoHistoryProductIds: [item.id], financingSession: { productIds: [item.id], status: "pending" } };
-const response = (text, { downPayment = noDownPayment, warranty = noWarranty, qualification = collecting, action = "none", ids = [], evaluation } = {}) => ({
+const response = (text, { downPayment = noDownPayment, warranty = noWarranty, qualification = collecting, action = "none", ids = [], evaluation, tradeRequest } = {}) => ({
   output_text: JSON.stringify({ text, catalogAction: action, productIds: ids, filters: { category: null, minPrice: null, maxPrice: null },
-    leadQualification: qualification, customerService: { downPayment, warranty }, ...(evaluation === undefined ? {} : { tradeInEvaluation: evaluation }) }), usage: { input_tokens: 10, output_tokens: 10 },
+    leadQualification: qualification, customerService: { downPayment, warranty, ...(tradeRequest === undefined ? {} : { tradeInRequest: tradeRequest }) }, ...(evaluation === undefined ? {} : { tradeInEvaluation: evaluation }) }), usage: { input_tokens: 10, output_tokens: 10 },
 });
 function service(responder, history = [], overrides = {}) {
   const factory = new MemoryResponsesClientFactory(responder);
@@ -193,12 +193,8 @@ test("documentos e entrada em várias linhas pedem nome e depois finalizam a mes
     assert.match(call.instructions, /inclusive quando enviados em linhas separadas/u);
     return first.factory.requests.length === 1 ? response("Um vendedor retornará sobre a simulação.", {
       action: "none", ids: [item.id], downPayment, qualification: { ...lead, name: "Cliente" },
-    }) : (assert.match(call.instructions, /A ficha não tem nome confirmado/u),
-      assert.deepEqual(call.text.format.schema.properties.leadQualification.properties.status.enum, ["collecting"]),
-      assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("Um vendedor retornará."), false),
-      assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test(ask), true),
-       assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("CPF: 00000000000\nComo posso te chamar?"), false),
-       assert.equal(new RegExp(call.text.format.schema.properties.text.pattern, "u").test("leadQualification.status: qualified\nComo posso te chamar?"), false),
+    }) : (assert.match(call.instructions, /O nome proposto não foi comprovado/u),
+      assert.match(call.instructions, /Somente se não houver nome identificável/u),
       response(ask, { action: "finance", ids: [item.id], downPayment }));
   }, initial);
   const collectingReply = await first.ai.reply(request(body));
@@ -471,4 +467,66 @@ test("avaliação por fotos reconhece recebimento, pede só nome e conclui após
   const missing = service(async () => response(closing, { evaluation, qualification: lead }), [], config);
   const rejected = await missing.ai.reply(request("Ana Teste", { context }));
   assert.equal(rejected.source, "fallback"); assert.equal(rejected.leadQualification, undefined);
+});
+
+test("pedido próprio de troca na legenda não exige palavra avaliação e apresentação com desculpas conclui", async () => {
+  const caption = "Tenho um Celta 2012, 133 mil km. Gostaria de saber quanto oferecem nele como parte do pagamento do Onix. Mandei as fotos do meu carro.";
+  const tradeRequest = { status: "photo_appraisal_requested", requestEvidence: caption };
+  const evaluation = { step: "photos_received", interestName: "Onix", interestSource: "customer" };
+  const cfg = { tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true, leadQualificationCriteria: "Nome e fotos recebidas para avaliação da troca." };
+  const context = { catalog: { ...catalog, financingSession: null }, tradeInEvaluation: { session: null } };
+  const ask = "Recebi as fotos e os dados. Para continuar, só preciso saber como posso te chamar, por favor.";
+  const first = service(async (call) => {
+    assert.ok(call.text.format.schema.properties.customerService.properties.tradeInRequest);
+    return response(ask, { evaluation, tradeRequest });
+  }, [], cfg);
+  const initial = await first.ai.reply(request(caption, { context, turnMessages: [{ id: "photo1", type: "image", text: caption, mediaStored: true }] }));
+  assert.equal(initial.source, "ai"); assert.equal(initial.tradeInEvaluation.step, "photos_received"); assert.equal(initial.leadQualification, undefined);
+  const prior = [{ id: "photo1", type: "image", direction: "inbound", body: caption, mediaStorageKey: "fake/photo" }, history("assistant", ask)];
+  const card = { status: "qualified", name: "Caio", summary: "Caio quer usar Celta 2012, 133 mil km, como parte do pagamento do Onix; enviou fotos e aguarda retorno da equipe.", qualification: "Solicitou análise de veículo próprio na troca e forneceu nome e fotos." };
+  const closing = "Obrigado pelas informações, Caio! Um vendedor vai entrar em contato com o retorno da avaliação e dará continuidade ao seu atendimento.";
+  const second = service(async (call) => {
+    assert.match(call.instructions, /EXTRAÇÃO PELO SIGNIFICADO/u);
+    return response(closing, { evaluation, tradeRequest, qualification: card });
+  }, prior, cfg);
+  const result = await second.ai.reply(request("Caio, nossa me desculpa não me apresentei !", { context }));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification.name, "Caio"); assert.equal(result.tradeInEvaluation.step, "completed");
+  assert.match(result.leadQualification.summary, /133 mil km/u); assert.match(result.leadQualification.summary, /Imagens recebidas do cliente: 1/u);
+  assert.doesNotMatch(result.text, /CPF|como.*chamar/iu);
+});
+
+test("nome mal extraído é reprocessado semanticamente antes de pedir de novo", async () => {
+  const source = "Tenho um Celta e quero saber quanto oferecem nele como parte do pagamento do Onix.";
+  const tradeRequest = { status: "photo_appraisal_requested", requestEvidence: source };
+  const evaluation = { step: "photos_received", interestName: "Onix", interestSource: "customer" };
+  const cfg = { tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true };
+  const prior = [{ id: "p", type: "image", direction: "inbound", body: source, mediaStorageKey: "fake/photo" }, history("assistant", "Como posso te chamar?")];
+  const { ai, factory } = service(async (call) => {
+    const first = factory.requests.length === 1;
+    if (!first) assert.match(call.instructions, /não significa que o cliente deixou de se apresentar/u);
+    return response("Obrigado, Caio! Um vendedor vai retornar com a avaliação.", { evaluation, tradeRequest, qualification: { ...lead,
+      name: first ? "Caio Silva" : "Caio", summary: "Caio enviou fotos do Celta para análise como parte do pagamento do Onix.", qualification: "Solicitou avaliação por fotos." } });
+  }, prior, cfg);
+  const reply = await ai.reply(request("Caio, perdão, esqueci de me apresentar.", { context: { catalog: { ...catalog, financingSession: null }, tradeInEvaluation: { session: null } } }));
+  assert.equal(factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.leadQualification.name, "Caio");
+});
+
+test("falha ao processar resposta em frase conserva a pergunta implícita, não o menu genérico", async () => {
+  const { ai } = service(async () => { throw Error("falha fictícia"); }, [history("assistant", "Para continuar, só preciso saber como posso te chamar, por favor.")]);
+  const result = await ai.reply(request("Não entendi direito"));
+  assert.equal(result.source, "fallback"); assert.match(result.text, /como posso te chamar/iu); assert.doesNotMatch(result.text, /estoque|pós-venda|modelo que procura/iu);
+  assert.equal(result.leadQualification, undefined);
+});
+
+test("evidência de pedido de troca só vem do corpo original ou legenda, sem usar marcadores e citações", () => {
+  const tradeRequest = { status: "photo_appraisal_requested", requestEvidence: "Quero saber quanto oferecem no meu carro para trocar." };
+  const value = { downPayment: noDownPayment, warranty: noWarranty, tradeInRequest: tradeRequest };
+  const parse = transcript => parseCustomerService(value, transcript, { photoAppraisalEnabled: true });
+  assert.equal(parse([{ role: "user", content: tradeRequest.requestEvidence }]).tradeInPhotoRequest, true);
+  assert.equal(parse([{ role: "user", content: "[Imagem recebida do cliente; arquivo armazenado; sem análise visual.]\nLegenda escrita pelo cliente: " + tradeRequest.requestEvidence }]).tradeInPhotoRequest, true);
+  assert.throws(() => parse([{ role: "assistant", content: tradeRequest.requestEvidence }]), { code: "AI_INVALID_CUSTOMER_SERVICE" });
+  assert.throws(() => parse([{ role: "user", content: "Olá\n[Em resposta à mensagem: " + tradeRequest.requestEvidence + "]" }]), { code: "AI_INVALID_CUSTOMER_SERVICE" });
+  assert.throws(() => parseCustomerService({ ...value, tradeInRequest: { ...tradeRequest, requestEvidence: "arquivo armazenado" } },
+    [{ role: "user", content: "[Imagem recebida do cliente; arquivo armazenado; sem análise visual.]" }], { photoAppraisalEnabled: true }), { code: "AI_INVALID_CUSTOMER_SERVICE" });
+  assert.throws(() => parseCustomerService(value, [{ role: "user", content: tradeRequest.requestEvidence }]), { code: "AI_INVALID_CUSTOMER_SERVICE" });
 });

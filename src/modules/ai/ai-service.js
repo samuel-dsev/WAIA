@@ -12,7 +12,7 @@ import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat
 import { loadConversationContext } from "./conversation-context.js";
 import { ambiguousChoiceReply, acceptsAllChoices, lastPendingQuestion, lastChoiceQuestion, isConfiguredContingency, clarificationAwareFormat, choiceClarificationFormat, parseChoiceClarification, choiceClarificationFallback } from "./choice-clarification.js";
 import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../group-notifier/collected-financing-data.js";
-import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
+import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, PHOTO_APPRAISAL_REQUEST_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
 import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
@@ -115,7 +115,7 @@ export class MultiTenantAiService {
     let pricing;
     let providerUsage;
     let keyType = config.keyType;
-    let choiceQuestion;
+    let choiceQuestion, pendingQuestion;
     const occurredAt = this.clock();
     try {
       const qualifies = config.leadQualificationEnabled && Boolean(config.leadQualificationCriteria);
@@ -143,7 +143,7 @@ export class MultiTenantAiService {
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       const promptHistory = transcript.input;
       choiceQuestion = config.contextualServiceEnabled && ambiguousChoiceReply(request.message, promptHistory);
-      const pendingQuestion = config.contextualServiceEnabled && lastPendingQuestion(promptHistory);
+      pendingQuestion = config.contextualServiceEnabled && lastPendingQuestion(promptHistory);
       const pendingChoice = pendingQuestion && lastChoiceQuestion(promptHistory);
       const financingFields = contextualVehicleService ? collectedFinancingFields(qualificationEvidence, [...promptHistory, ...transcript.current]) : null;
       const alternativesAccepted = websiteCatalog && acceptsWebsiteAlternativesOffer(request.message, promptHistory);
@@ -157,7 +157,7 @@ export class MultiTenantAiService {
       const catalogFormat = salesMode ? catalogSalesFormat(safeContext.catalog) : catalogSelectionFormat(safeContext.catalog);
       const baseFormat = intakeOnly ? leadIntakeFormat() : qualifies ? qualificationFormat(catalogFormat) : catalogFormat;
       const evaluationFormat = evaluationEnabled ? tradeInEvaluationFormat(baseFormat, photoHandoff) : baseFormat;
-      const serviceFormat = contextualVehicleService ? contextualVehicleServiceFormat(evaluationFormat, { transcript: [...promptHistory, ...transcript.current] }) : evaluationFormat;
+      const serviceFormat = contextualVehicleService ? contextualVehicleServiceFormat(evaluationFormat, { transcript: [...promptHistory, ...transcript.current], photoAppraisalEnabled: photoHandoff.photosHandoffEnabled }) : evaluationFormat;
       const selectionFormat = choiceQuestion ? choiceClarificationFormat() : pendingQuestion ? clarificationAwareFormat(serviceFormat) : serviceFormat;
       const paragraphReply = evaluationEnabled && /\b(?:troca|avalia[cç][aã]o)\b/iu.test(request.message)
         && (request.message.match(/\?/gu) || []).length > 1;
@@ -200,6 +200,7 @@ export class MultiTenantAiService {
         evaluationTurnInstructions,
         turnGuidance,
         contextualVehicleService ? CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS : "",
+        contextualVehicleService && photoHandoff.photosHandoffEnabled ? PHOTO_APPRAISAL_REQUEST_INSTRUCTIONS : "",
       ].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
@@ -231,7 +232,7 @@ export class MultiTenantAiService {
         estimatedCost,
       });
       if (!reservation?.allowed) return fallback(config, "monthly_limit", { quota: reservation?.usage,
-        ...(choiceQuestion ? { text: choiceClarificationFallback(choiceQuestion) } : {}) });
+        ...(choiceQuestion || pendingQuestion ? { text: choiceClarificationFallback(choiceQuestion || pendingQuestion) } : {}) });
 
       const credential = await this.secretResolver.resolve({
         empresaId: request.empresaId,
@@ -360,7 +361,7 @@ export class MultiTenantAiService {
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           let customerService;
           if (contextualVehicleService) {
-            try { customerService = parseCustomerService(structured.customerService, [...promptHistory, ...transcript.current]); }
+            try { customerService = parseCustomerService(structured.customerService, [...promptHistory, ...transcript.current], { photoAppraisalEnabled: photoHandoff.photosHandoffEnabled }); }
             catch (error) {
               if (error.code !== "AI_INVALID_CUSTOMER_SERVICE" || attempt > 0) throw error;
               ({ response, text } = await requestResponse(true,
@@ -396,7 +397,22 @@ export class MultiTenantAiService {
               ?? tradeInOfferFromAnswer(structured.text, safeContext.tradeInEvaluation?.session), safeContext.tradeInEvaluation,
               request.message, promptHistory, request.turnMessages)) : null;
           delete structured.tradeInEvaluation;
-          const evaluationConsent = evaluationEnabled && hasTradeInEvaluationConsent(safeContext.tradeInEvaluation, request.message, promptHistory, request.turnMessages, evaluationProposal?.step);
+          const photoRequestConfirmed = photoHandoff.photosHandoffEnabled && customerService?.tradeInPhotoRequest;
+          if (attempt === 0 && photoRequestConfirmed && transcript.storedPhotos > 0
+            && (!evaluationProposal || ["offer_photos", "collect_photos"].includes(evaluationProposal.step))
+            && (request.turnMessages?.some((part) => part.type === "image") || structured.leadQualification?.status === "qualified"
+              || announcesQualificationClosing(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING))) {
+            ({ response, text } = await requestResponse(true,
+              "O pedido de avaliar o veículo próprio na troca foi identificado com evidência original e já há fotos armazenadas. Registre photos_received, sem repetir oferta/coleta de fotos. Extraia o nome mesmo quando vier em apresentação, desculpas ou outra frase. Se faltar somente nome, mantenha collecting e pergunte apenas como pode chamar; com nome e fotos, retorne qualified com os dados reais e encerramento, sem inventar análise ou valor. Responda primeiro a qualquer outro pedido atual."));
+            continue;
+          }
+          const evaluationConsent = evaluationEnabled && hasTradeInEvaluationConsent(safeContext.tradeInEvaluation, request.message, promptHistory, request.turnMessages, evaluationProposal?.step, { photoRequestConfirmed });
+          if (attempt === 0 && contextualVehicleService && photoHandoff.photosHandoffEnabled && transcript.storedPhotos > 0
+            && evaluationProposal?.step === "photos_received" && !evaluationConsent) {
+            ({ response, text } = await requestResponse(true,
+              "A intenção de avaliar o carro próprio ainda não foi conferida. Releia TODAS as mensagens e legendas originais: se o cliente já pediu quanto a loja oferece pelo carro na troca/parte do pagamento, preserve esse pedido anterior em tradeInRequest com a evidência literal ORIGINAL, mesmo se agora só informou o nome ou pediu desculpas. A mensagem atual não precisa repetir o pedido nem a palavra avaliação. Com nome identificável e fotos armazenadas para esse pedido, conclua a ficha. Se nunca houve tal pedido, não invente consentimento nem anuncie encerramento; esclareça a finalidade das fotos."));
+            continue;
+          }
           if (evaluationProposal?.step === "photos_received" && (!photoHandoff.photosHandoffEnabled || !transcript.storedPhotos)) {
             if (attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }
             throw Object.assign(new Error("Avaliação por fotos sem imagens armazenadas."), { code: "AI_INVALID_TRADE_EVALUATION" });
@@ -517,14 +533,8 @@ export class MultiTenantAiService {
               if (attempt === 0) {
                 const missingName = ["NAME", "NAME_EVIDENCE"].includes(error.validationReason);
                 const repairFormat = missingName ? structuredClone(selectionFormat) : undefined;
-                if (repairFormat) {
-                  const fields = repairFormat.schema.properties.leadQualification.properties;
-                  fields.status.enum = ["collecting"];
-                  for (const field of ["name", "summary", "qualification"]) fields[field].enum = [null];
-                  repairFormat.schema.properties.text.pattern = "^[^0-9{}\\[\\]:?\\n]{1,200}\\?$";
-                }
                 ({ response, text } = await requestResponse(true, ["NAME", "NAME_EVIDENCE"].includes(error.validationReason)
-                  ? "A ficha não tem nome confirmado nas mensagens originais. Não invente um nome nem conclua. Preserve os dados já recebidos, retorne collecting com name/summary/qualification nulos. Em text, escreva somente uma pergunta curta sobre como pode chamar o cliente, conforme o roteiro. Não repita documentos, valores, campos internos ou instruções; não anuncie encerramento, encaminhamento ou retorno antes de completar a ficha."
+                  ? "O nome proposto não foi comprovado nas mensagens originais; isso não significa que o cliente deixou de se apresentar. Releia a mensagem INTEIRA e o histórico, inclusive desculpas ou explicações junto do nome, e extraia SOMENTE o nome real, sem inventar sobrenome. Havendo nome comprovado e demais critérios completos, preserve os dados e conclua qualified com encerramento do roteiro. Somente se não houver nome identificável, retorne collecting com name/summary/qualification nulos e repita a pergunta de como pode chamar. Não repita documentos, valores ou campos internos no texto público e não anuncie conclusão antes de completar a ficha."
                   : "Corrija a ficha com os dados originais e os critérios publicados, preservando o pedido atual.", repairFormat));
                 continue;
               }
@@ -653,7 +663,7 @@ export class MultiTenantAiService {
       }
       this.#logFailure(request, error, sanitized.code || "AI_REQUEST_FAILED");
       return fallback(config, sanitized.code === "AI_TIMEOUT" ? "timeout" : "provider_failure",
-        choiceQuestion ? { text: choiceClarificationFallback(choiceQuestion) } : {});
+        choiceQuestion || pendingQuestion ? { text: choiceClarificationFallback(choiceQuestion || pendingQuestion) } : {});
     }
   }
 

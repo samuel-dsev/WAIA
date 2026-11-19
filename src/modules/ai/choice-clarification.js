@@ -7,7 +7,13 @@ export function lastPendingQuestion(history) {
     .split("\n[Em resposta à mensagem:")[0].trim();
   const end = body.lastIndexOf("?");
   if (end >= 0 && /^(?:por favor[, ]+)?(?:me (?:informe|diga)|aguardo)\b/iu.test(body.slice(end + 1).trim())) body = body.slice(0, end + 1);
-  if (!body.endsWith("?")) return null;
+  if (!body.endsWith("?")) {
+    // Requests remain pending even when conversational punctuation is a period.
+    // Recover the original sentence; interpretation of its answer belongs to AI.
+    const sentence = body.split(/(?<=[.!?])\s+|\n\s*\n/u).at(-1)?.trim();
+    if (!sentence || sentence.length > 1000 || !/\b(?:informe|diga|passe|me (?:conte|fale)|precis[oa]mos? saber|preciso saber|(?:pode|poderia) me (?:dizer|informar)|como (?:posso|podemos) (?:te |lhe )?chamar)\b/iu.test(sentence)) return null;
+    return sentence.replace(/[.!]+$/u, "") + "?";
+  }
   const sentences = body.split(/(?<=[.!?])\s+|\n\s*\n/u);
   const statement = sentences.findLastIndex((sentence) => !sentence.trim().endsWith("?"));
   const question = sentences.slice(statement + 1).join(" ").trim();
@@ -40,7 +46,7 @@ export function clarificationAwareFormat(base) {
   const format = structuredClone(base || { type: "json_schema", name: "contextual_reply", strict: true,
     schema: { type: "object", additionalProperties: false, properties: { text: { type: "string" } }, required: ["text"] } });
   format.schema.properties = { turnIntent: { type: "string", enum: ["answer", "clarify"],
-    description: "Decida ANTES de responder. clarify se a resposta for incompreensível, não escolher entre as opções ou precisar de confirmação da pergunta anterior. Nunca use contingência genérica nesse caso. answer para escolha clara, recusa, dados solicitados ou nova solicitação compreensível." }, ...format.schema.properties };
+    description: "Decida ANTES de responder. answer se houver dado solicitado identificável em qualquer parte da mensagem, mesmo com desculpas, apresentação, texto adicional ou outra ordem. Não considere sequência aleatória/de teclado ou resposta sem identidade como nome só por ser a pergunta pendente. answer também para escolha clara, recusa ou novo pedido compreensível. clarify se não houver dado útil nem novo pedido compreensível, ou faltar escolha entre alternativas. Nunca use contingência genérica." }, ...format.schema.properties };
   format.schema.required.unshift("turnIntent");
   return format;
 }

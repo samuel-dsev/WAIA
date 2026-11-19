@@ -94,11 +94,12 @@ export function reconcileTradeInEvaluation(proposal, context, message, history, 
     interestSource: proposal?.interestName ? proposal.interestSource : session.interestSource || "unknown" };
 }
 
-export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
+export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep, { photoRequestConfirmed = false } = {}) {
   const answer = normalized(message), session = context?.session;
+  if (declinesTradeInEvaluation(message)) return false;
   const last = history.findLast((part) => part.role === "assistant")?.content || "";
   if (targetStep === "photos_received" && !["offer_photos", "collect_photos", "photos_received"].includes(session?.step)
-    && !/\b(?:quero|gostaria|preciso|vamos|pode)\b.{0,100}\bavalia(?:r|cao)\b/u.test(answer)) return false;
+    && !photoRequestConfirmed && !/\b(?:quero|gostaria|preciso|vamos|pode)\b.{0,100}\bavalia(?:r|cao)\b/u.test(answer)) return false;
   if (targetStep === "visit_requested" && session?.step !== "visit_requested" && !session?.visitAccepted) {
     const offeredVisit = session?.step === "offer_visit" && session.direct === true && /\bavalia[cç][aã]o\b[^?]*\?\s*$/iu.test(last);
     const clauses = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?\n]/u);
@@ -115,10 +116,11 @@ export function hasTradeInEvaluationConsent(context, message, history, turnMessa
     const humanClause = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?]/u).findLast((part) => /\b(?:vendedor|atendente|equipe|humano|pessoa)\b/u.test(part));
     if (!humanClause || /\bnao (?:quero|preciso|cham)/u.test(humanClause)
       || !/\b(?:quero|gostaria|preciso|pode(?:m)?|chame|chamar|falar|contato|encaminh[ae])\b/u.test(humanClause)) return false;
+    if (photoRequestConfirmed) return true;
   }
   const evaluationClause = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?]/u).findLast((part) => /\bavalia(?:r|cao)\b/u.test(part));
-  if (declinesTradeInEvaluation(message)) return false;
   if (/^(?:nao(?: quero)?|desisti|cancela|cancele)[.! ]*$/u.test(answer)) return false;
+  if (photoRequestConfirmed && ["collect_photos", "photos_received"].includes(targetStep)) return true;
   if (ACCEPTED.includes(session?.step)) return true;
   if (evaluationClause && /\b(?:quero|gostaria|preciso|vamos|pode(?:mos)?|poderia)\b.{0,100}\bavalia(?:r|cao)\b/u.test(evaluationClause)) return true;
   const images = turnMessages.some((part) => part.type === "image");
