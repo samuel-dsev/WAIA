@@ -137,7 +137,7 @@ const DRAFT_OBJECT_SCHEMAS = Object.freeze([
   [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef", "cooldownSeconds", "salesInterestMessage", "pauseOnBusinessAppMessage"] ],
   [ /^\/ai$/u, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "contextualServiceEnabled", "leadImageHandoffEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
   ] ],
   [ /^\/flows$/u, ["definitions"] ],
   [ /^\/flows\/definitions\/\d+$/u, ["key", "name", "version", "startStepId", "steps"] ],
@@ -562,7 +562,7 @@ function parseAi(value, path) {
   const object = plainObject(value, path, { optional: true });
   allowedKeys(object, path, [
     "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
-    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
+    "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "contextualServiceEnabled", "leadImageHandoffEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
   ]);
   const enabled = boolean(object.enabled, pointer(path, "enabled"), false);
   const keyMode = object.keyMode == null ? "shared" : text(object.keyMode, pointer(path, "keyMode"), { max: 20 });
@@ -573,6 +573,8 @@ function parseAi(value, path) {
     enabled,
     ...(object.leadIntakeOnlyEnabled === undefined ? {} : { leadIntakeOnlyEnabled: boolean(object.leadIntakeOnlyEnabled, pointer(path, "leadIntakeOnlyEnabled")) }),
     ...(object.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: boolean(object.responseDelayEnabled, pointer(path, "responseDelayEnabled")) }),
+    ...(object.contextualServiceEnabled === undefined ? {} : { contextualServiceEnabled: boolean(object.contextualServiceEnabled, pointer(path, "contextualServiceEnabled")) }),
+    ...(object.leadImageHandoffEnabled === undefined ? {} : { leadImageHandoffEnabled: boolean(object.leadImageHandoffEnabled, pointer(path, "leadImageHandoffEnabled")) }),
     ...(object.catalogSalesEnabled === undefined ? {} : { catalogSalesEnabled: boolean(object.catalogSalesEnabled, pointer(path, "catalogSalesEnabled")) }),
     ...(object.leadQualificationEnabled === undefined ? {} : { leadQualificationEnabled: boolean(object.leadQualificationEnabled, pointer(path, "leadQualificationEnabled")) }),
     ...(object.leadQualificationCriteria === undefined && !object.leadQualificationEnabled ? {} : { leadQualificationCriteria: text(object.leadQualificationCriteria, pointer(path, "leadQualificationCriteria"), { max: 2000, optional: !object.leadQualificationEnabled }) }),
@@ -790,6 +792,12 @@ export function parseTenantRuntimeConfigV2(input) {
   if (parsed.ai.tradeInEvaluationEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled
     || !parsed.ai.leadQualificationEnabled || parsed.ai.leadIntakeOnlyEnabled || !enabled.has("human_handoff"))) {
     fail("TRADE_EVALUATION_CONFIGURATION_REQUIRED", "/ai/tradeInEvaluationEnabled", "Avaliação de troca exige IA, qualificação completa e atendimento humano.");
+  }
+  if (parsed.ai.contextualServiceEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled || !parsed.ai.prompt)) {
+    fail("CONTEXTUAL_SERVICE_CONFIGURATION_REQUIRED", "/ai/contextualServiceEnabled", "Atendimento contextual exige IA habilitada e roteiro preenchido.");
+  }
+  if (parsed.ai.leadImageHandoffEnabled === true && (!parsed.ai.contextualServiceEnabled || !parsed.ai.tradeInEvaluationEnabled)) {
+    fail("LEAD_IMAGES_CONFIGURATION_REQUIRED", "/ai/leadImageHandoffEnabled", "Encaminhamento de imagens exige atendimento contextual e avaliação de troca habilitados.");
   }
   if (!enabled.has("flows") && parsed.flows.definitions.length > 0) {
     fail("FLOW_CAPABILITY_DISABLED", "/flows/definitions", "Habilite flows antes de configurar definições.");

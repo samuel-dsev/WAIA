@@ -81,6 +81,8 @@ export function normalizeAiConfig(input, empresaId) {
   return Object.freeze({
     empresaId,
     enabled: input.enabled === true,
+    contextualServiceEnabled: input.contextualServiceEnabled === true,
+    leadImageHandoffEnabled: input.leadImageHandoffEnabled === true,
     leadIntakeOnlyEnabled: input.leadIntakeOnlyEnabled === true,
     nonLeadHandoffMessage: input.leadIntakeOnlyEnabled === true ? optionalText(input.nonLeadHandoffMessage, "nonLeadHandoffMessage", 1000) : "",
     leadQualificationEnabled: input.leadQualificationEnabled === true,

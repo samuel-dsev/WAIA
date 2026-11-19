@@ -57,6 +57,18 @@ test("piloto confere o número dedicado, não responde a entradas e mantém cred
   assert.equal(f.session.snapshot().phase, "disconnected");
 });
 
+test("transporte envia bytes de imagem só ao grupo e recusa URL, destinatário individual e MIME indevido", async () => {
+  const f = connectionFixture(); await f.open();
+  const data = Buffer.from("imagem sintética");
+  assert.equal((await f.session.sendImage(GROUP_A, { data, mimeType: "image/png", caption: "Lead sintético" })).messageId, "message-synthetic");
+  assert.deepEqual(f.calls.find(([action]) => action === "send")[2], { image: data, mimetype: "image/png", caption: "Lead sintético" });
+  for (const args of [["5511000000000@s.whatsapp.net", { data, mimeType: "image/png" }],
+    [GROUP_A, { data: "https://example.test/private.png", mimeType: "image/png" }], [GROUP_A, { data, mimeType: "application/pdf" }]]) {
+    await assert.rejects(f.session.sendImage(...args), { code: "INVALID_MESSAGE" });
+  }
+  f.session.close();
+});
+
 test("QR lido por outro número é recusado e revogado", async () => {
   const f = connectionFixture(); await f.session.connect(PHONE);
   f.sockets[0].user.id = "5511999990002@s.whatsapp.net";

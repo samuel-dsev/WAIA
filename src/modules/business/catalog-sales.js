@@ -1,5 +1,5 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
-import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification, WEBSITE_CATALOG_LIST_FORMAT_VERSION } from "./website-catalog-interaction.js";
+import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification, WEBSITE_CATALOG_LIST_FORMAT_VERSION, CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION, validCatalogContinuation } from "./website-catalog-interaction.js";
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -114,15 +114,28 @@ export function hasWebsiteCatalogLink(text) {
   return /(?<![@.\p{L}\p{N}-])(?:www\.)?turimautos\.com(?!\.[\p{L}\p{N}]|[\p{L}\p{N}-])/iu.test(text || "");
 }
 
-export function websiteCatalogPage(catalog, query = { ...EMPTY_FILTERS }, seen = []) {
-  if (catalog.source?.status !== "healthy") return { text: websiteStockUnavailable };
+export function websiteCatalogPage(catalog, query = { ...EMPTY_FILTERS }, seen = [], { continuation } = {}) {
+  const contextual = continuation !== undefined;
+  if (contextual && !validCatalogContinuation(continuation)) throw invalid();
+  if (catalog.source?.status !== "healthy") {
+    if (contextual) throw invalid();
+    return { text: websiteStockUnavailable };
+  }
   const candidates = filteredProducts(availableCatalogProducts(catalog), query);
-  if (!candidates.length) return { text: "Não encontrei veículos com esses critérios no estoque publicado. Quer consultar outra faixa ou modelo?" };
-  const selected = websiteCatalogList(candidates.filter((item) => !seen.includes(item.id)));
-  if (!selected.length) return { text: "Já mostrei as opções dessa busca. Quer mudar a faixa de preço ou o modelo?" };
-  const text = websiteCatalogListText(selected);
+  if (!candidates.length) {
+    if (contextual) throw invalid();
+    return { text: "Não encontrei veículos com esses critérios no estoque publicado. Quer consultar outra faixa ou modelo?" };
+  }
+  const selected = websiteCatalogList(candidates.filter((item) => !seen.includes(item.id)), continuation);
+  if (!selected.length) {
+    if (contextual) throw invalid();
+    return { text: "Já mostrei as opções dessa busca. Quer mudar a faixa de preço ou o modelo?" };
+  }
+  const formatVersion = contextual ? CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION : WEBSITE_CATALOG_LIST_FORMAT_VERSION;
+  const text = websiteCatalogListText(selected, { formatVersion, continuation });
   const productIds = selected.map((item) => item.id);
-  return { text, messages: [{ text, buttons: [], catalogListFormatVersion: WEBSITE_CATALOG_LIST_FORMAT_VERSION, websiteInteraction: { step: "list", productIds } }],
+  return { text, messages: [{ text, buttons: [], catalogListFormatVersion: formatVersion,
+    ...(contextual ? { catalogContinuation: continuation } : {}), websiteInteraction: { step: "list", productIds } }],
     catalogBrowse: { filters: query, priorSeenProductIds: seen.filter((id) => candidates.some((item) => item.id === id)).slice(0, 100) } };
 }
 
@@ -139,7 +152,7 @@ export function websiteCatalogBudget(message) {
   return ceiling;
 }
 
-export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabled = false, message } = {}) {
+export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabled = false, contextualServiceEnabled = false, message } = {}) {
   let value;
   try { value = JSON.parse(output); } catch { throw invalid(); }
   const products = availableCatalogProducts(catalog), byId = new Map(products.map((item) => [item.id, item]));
@@ -149,9 +162,13 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     || !Array.isArray(value.productIds) || value.productIds.length > 3 || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => !byId.has(id))) throw invalid();
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
+  if (website && contextualServiceEnabled && hasWebsiteCatalogLink(text)) throw invalid();
   const clarification = website && websiteReferenceClarification(catalog, message, value.productIds);
-  if (clarification) return clarification;
-  if (website && action === "products" && !asksForVehiclePhoto(message) && asksForWebsiteVehicleDetails(message) && value.productIds.length) {
+  if (clarification && !(contextualServiceEnabled && action === "none" && !value.productIds.length)) {
+    if (contextualServiceEnabled) throw invalid();
+    return clarification;
+  }
+  if (website && !contextualServiceEnabled && action === "products" && !asksForVehiclePhoto(message) && asksForWebsiteVehicleDetails(message) && value.productIds.length) {
     // A request for more information must not resend a gallery even if the
     // model kept the old products classification. Every fact still comes from
     // the selected advert, not from a guessed equipment list or stock summary.
@@ -172,11 +189,13 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   if (query.category !== null && !products.some((item) => item.category === query.category)) throw invalid();
   if (website && action === "browse" && query.category === null
     && /\b(?:suvs?|hatchs?|sed[aã]s?|sedoes|picapes?|minivans?|crossovers?|peruas?)\b/u.test(normalize(message))) {
+    if (contextualServiceEnabled) throw invalid();
     return { text: "Não consegui confirmar essa categoria no estoque publicado. Posso verificar com a equipe?" };
   }
-  if (website && (action === "products" || action === "choose" && value.productIds.length > 1
-    || ["none", "details", "choose"].includes(action) && asksForVehiclePhoto(message))) {
-    if (value.productIds.length) return websiteGalleriesReply(value.productIds.map((id) => byId.get(id)));
+  if (website && (action === "products" || action === "choose" && !contextualServiceEnabled && value.productIds.length > 1
+    || !contextualServiceEnabled && ["none", "details", "choose"].includes(action) && asksForVehiclePhoto(message))) {
+    if (value.productIds.length) return websiteGalleriesReply(value.productIds.map((id) => byId.get(id)), contextualServiceEnabled ? { continuation: text } : {});
+    if (contextualServiceEnabled) { if (!text) throw invalid(); return { text }; }
     return { text: /\b(?:qual versao|qual veiculo|qual modelo)\b/u.test(normalize(text)) ? text : websiteStockUnconfirmed };
   }
   if (website && action === "finance") {
@@ -187,8 +206,12 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     if (!value.productIds.length || !text) throw invalid();
     return { text, websiteInteraction: { step: "declined", productIds: value.productIds } };
   }
+  if (website && action === "choose" && contextualServiceEnabled) {
+    if (!value.productIds.length || !text) throw invalid();
+    return { text, websiteInteraction: { step: "discussion", productIds: value.productIds } };
+  }
   if (website && action === "choose") return chooseWebsiteVehicle(catalog, value.productIds.length === 1 ? byId.get(value.productIds[0]) : null, message);
-  if (website && action === "details" && !value.productIds.length) return { text: websiteStockUnconfirmed };
+  if (website && action === "details" && !value.productIds.length && !contextualServiceEnabled) return { text: websiteStockUnconfirmed };
   if (action === "none" || action === "details") {
     // During lead collection, known product IDs/valid filters may describe the prior
     // choice. A conversational reply never sends those cards or concludes interest.
@@ -218,7 +241,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   } else {
     activeFilters = action === "more" && previous ? previous.filters : query;
     seen = action === "more" && previous ? previous.seenProductIds : [];
-    if (website) return websiteCatalogPage(catalog, activeFilters, seen);
+    if (website) return websiteCatalogPage(catalog, activeFilters, seen, contextualServiceEnabled ? { continuation: text } : {});
     const candidates = filteredProducts(products, activeFilters);
     selected = candidates.filter((item) => !seen.includes(item.id)).slice(0, 3);
     if (!selected.length) return {

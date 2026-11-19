@@ -64,6 +64,8 @@ function versionedAiConfig(compiled, empresaId, configVersion, revisionChecksum)
     prompt: ai.prompt,
     personality: ai.personality,
     leadIntakeOnlyEnabled: ai.leadIntakeOnlyEnabled === true,
+    contextualServiceEnabled: ai.contextualServiceEnabled === true,
+    leadImageHandoffEnabled: ai.leadImageHandoffEnabled === true,
     nonLeadHandoffMessage: compiled.configuration.humanHandoff.message,
     leadQualificationEnabled: ai.leadQualificationEnabled === true,
     leadQualificationCriteria: ai.leadQualificationCriteria,

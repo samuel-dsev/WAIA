@@ -87,6 +87,31 @@ test("PostgreSQL: fatos do site atravessam sincronização, runtime, fila, retom
       assert.equal((await repository.claimBotDispatch(single.scope)).allowed, true);
       await repository.markReplySent({ empresaId, replyId: single.result.id, externalMessageId: "wamid." + randomUUID() });
     });
+    await t.test("lista contextual e legenda final persistem a redação da IA e validam os fatos no envio", async () => {
+      const continuation = "Qual dessas opções combina mais com o que procura?";
+      const output = (action, ids) => JSON.stringify({ text: continuation, catalogAction: action, productIds: ids,
+        filters: { category: null, minPrice: null, maxPrice: null } });
+      for (const action of ["browse", "products"]) {
+        const input = await inbound(), message = await repository.inboundMessage({ empresaId, messageId: input.messageId });
+        const reply = parseCatalogSalesReply(output(action, action === "products" ? [item.id] : []), definition.runtime.catalog,
+          { contextualServiceEnabled: true, message: action === "products" ? "Envie fotos da Tracker" : "Mostre as opções" });
+        const prepared = await repository.prepareReply({ empresaId, message, origin: "ai", reply });
+        const scope = { empresaId, messageId: input.messageId, replyId: prepared.id };
+        const resumed = await new PostgresJobHandlerRepository(pool).preparedReply(scope);
+        const last = resumed.messages.at(-1);
+        assert.equal(last.catalogContinuation, continuation);
+        assert.equal(last.text, prepared.messages.at(-1).text);
+        if (action === "browse") assert.equal(last.catalogListFormatVersion, 3);
+        assert.equal((await repository.claimBotDispatch(scope)).allowed, true);
+        await repository.markReplySent({ empresaId, replyId: prepared.id, externalMessageId: "wamid." + randomUUID() });
+        assert.equal((await repository.claimBotDispatch(scope)).allowed, false);
+      }
+      const input = await inbound(), message = await repository.inboundMessage({ empresaId, messageId: input.messageId });
+      const reply = websiteCatalogPage(definition.runtime.catalog, undefined, [], { continuation });
+      const prepared = await repository.prepareReply({ empresaId, message, origin: "ai", reply });
+      await owner.query("UPDATE mensagens SET outbound_payload=outbound_payload-'catalogContinuation' WHERE id=$1", [prepared.id]);
+      assert.equal((await repository.claimBotDispatch({ empresaId, messageId: input.messageId, replyId: prepared.id })).allowed, false);
+    });
     await t.test("alterar km, ano, preço ou remover a unidade impede o envio preparado", async () => {
       for (const field of ["mileageKm", "year", "price", "removed"]) {
         const current = await prepare(), changed = structuredClone(snapshot);

@@ -203,6 +203,16 @@ export function createWhatsAppWebGroupSession({
         return { messageId: result.key.id };
       } catch { throw failure("SEND_UNCONFIRMED"); }
     },
+    async sendImage(id, { data, mimeType, caption = "" }) {
+      const active = connected();
+      if (!GROUP_ID.test(id) || !Buffer.isBuffer(data) || data.length < 1 || data.length > 10 * 1024 * 1024
+        || !["image/jpeg", "image/png", "image/webp"].includes(mimeType) || typeof caption !== "string" || caption.length > 1024) throw failure("INVALID_MESSAGE");
+      try {
+        const result = await active.sendMessage(id, { image: data, mimetype: mimeType, caption }, { useCachedGroupMetadata: false });
+        if (typeof result?.key?.id !== "string" || !result.key.id) throw failure("SEND_UNCONFIRMED");
+        return { messageId: result.key.id };
+      } catch { throw failure("SEND_UNCONFIRMED"); }
+    },
     async disconnect() {
       const active = socket;
       const linked = state.phase === "connected";

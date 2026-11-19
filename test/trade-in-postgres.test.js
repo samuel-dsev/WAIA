@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import pg from "pg";
 import { compileTenantRuntimeConfigV2, materializeLegacyTenantDefinition } from "../src/modules/configuration/index.js";
 import { PostgresWebhookRepository } from "../src/infra/postgres/repositories/webhook-repository.js";
@@ -59,7 +59,11 @@ test("PostgreSQL: fotos e textos formam um turno, contexto retoma e avaliação 
         return { source: "ai", text: "Obrigada pelas fotos! Você já tem um modelo em mente?",
           tradeInEvaluation: { step: "collect_photos", interestName: null, interestSource: "unknown" } };
       } },
-      metaGateway: { async sendReply(_scope, part) { sent.push(part); return { id: "wamid." + randomUUID() }; } },
+      mediaStore: { maxBytes: 1024, allowedMimeTypes: new Set(["image/png"]), async put({ empresaId, messageId, data, mimeType }) {
+        return { storageKey: empresaId + "/" + messageId, mimeType, sizeBytes: data.length, sha256: createHash("sha256").update(data).digest("hex") };
+      }, async delete() {} },
+      metaGateway: { async downloadMedia() { return { data: Buffer.from("imagem sintética"), mimeType: "image/png" }; },
+        async sendReply(_scope, part) { sent.push(part); return { id: "wamid." + randomUUID() }; } },
     };
     assert.equal((await createWorkerHandlers(dependencies).process_inbound_message({ empresaId, messageId: first.messageId })).replied, true);
     assert.equal(sent.length, 1);

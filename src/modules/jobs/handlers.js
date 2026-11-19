@@ -5,13 +5,15 @@ import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
 import { loadTradeInEvaluationSession } from "./trade-in-session.js";
 import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../ai/inbound-content.js";
+import { storeInboundMedia } from "./store-inbound-media.js";
+import { queueLeadImages } from "../group-notifier/delivery-images.js";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState, websiteListFormatMetadata } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
-import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt, normalizeWebsiteListFormatVersion } from "../business/website-catalog-interaction.js";
+import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt, normalizeWebsiteListFormatVersion, validCatalogContinuation } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
 async function canDispatchWebsiteReply(client, empresaId, part) {
@@ -20,6 +22,11 @@ async function canDispatchWebsiteReply(client, empresaId, part) {
   const redirect = hasWebsiteCatalogLink(part.text);
   const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
   const listFormatVersion = normalizeWebsiteListFormatVersion(part.catalogListFormatVersion);
+  const continuation = part.catalogContinuation;
+  if (listFormatVersion === 3 && !validCatalogContinuation(continuation)) return false;
+  if (continuation !== undefined && (!validCatalogContinuation(continuation)
+    || !(interaction?.step === "list" && listFormatVersion === 3
+      || interaction?.step === "gallery" && websiteCard && interaction.productIds.at(-1) === productId))) return false;
   if (part.catalogListFormatVersion !== undefined && (listFormatVersion === null || interaction?.step !== "list")) return false;
   if (!websiteCard && !redirect && !interaction) return true;
   const catalog = await loadWebsiteCatalog(client, empresaId);
@@ -38,7 +45,8 @@ async function canDispatchWebsiteReply(client, empresaId, part) {
     const items = interaction.productIds.map(trustedItem);
     if (items.some((item) => !item)) return false;
     if (interaction.step === "list") {
-      return part.text === websiteCatalogSelectionPrompt || part.text === websiteCatalogListText(items, { formatVersion: listFormatVersion });
+      return listFormatVersion !== 3 && part.text === websiteCatalogSelectionPrompt
+        || part.text === websiteCatalogListText(items, { formatVersion: listFormatVersion, continuation });
     }
   }
   if (!websiteCard) return true;
@@ -163,6 +171,10 @@ export class PostgresJobHandlerRepository {
       if (!result.rows[0]) throw permanent("Mensagem de mídia não encontrada.", "MEDIA_MESSAGE_NOT_FOUND");
       return result.rows[0];
     });
+  }
+
+  queueLeadImages(input) {
+    return withTenantTransaction(this.pool, input, ({ client }) => queueLeadImages(client, input));
   }
 
   statusEvent({ empresaId, statusEventId }) {
@@ -499,40 +511,9 @@ export function createWorkerHandlers({
       conversationId: message.conversationId,
     });
     let mediaRejected = false;
-    if (["image", "document"].includes(message.type) && message.mediaId && !message.mediaStorageKey) {
-      if (typeof metaGateway?.downloadMedia !== "function" || typeof mediaStore?.put !== "function" || typeof repository.markMediaStored !== "function") {
-        throw permanent("Armazenamento privado de mídia não configurado.", "MEDIA_STORAGE_NOT_CONFIGURED");
-      }
+    async function storeMedia(target) {
       try {
-        const downloaded = await metaGateway.downloadMedia({
-          empresaId: reference.empresaId,
-          numeroWhatsappId: message.numeroWhatsappId,
-        }, {
-          mediaId: message.mediaId,
-          maxBytes: mediaStore.maxBytes,
-          allowedMimeTypes: [...mediaStore.allowedMimeTypes],
-        });
-        const stored = await mediaStore.put({
-          empresaId: reference.empresaId,
-          messageId: message.id,
-          data: downloaded.data,
-          mimeType: downloaded.mimeType,
-        });
-        try {
-          await repository.markMediaStored({
-            empresaId: reference.empresaId,
-            messageId: message.id,
-            mediaId: message.mediaId,
-            stored,
-          });
-        } catch (error) {
-          await mediaStore.delete({ empresaId: reference.empresaId, storageKey: stored.storageKey }).catch(() => {});
-          throw error;
-        }
-        message.mediaStorageKey = stored.storageKey;
-        message.mediaMimeType = stored.mimeType;
-        message.mediaSizeBytes = stored.sizeBytes;
-        message.mediaSha256 = stored.sha256;
+        return await storeInboundMedia({ empresaId: reference.empresaId, message: target, metaGateway, mediaStore, repository });
       } catch (error) {
         if (!MEDIA_POLICY_ERRORS.has(error?.code)) throw error;
         mediaRejected = true;
@@ -541,7 +522,12 @@ export function createWorkerHandlers({
           conversationId: message.conversationId,
           code: error.code,
         });
+        return target;
       }
+    }
+    message = await storeMedia(message);
+    if (message.type === "image" && message.mediaStorageKey && conversation.mode !== "bot") {
+      await repository.queueLeadImages?.({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
     }
     if (conversation.mode !== "bot") {
       await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
@@ -569,9 +555,10 @@ export function createWorkerHandlers({
     if (!prepared) {
       const storedDefinition = mediaRejected ? null : await tenantDefinitionRepository.load(reference.empresaId);
       if (!mediaRejected && !storedDefinition) throw permanent("Configuracao da empresa nao encontrada.", "TENANT_RUNTIME_NOT_FOUND");
-      const activeFlow = storedDefinition?.ai?.tradeInEvaluationEnabled === true
+      const acceptsContextualImages = storedDefinition?.ai?.tradeInEvaluationEnabled === true || storedDefinition?.ai?.contextualServiceEnabled === true;
+      const activeFlow = acceptsContextualImages
         ? await conversationService.getState?.({ empresaId: reference.empresaId, conversationId: message.conversationId }) : null;
-      const includeImages = storedDefinition?.ai?.tradeInEvaluationEnabled === true && !["orders", "appointments", "flows"].includes(activeFlow?.flowKey);
+      const includeImages = acceptsContextualImages && !["orders", "appointments", "flows"].includes(activeFlow?.flowKey);
       if ((message.type === "text" || includeImages && message.type === "image") && storedDefinition?.ai?.enabled === true
         && typeof repository.inboundTurn === "function") {
         inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(includeImages ? { includeImages: true } : {}) });
@@ -583,6 +570,15 @@ export function createWorkerHandlers({
           message = { ...latest, runtimeGeneration: message.runtimeGeneration };
           prepared = await repository.preparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
           if (prepared) return { skipped: true, reason: "inbound_turn_checkpoint_exists" };
+        }
+        if (includeImages) {
+          for (const part of inboundTurn.messages.filter((part) => part.type === "image")) {
+            const image = part.id === message.id ? message : await repository.inboundMessage({ ...reference, messageId: part.id });
+            if (!image) throw permanent("Mensagem de imagem não encontrada.", "INBOUND_MESSAGE_NOT_FOUND");
+            const stored = await storeMedia(image);
+            part.mediaStored = Boolean(stored.mediaStorageKey);
+            if (stored.id === message.id) message = stored;
+          }
         }
       }
       let generatedByAi = false;
@@ -639,7 +635,7 @@ export function createWorkerHandlers({
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),
                 interestHandoff: { enabled: definition.ai?.catalogSalesEnabled === true && config.enabledModules.includes("human_handoff") && Boolean(config.humanHandoff.salesInterestMessage?.trim()), message: config.humanHandoff.salesInterestMessage || "" },
               } : {}) };
-              const direct = salesMode && !qualifiesLeads && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
+              const direct = salesMode && !qualifiesLeads && definition.ai?.contextualServiceEnabled !== true && definition.ai?.enabled === true && message.type === "text" ? directCatalogInterest(input.text, catalogContext) : null;
               if (direct) return { reply: direct };
               const aiReply = await aiService.reply({
                 empresaId: config.empresaId,
@@ -696,6 +692,7 @@ export function createWorkerHandlers({
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };
       }
+      if (reply.code === "NO_CUSTOMER_CONTENT") return { skipped: true, reason: "no_customer_content" };
       if (generatedByAi) {
         if (typeof repository.prepareReply !== "function") throw permanent("Persistência da resposta da IA não configurada.", "BOT_REPLY_CHECKPOINT_REQUIRED");
         const delayMs = !inboundTurn && responseDelayEnabled ? aiReplyDelayMs() : 0;

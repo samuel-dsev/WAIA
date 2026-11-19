@@ -162,6 +162,10 @@ services:
       DATABASE_URL: postgres://${DATABASE_APP_USER:-waia_app}:${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD obrigatorio}@postgres:5432/${POSTGRES_DB:-waia}
       DATABASE_POOL_MAX: 5
       MASTER_KEYRING: "${MASTER_KEYRING:-}"
+      MEDIA_STORAGE_ROOT: /app/.data/media
+      MEDIA_MAX_BYTES: ${MEDIA_MAX_BYTES:-10485760}
+    volumes:
+      - media_data:/app/.data/media:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

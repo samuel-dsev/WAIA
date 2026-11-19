@@ -1,8 +1,9 @@
 import { verifyCompiledTenantRuntimeConfigV2 } from "../configuration/compiler.js";
+import { queueLeadImages } from "./delivery-images.js";
 
 // Called inside the existing response-ack transaction, before commit.
 export async function acknowledgeQualification(client, { empresaId, replyId }) {
-  const row = (await client.query(`SELECT m.conversa_id,m.contato_id,m.outbound_payload,ct.telefone_normalizado,
+  const row = (await client.query(`SELECT m.conversa_id,m.contato_id,m.source_message_id,m.outbound_payload,ct.telefone_normalizado,
     cr.configuracao_compilada AS compiled,r.group_id,r.revision,r.sender_phone,r.enabled
     FROM mensagens m JOIN conversas c ON c.empresa_id=m.empresa_id AND c.id=m.conversa_id
     JOIN contatos ct ON ct.empresa_id=m.empresa_id AND ct.id=m.contato_id
@@ -29,6 +30,9 @@ export async function acknowledgeQualification(client, { empresaId, replyId }) {
   if (!created) return;
   if (row.enabled) await client.query(`INSERT INTO group_notifier_deliveries(empresa_id,lead_id,group_id,route_revision,sender_phone)
     VALUES ($1,$2,$3,$4,$5) ON CONFLICT(empresa_id,lead_id) DO NOTHING`, [empresaId, created.id, row.group_id, row.revision, row.sender_phone]);
+  if (compiled.configuration.ai.leadImageHandoffEnabled === true) await queueLeadImages(client, {
+    empresaId, conversationId: row.conversa_id, messageId: row.source_message_id,
+  });
   await client.query(`UPDATE conversas SET modo_atendimento='pausado',lock_version=lock_version+1,updated_at=now()
     WHERE empresa_id=$1 AND id=$2 AND modo_atendimento='bot'`, [empresaId, row.conversa_id]);
 }

@@ -1,5 +1,5 @@
-const STEPS = ["offer_photos", "offer_visit", "collect_photos", "visit_requested", "human_review_requested", "declined", "completed"];
-const ACCEPTED = ["collect_photos", "visit_requested", "human_review_requested"];
+const STEPS = ["offer_photos", "offer_visit", "collect_photos", "photos_received", "visit_requested", "human_review_requested", "declined", "completed"];
+const ACCEPTED = ["collect_photos", "photos_received", "visit_requested", "human_review_requested"];
 const normalized = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 const invalid = () => Object.assign(new Error("Contexto de avaliação inválido."), { code: "AI_INVALID_TRADE_EVALUATION" });
 export const EVALUATION_CLOSING = "Obrigada, {nome}! Um de nossos vendedores entrará em contato por aqui para combinar a avaliação do seu veículo e os próximos passos.";
@@ -14,13 +14,13 @@ export function normalizeTradeInEvaluation(value) {
   return { step: value.step, interestName: value.interestName?.trim() || null, interestSource: value.interestSource };
 }
 
-export function tradeInEvaluationFormat(base) {
+export function tradeInEvaluationFormat(base, { photosHandoffEnabled = false } = {}) {
   const format = structuredClone(base);
   format.schema.properties.tradeInEvaluation = {
     type: ["object", "null"], additionalProperties: false,
     description: "Estado de avaliação obrigatório ao oferecer fotos/visita, receber fotos, aceitar, continuar ou recusar avaliação. Null somente quando não tratar desse assunto.",
     properties: {
-      step: { type: "string", enum: STEPS.filter((step) => step !== "completed") },
+      step: { type: "string", enum: STEPS.filter((step) => step !== "completed" && (photosHandoffEnabled || step !== "photos_received")) },
       interestName: { type: ["string", "null"] },
       interestSource: { type: "string", enum: ["customer", "ad", "unknown"] },
     }, required: ["step", "interestName", "interestSource"],
@@ -29,20 +29,30 @@ export function tradeInEvaluationFormat(base) {
   return format;
 }
 
-export const TRADE_IN_EVALUATION_INSTRUCTIONS = [
+export function tradeInEvaluationInstructions({ photosHandoffEnabled = false } = {}) { return [
   "AVALIAÇÃO DE VEÍCULO NA TROCA (capacidade habilitada pela empresa):",
   "A política comercial continua sendo a publicada no roteiro. Responda explicitamente se a empresa avalia veículos na troca, sem garantir aceitação, valor, condição mecânica ou aprovação. Responda também às outras perguntas realmente feitas no turno, em UMA mensagem personalizada, antes de uma única pergunta de continuidade. Informe cidade, endereço, mapa ou localização da loja SOMENTE se o cliente solicitar essa informação; perguntar sobre troca, aceitar avaliação ou mencionar uma visita não solicita localização. Não repita um endereço apenas porque apareceu no histórico ou no exemplo do roteiro. Sem pedido de localização, responda à troca e ofereça avaliação por fotos conforme o roteiro, sem acrescentar endereço.",
-  "Há dois caminhos distintos. Na análise inicial por fotos, ofereça essa possibilidade (step=offer_photos), após aceite use collect_photos e peça fotos do veículo que o cliente quer oferecer na troca. Recebendo anexos, agradeça uma vez e continue pelo modelo de interesse; não encerre apenas pelas fotos ou pelo nome. Se ainda não escolheu, pergunte qual modelo procura; se já escolheu, ofereça as fotos dele sem repetir a pergunta; depois da galeria, ofereça simulação, que continua exigindo aceite próprio.",
+  photosHandoffEnabled
+    ? "Na avaliação por fotos, ofereça essa possibilidade (offer_photos); após aceite, use collect_photos e peça fotos do carro de troca. Ao receber imagens, reconheça explicitamente o recebimento sem análise visual, responda às demais perguntas e use photos_received. Se faltar nome, pergunte somente como pode chamá-lo, sem pedir modelo, CPF ou nascimento. Fotos efetivamente armazenadas e nome informado bastam para concluir a ficha de avaliação. Não exija nova confirmação nem outra etapa comercial. Modelo de encerramento: Obrigado pelas informações, logo um de nossos vendedores vai entrar em contato com o retorno da avaliação e dará continuidade no seu atendimento. A ficha e os anexos seguem pelo sistema; o bot pausa após a confirmação de envio. Se o cliente mudar de assunto ou trouxer outra solicitação pendente, responda primeiro sem forçar o encerramento. Fotos sem armazenamento confirmado exigem explicar a indisponibilidade, nunca fingir que estão disponíveis para avaliação."
+    : "Há dois caminhos distintos. Na análise inicial por fotos, ofereça essa possibilidade (step=offer_photos), após aceite use collect_photos e peça fotos do veículo que o cliente quer oferecer na troca. Recebendo anexos, agradeça uma vez e continue pelo modelo de interesse; não encerre apenas pelas fotos ou pelo nome. Se ainda não escolheu, pergunte qual modelo procura; se já escolheu, ofereça as fotos dele sem repetir a pergunta; depois da galeria, ofereça simulação, que continua exigindo aceite próprio.",
   "Na avaliação presencial, ofereça registrar o pedido (offer_visit). Quando aceitar ou pedir a avaliação, use visit_requested. Primeiro nome informado e aceite de avaliação presencial bastam para qualificar, mesmo sem modelo de interesse, fotos, CPF, nascimento ou horário escolhido. Pergunte como pode chamar somente se o nome faltar. human_review_requested vale quando o cliente pede explicitamente que a equipe avalie a troca por atendimento humano. Não confunda uma dúvida isolada com aceite.",
   "O sim curto se refere à oferta efetivamente enviada mais recente. Não converta aceite de fotos/lista em visita ou financiamento. tradeInEvaluation.session preserva a pendência confirmada. Fotos, dúvidas ou mudança de assunto suspendem a coleta sem apagar dados nem presumir desistência. Use declined somente para recusa explícita da avaliação; falta de fotos não é recusa. Uma pergunta sobre localização não constitui pedido de avaliação.",
   "As mensagens de imagem fornecem somente metadados de recebimento e legenda escrita pelo cliente. Não há análise visual: não identifique marca, modelo, placa, estado, danos ou valor pela imagem. Se o arquivo estiver indisponível, explique o problema e permita alternativa. Não chame foto de carro de comprovante.",
   "Separe o veículo de troca do veículo de interesse. Em quero o Onix e tenho um HB20 para trocar, interesse é Onix e troca é HB20. interestName descreve só o interesse de compra, nunca o carro de troca. Use interestSource=customer apenas para escolha explícita do cliente, com a forma do nome que ele escreveu; ad para modelo identificável no anúncio e ainda não escolhido; unknown e interestName=null quando desconhecido. O anúncio não comprova intenção. Uma escolha recente prevalece e possível interesse não precisa ser dito ao cliente.",
   "Sempre preencha tradeInEvaluation ao oferecer avaliação por fotos ou presencial, receber fotos ou tratar de uma avaliação pendente; null não registra a oferta e impede o aceite curto seguinte. Quando oferecer as duas alternativas, use offer_visit; o próximo pedido explícito de fotos deve usar collect_photos. Recusa explícita usa declined mesmo quando atender um pedido de galeria na mesma resposta. Quando houver atualização, retorne step, interestName e interestSource. O sistema valida aceite, acrescenta o rótulo de interesse na ficha e só conclui após a confirmação de envio. Não use finance para avaliação; use none/details conforme a solicitação. Preserve a simulação pendente quando houver.",
   "Ao qualificar para avaliação, summary e qualification preservam todos os dados fornecidos: finalidade, necessidade de avaliação, carro de troca, características declaradas, fotos recebidas quando houver, interesse e preferência de visita. Não diga que um horário está reservado. text responde às dúvidas atuais e pode encerrar naturalmente agradecendo pelo nome e informando que um vendedor entrará em contato para combinar os detalhes, seguindo a referência de encerramento. Encerre sem pergunta: não peça nova confirmação de cadastro/telefone/interesse nem pergunte se pode ajudar em algo mais. O sistema completa o encerramento quando faltar, sem duplicá-lo. Nunca afirme que enviou a ficha ou notificou o grupo/equipe e não repita CPF/nascimento no texto público.",
-].join("\n");
+].join("\n"); }
+export const TRADE_IN_EVALUATION_INSTRUCTIONS = tradeInEvaluationInstructions();
 
-export function tradeInTurnInstructions(context, turnMessages = []) {
+export function tradeInTurnInstructions(context, turnMessages = [], { photosHandoffEnabled = false, storedPhotos = 0 } = {}) {
   const photos = turnMessages.filter((part) => part.type === "image").length;
+  if (photosHandoffEnabled && ["offer_photos", "collect_photos", "photos_received"].includes(context?.session?.step)) {
+    return "AVALIAÇÃO POR FOTOS NESTE ATENDIMENTO: " + photos + " imagens no turno e " + storedPhotos + " imagens armazenadas no histórico. "
+      + "Reconheça explicitamente as imagens novas recebidas, sem descrever o conteúdo visual. "
+      + (storedPhotos ? "Use photos_received. Se faltar nome, pergunte como pode chamá-lo; se já tiver nome e não houver outro pedido pendente, conclua com a ficha completa e o modelo de encerramento. Não peça modelo de interesse como requisito. "
+        : "Sem imagem armazenada, mantenha collecting e não conclua a avaliação por fotos. ")
+      + "Responda também às perguntas atuais antes de concluir; se mudou de assunto, atenda ao pedido sem reiniciar a conversa.";
+  }
   if (!photos || !["offer_photos", "collect_photos"].includes(context?.session?.step)) return "";
   return "CONTEXTO DO TURNO ATUAL: recebidas " + photos + " imagens durante a avaliação inicial por fotos. "
     + "O cliente já está enviando as fotos solicitadas; não pergunte novamente se quer avaliar por fotos. "
@@ -87,6 +97,8 @@ export function reconcileTradeInEvaluation(proposal, context, message, history, 
 export function hasTradeInEvaluationConsent(context, message, history, turnMessages = [], targetStep) {
   const answer = normalized(message), session = context?.session;
   const last = history.findLast((part) => part.role === "assistant")?.content || "";
+  if (targetStep === "photos_received" && !["offer_photos", "collect_photos", "photos_received"].includes(session?.step)
+    && !/\b(?:quero|gostaria|preciso|vamos|pode)\b.{0,100}\bavalia(?:r|cao)\b/u.test(answer)) return false;
   if (targetStep === "visit_requested" && session?.step !== "visit_requested" && !session?.visitAccepted) {
     const offeredVisit = session?.step === "offer_visit" && session.direct === true && /\bavalia[cç][aã]o\b[^?]*\?\s*$/iu.test(last);
     const clauses = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?\n]/u);
@@ -128,8 +140,9 @@ export function evaluationAnswerWithoutFollowUp(answer) {
   return String(answer || "").replace(/(?:^|(?<=[.!?\n]))\s*(?:posso|podemos|pode(?:ria)?|gostaria|quer|qual|como|mais alguma)[^.!?\n]*\?\s*$/iu, "").trim();
 }
 
-export function mayQualifyTradeInEvaluation(state, consent) {
-  return consent && ["visit_requested", "human_review_requested"].includes(state?.step);
+export function mayQualifyTradeInEvaluation(state, consent, { photosHandoffEnabled = false, storedPhotos = 0 } = {}) {
+  return consent && (["visit_requested", "human_review_requested"].includes(state?.step)
+    || photosHandoffEnabled && storedPhotos > 0 && state?.step === "photos_received");
 }
 
 export function evaluationInterest(state, context, evidence) {

@@ -5,6 +5,7 @@ const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
 const listQuestion = "Gostou de algum? Se sim, gostaria de ver as fotos dele? Me diga qual modelo chamou sua atenção.";
 export const WEBSITE_CATALOG_LIST_FORMAT_VERSION = 2;
+export const CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION = 3;
 export const websiteCatalogSelectionPrompt = "Qual modelo chamou sua atenção?";
 export const websiteGalleryClosing = "Qual modelo você mais gostou?\n\nSe quiser fazer a simulação do financiamento de algum deles, é só me falar!";
 const galleryQuestion = "Você gostou desse veículo?";
@@ -58,7 +59,12 @@ function choiceQuestion(step, item, text) {
 }
 
 export function normalizeWebsiteListFormatVersion(value) {
-  return value === undefined ? 1 : [1, 2].includes(value) ? value : null;
+  return value === undefined ? 1 : [1, 2, 3].includes(value) ? value : null;
+}
+
+export function validCatalogContinuation(value) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 1000
+    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
 function listEntry(item, formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION) {
@@ -66,14 +72,15 @@ function listEntry(item, formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION) {
   return [`*${item.name}*`, formatVersion === 1 ? `Modelo: ${item.model || item.name}` : vehicleFactsText(item), `Valor: ${price}`].join("\n");
 }
 
-export function websiteCatalogListText(items, { formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION } = {}) {
+export function websiteCatalogListText(items, { formatVersion = WEBSITE_CATALOG_LIST_FORMAT_VERSION, continuation } = {}) {
   if (normalizeWebsiteListFormatVersion(formatVersion) === null) throw new TypeError("Formato de lista inválido.");
-  return [...items.map((item) => listEntry(item, formatVersion)), listQuestion].join("\n\n");
+  if (formatVersion === 3 && !validCatalogContinuation(continuation)) throw new TypeError("Continuidade contextual inválida.");
+  return [...items.map((item) => listEntry(item, formatVersion)), formatVersion === 3 ? continuation : listQuestion].join("\n\n");
 }
 
-export function websiteCatalogList(candidates) {
+export function websiteCatalogList(candidates, continuation = listQuestion) {
   const items = [];
-  let size = listQuestion.length;
+  let size = continuation.length;
   for (const item of candidates) {
     size += listEntry(item).length + 2;
     if (size > 4096) break;
@@ -93,9 +100,11 @@ export function websiteGalleryPart(item, index) {
   return { text, buttons: [], imageUrl: urls[index], catalogProductId: item.id, catalogPhotoIndex: index };
 }
 
-export function matchesWebsiteGalleryPart(item, index, { text, imageUrl }) {
+export function matchesWebsiteGalleryPart(item, index, { text, imageUrl, catalogContinuation }) {
   const current = websiteGalleryPart(item, index);
   if (!current || current.imageUrl !== imageUrl) return false;
+  if (catalogContinuation !== undefined) return index === photoUrls(item).length - 1 && validCatalogContinuation(catalogContinuation)
+    && galleryClosingCaption(current, catalogContinuation) === text;
   if (current.text === text) return true;
   // Retomadas de galerias preparadas antes da pergunta em separado.
   const last = index === photoUrls(item).length - 1;
@@ -123,7 +132,15 @@ export function websiteGalleryReply(item) {
   return closeGallery(messages, financingOffer(item));
 }
 
-export function websiteGalleriesReply(items) {
+export function websiteGalleriesReply(items, { continuation } = {}) {
+  if (continuation !== undefined) {
+    if (!validCatalogContinuation(continuation) || items.some((item) => !photoUrls(item).length)) {
+      throw Object.assign(new Error("Galeria contextual inválida."), { code: "AI_INVALID_CATALOG_SELECTION" });
+    }
+    const messages = items.flatMap((item) => photoUrls(item).map((_, index) => websiteGalleryPart(item, index)));
+    return closeGallery(messages, { text: continuation, catalogContinuation: continuation, buttons: [],
+      websiteInteraction: { step: "gallery", productIds: items.map((item) => item.id) } });
+  }
   if (items.length === 1) return websiteGalleryReply(items[0]);
   // Put unavailable-photo notices before the actual galleries. The final
   // invitation belongs to the last image payload, so it cannot overtake it.
@@ -161,7 +178,9 @@ function negative(message) {
 
 export function hasWebsiteFinancingConsent(catalog, message, productId, history) {
   const answer = normalize(message);
-  if (/\b(?:nao quero|nao (?:vou|preciso)|cancel[ae]|desisti)\b/u.test(answer)) return false;
+  // Negation of a down payment is not cancellation of an accepted simulation.
+  if (/\b(?:nao (?:quero|vou|preciso)(?: mais)?(?: fazer| de)?(?: a| o)? (?:simulacao|simular|financiamento|financiar)|cancel[ae]|desisti)\b/u.test(answer)
+    || /^(?:nao quero|nao vou|nao preciso)[.! ]*$/u.test(answer)) return false;
   if (catalog.financingSession?.productIds?.includes(productId) || catalog.financingSession?.productId === productId
     || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds.includes(productId)) return true;
   if (/\b(?:quero|gostaria|vamos|preciso|aceito|pode(?: me)?|poderia)\b.{0,60}\b(?:simular|simulacao|financiar|financiamento)\b/u.test(answer)) return true;
@@ -178,6 +197,24 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
     .every((part) => /^(?:entendi|certo|ta|tudo bem)?[.! ]*$/u.test(part));
   const uncertain = negative(message) || /\b(?:talvez|nao sei|ainda nao|depois|mais tarde)\b/u.test(answer);
   return (offer || currentQuestion) && !acknowledgementOnly && !uncertain;
+}
+
+export function hasWebsitePhotoConsent(message, history) {
+  const answer = normalize(message);
+  if (/\bnao\b[^.!?\n]{0,35}\b(?:envie|mande|quero|preciso|mostre)\b[^.!?\n]{0,25}\bfotos?\b/u.test(answer)
+    || /^(?:nao|agora nao|dispenso)[.! ]*$/u.test(answer)) return false;
+  const requested = answer.split(/\b(?:mas|porem)\b|[;.!?\n]/u).some((part) => /\b(?:fotos?|imagens?)\b/u.test(part)
+    && /\b(?:tem|teria|manda(?:r|m|e)?|envia(?:r|m)?|envie|mostra(?:r|m)?|mostre|ver|quero|gostaria|pode|poderia)\b/u.test(part)
+    && !/\b(?:nao|sem)\b.{0,35}\b(?:fotos?|imagens?)\b/u.test(part));
+  if (requested) return true;
+  const last = normalize(history.findLast((part) => part.role === "assistant")?.content);
+  const question = last.match(/[^.!?]*\?\s*$/u)?.[0] || "";
+  const accepts = /^(?:sim|pode(?: sim| ser| mandar| enviar| mostrar)?|quero(?: sim)?|gostaria(?: sim)?|claro|por favor|com certeza|mande|envie|os dois|as duas|ambos|ambas|esses(?: aqui)?|essas(?: aqui)?|deles|delas)(?:\b|$)/u;
+  return /\b(?:fotos?|imagens?)\b/u.test(question)
+    && /\b(?:quer|gostaria|posso|deseja|pode|prefere)\b/u.test(question)
+    && !/\b(?:simulacao|financiamento)\b/u.test(question)
+    && answer.split("\n").some((part) => accepts.test(part.trim()))
+    && !/\b(?:depois|mais tarde|ainda nao|agora nao)\b/u.test(answer);
 }
 
 function financingOffer(item) {

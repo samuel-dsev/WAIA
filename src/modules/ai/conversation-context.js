@@ -34,7 +34,11 @@ export async function loadConversationContext(service, request, now, { includeIn
     });
   // Resolve quotations in the current burst as well as the earlier transcript.
   const current = (request.turnMessages || [{ id: request.messageId, text: request.message }]).map((part) => ({ ...part, text: inboundMessageContent(part) }));
-  return { input, evidence: retained.filter((item) => item.direction === "inbound" && (item.type === "text" || includeIncomingImages && item.type === "image")
+  const incomingImages = retained.filter((item) => item.direction === "inbound" && item.type === "image");
+  const currentImages = (request.turnMessages || []).filter((part) => part.type === "image" && !retained.some((item) => item.id === part.id));
+  return { input, receivedPhotos: incomingImages.length + currentImages.length,
+    storedPhotos: incomingImages.filter((item) => item.mediaStorageKey).length + currentImages.filter((part) => part.mediaStored === true).length,
+    evidence: retained.filter((item) => item.direction === "inbound" && (item.type === "text" || includeIncomingImages && item.type === "image")
     && typeof item.body === "string" && !isPromptInjectionAttempt(item.body)).map((item) => item.body), current: current.map((part) => {
     const record = retained.find((item) => item.id === part.id);
     const quoted = byExternalId.get(record?.replyToExternalMessageId);

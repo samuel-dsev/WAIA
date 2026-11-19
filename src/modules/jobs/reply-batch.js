@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createWhatsAppReplyPayload } from "../whatsapp/outbound.js";
 import { normalizeCatalogBrowseState } from "../business/catalog-sales.js";
-import { normalizeWebsiteInteraction, normalizeWebsiteListFormatVersion } from "../business/website-catalog-interaction.js";
+import { normalizeWebsiteInteraction, normalizeWebsiteListFormatVersion, validCatalogContinuation } from "../business/website-catalog-interaction.js";
 import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
@@ -9,10 +9,16 @@ const columns = "id, corpo, outbound_payload, external_message_id, status";
 const maxReplyParts = 303; // Até três veículos com 100 fotos e a pergunta em texto.
 
 export function websiteListFormatMetadata(part) {
-  if (part.catalogListFormatVersion === undefined) return {};
+  const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
+  const continuation = part.catalogContinuation;
+  if (continuation !== undefined && (!validCatalogContinuation(continuation)
+    || !(part.catalogListFormatVersion === 3 && interaction?.step === "list" && !part.imageUrl
+      || interaction?.step === "gallery" && part.imageUrl && part.catalogProductId === interaction.productIds.at(-1)))) throw invalid();
+  const metadata = continuation === undefined ? {} : { catalogContinuation: continuation };
+  if (part.catalogListFormatVersion === undefined) return metadata;
   if (normalizeWebsiteListFormatVersion(part.catalogListFormatVersion) === null
-    || normalizeWebsiteInteraction(part.websiteInteraction)?.step !== "list" || part.imageUrl) throw invalid();
-  return { catalogListFormatVersion: part.catalogListFormatVersion };
+    || interaction?.step !== "list" || part.imageUrl || part.catalogListFormatVersion === 3 && continuation === undefined) throw invalid();
+  return { ...metadata, catalogListFormatVersion: part.catalogListFormatVersion };
 }
 
 export function replyFromRow(row) {
@@ -118,6 +124,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(part.websiteInteraction ? { websiteInteraction: part.websiteInteraction } : {}),
       ...(part.catalogListFormatVersion === undefined ? {} : { catalogListFormatVersion: part.catalogListFormatVersion }),
+      ...(part.catalogContinuation === undefined ? {} : { catalogContinuation: part.catalogContinuation }),
       ...(part.tradeInEvaluation ? { tradeInEvaluation: part.tradeInEvaluation } : {}),
       ...(part.catalogPhotoIndex != null ? { catalogPhotoIndex: part.catalogPhotoIndex } : {}),
       ...(index === 0 ? { partIds: ids, ...(reply.sendNotBefore ? { sendNotBefore: reply.sendNotBefore } : {}),

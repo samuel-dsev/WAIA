@@ -2,8 +2,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { withPlatformTransaction, withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { encryptCredentialSecret, decryptCredentialSecret } from "../../security/credential-crypto.js";
 import { normalizePilotPhone } from "../../integrations/whatsapp-web/group-session.js";
-import { verifyCompiledTenantRuntimeConfigV2 } from "../configuration/compiler.js";
 import { AdminError } from "../admin/errors.js";
+import { readGroupDelivery, groupDeliveryAllowed, LEAD_IMAGE_MIME_TYPES } from "./delivery-images.js";
 
 const MESSAGES = {
   INVALID_PHONE: "Informe o número dedicado em formato internacional, com +55 e DDD.",
@@ -178,8 +178,11 @@ export class PostgresGroupNotifierRepository {
   recover(owner, epoch) {
     return this.platform(async (client) => {
       await this.fence(client, owner, epoch);
-      await client.query(`UPDATE group_notifier_deliveries SET status='unconfirmed',error_code='SENDER_RESTARTED',updated_at=now()
-        WHERE status='sending'`);
+      await client.query(`UPDATE group_notifier_delivery_parts SET status='unconfirmed',error_code='SENDER_RESTARTED',updated_at=now() WHERE status='sending'`);
+      await client.query(`UPDATE group_notifier_deliveries d SET status=CASE
+        WHEN EXISTS(SELECT 1 FROM group_notifier_delivery_parts p WHERE p.delivery_id=d.id)
+          AND NOT EXISTS(SELECT 1 FROM group_notifier_delivery_parts p WHERE p.delivery_id=d.id AND p.status='unconfirmed') THEN 'pending'
+        ELSE 'unconfirmed' END,error_code='SENDER_RESTARTED',updated_at=now() WHERE d.status='sending'`);
     });
   }
   candidate(owner, epoch) {
@@ -189,50 +192,88 @@ export class PostgresGroupNotifierRepository {
       await client.query(`UPDATE qualified_leads l SET name=NULL,summary=NULL,qualification=NULL,phone=NULL,redacted_at=now()
         FROM empresas e WHERE e.id=l.empresa_id AND l.redacted_at IS NULL
         AND l.created_at<now()-make_interval(days=>e.retencao_mensagens_dias)`);
-      return (await client.query(`SELECT id,group_id FROM group_notifier_deliveries WHERE status='pending' AND available_at<=now() ORDER BY created_at,id LIMIT 1`)).rows[0] || null;
+      return (await client.query(`SELECT d.id,d.group_id,EXISTS(SELECT 1 FROM group_notifier_delivery_parts p WHERE p.delivery_id=d.id) AS multipart
+        FROM group_notifier_deliveries d WHERE d.status='pending' AND d.available_at<=now() ORDER BY d.created_at,d.id LIMIT 1`)).rows[0] || null;
     });
   }
   beginSend(owner, epoch, deliveryId) {
     return this.platform(async (client) => {
       await this.fence(client, owner, epoch);
-      const row = (await client.query(`SELECT d.*,l.name,l.summary,l.qualification,l.phone,l.redacted_at,l.config_version,
-        e.nome_exibicao AS company_name,e.status AS company_status,e.deleted_at AS company_deleted,
-        e.configuracao_runtime_modo,e.versao_configuracao,e.configuracao_ativa_versao,
-        c.status AS conversation_status,ct.deleted_at AS contact_deleted,ct.bloqueado AS blocked,ct.anonimizado_at,
-        ct.bot_pausado AS contact_paused,n.status AS number_status,n.deleted_at AS number_deleted,
-        r.enabled AS route_enabled,r.group_id AS current_group,r.revision AS current_revision,r.sender_phone AS current_sender,
-        s.desired,s.phone AS actual_sender,s.phase,s.lease_until,
-        cr.configuracao_compilada AS compiled
-        FROM group_notifier_deliveries d JOIN qualified_leads l ON l.empresa_id=d.empresa_id AND l.id=d.lead_id
-        JOIN empresas e ON e.id=d.empresa_id JOIN conversas c ON c.empresa_id=l.empresa_id AND c.id=l.conversa_id
-        JOIN contatos ct ON ct.empresa_id=l.empresa_id AND ct.id=l.contato_id
-        JOIN numeros_whatsapp n ON n.empresa_id=c.empresa_id AND n.id=c.numero_whatsapp_id
-        LEFT JOIN group_notifier_routes r ON r.empresa_id=d.empresa_id
-        JOIN group_notifier_connection s ON s.id
-        LEFT JOIN configuracoes_revisoes cr ON cr.empresa_id=e.id AND cr.config_version=e.configuracao_ativa_versao
-        WHERE d.id=$1 AND d.status='pending' FOR UPDATE OF d`, [uuid(deliveryId)])).rows[0];
-      if (!row) return null;
-      const validConfig = row.configuracao_runtime_modo === "versionado" && Number(row.versao_configuracao) === Number(row.configuracao_ativa_versao)
-        && row.compiled && verifyCompiledTenantRuntimeConfigV2(row.compiled)
-        && row.compiled.empresaId === row.empresa_id && row.compiled.configVersion === Number(row.config_version)
-        && row.compiled.configuration.ai.enabled && row.compiled.configuration.ai.leadQualificationEnabled === true;
-      const allowed = validConfig && row.company_status === "ativa" && !row.company_deleted && row.conversation_status === "aberta"
-        && !row.contact_deleted && !row.blocked && !row.anonimizado_at && !row.contact_paused && !row.redacted_at
-        && row.number_status === "ativo" && !row.number_deleted && row.route_enabled
-        && row.current_group === row.group_id && Number(row.current_revision) === Number(row.route_revision)
-        && row.current_sender === row.sender_phone && row.actual_sender === row.sender_phone;
-      if (!allowed) {
+      const row = await readGroupDelivery(client, uuid(deliveryId));
+      if (!row || row.status !== "pending") return null;
+      if (!groupDeliveryAllowed(row)) {
         await client.query(`UPDATE group_notifier_deliveries SET status='cancelled',error_code='POLICY_CHANGED',updated_at=now() WHERE id=$1`, [deliveryId]);
         return null;
       }
       if (!row.desired || row.phase !== "connected" || !(Date.parse(row.lease_until) > Date.now())) return null;
       await client.query(`UPDATE group_notifier_deliveries SET status='sending',lease_owner=$2,updated_at=now() WHERE id=$1`, [deliveryId, owner]);
-      return row;
+      const multipart = (await client.query("SELECT 1 FROM group_notifier_delivery_parts WHERE delivery_id=$1 LIMIT 1", [deliveryId])).rowCount > 0;
+      return { ...row, multipart };
+    });
+  }
+
+  beginPart(owner, epoch, deliveryId) {
+    return this.platform(async (client) => {
+      await this.fence(client, owner, epoch);
+      const delivery = await readGroupDelivery(client, uuid(deliveryId));
+      if (!delivery || delivery.status !== "sending" || delivery.lease_owner !== owner) return null;
+      if (!delivery.desired || delivery.phase !== "connected" || !(Date.parse(delivery.lease_until) > Date.now())) return null;
+      if (!groupDeliveryAllowed(delivery) || delivery.compiled.configuration.ai.leadImageHandoffEnabled !== true) {
+        await client.query("UPDATE group_notifier_deliveries SET status='cancelled',error_code='POLICY_CHANGED',updated_at=now() WHERE id=$1", [deliveryId]); return null;
+      }
+      const part = (await client.query(`SELECT p.*,m.media_storage_key AS storage_key,m.media_sha256 AS sha256,m.media_mime_type AS mime_type,
+        m.media_size_bytes AS size_bytes,m.redacted_at,m.expires_at,m.conversa_id,m.direcao,m.tipo
+        FROM group_notifier_delivery_parts p LEFT JOIN mensagens m ON m.empresa_id=p.empresa_id AND m.id=p.source_message_id
+        WHERE p.delivery_id=$1 AND p.status='pending' ORDER BY p.position LIMIT 1 FOR UPDATE OF p`, [deliveryId])).rows[0];
+      if (!part) return null;
+      if (part.kind === "image" && (!part.storage_key || !/^[a-f0-9]{64}$/u.test(part.sha256 || "") || part.redacted_at
+        || part.expires_at && Date.parse(part.expires_at) <= Date.now() || part.conversa_id !== delivery.conversa_id
+        || part.direcao !== "entrada" || part.tipo !== "imagem" || !LEAD_IMAGE_MIME_TYPES.includes(part.mime_type))) {
+        await client.query("UPDATE group_notifier_delivery_parts SET status='cancelled',error_code='MEDIA_UNAVAILABLE',updated_at=now() WHERE id=$1", [part.id]);
+        await client.query("UPDATE group_notifier_deliveries SET status='unconfirmed',error_code='MEDIA_UNAVAILABLE',updated_at=now() WHERE id=$1", [deliveryId]); return null;
+      }
+      await client.query("UPDATE group_notifier_delivery_parts SET status='sending',updated_at=now() WHERE id=$1", [part.id]);
+      return part;
+    });
+  }
+
+  canSendPart(owner, epoch, deliveryId, part) {
+    return this.platform(async (client) => {
+      await this.fence(client, owner, epoch);
+      const delivery = await readGroupDelivery(client, uuid(deliveryId));
+      if (!delivery || delivery.status !== "sending" || delivery.lease_owner !== owner || !groupDeliveryAllowed(delivery)
+        || delivery.compiled.configuration.ai.leadImageHandoffEnabled !== true || !delivery.desired || delivery.phase !== "connected"
+        || !(Date.parse(delivery.lease_until) > Date.now())) return false;
+      return (await client.query(`SELECT 1 FROM group_notifier_delivery_parts p LEFT JOIN mensagens m ON m.empresa_id=p.empresa_id AND m.id=p.source_message_id
+        WHERE p.id=$1 AND p.delivery_id=$2 AND p.status='sending' AND (p.kind='summary' OR
+          m.direcao='entrada' AND m.tipo='imagem' AND m.conversa_id=$3 AND m.redacted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>now())
+          AND m.media_storage_key=$4 AND m.media_sha256=$5 AND m.media_mime_type=$6)`,
+      [uuid(part.id), deliveryId, delivery.conversa_id, part.storage_key || null, part.sha256 || null, part.mime_type || null])).rowCount > 0;
+    });
+  }
+
+  completePart(owner, epoch, deliveryId, partId, result) {
+    return this.platform(async (client) => {
+      await this.fence(client, owner, epoch);
+      await client.query(`UPDATE group_notifier_delivery_parts p SET status=$4,message_id=$5,error_code=$6,updated_at=now()
+        FROM group_notifier_deliveries d WHERE p.id=$1 AND d.id=$2 AND p.delivery_id=d.id AND d.lease_owner=$3 AND p.status='sending'`,
+      [uuid(partId), uuid(deliveryId), owner, result.messageId ? "accepted" : "unconfirmed", result.messageId || null, result.messageId ? null : "SEND_UNCONFIRMED"]);
     });
   }
   complete(owner, deliveryId, result) {
-    return this.platform((client) => client.query(`UPDATE group_notifier_deliveries SET status=$3,message_id=$4,error_code=$5,updated_at=now()
-      WHERE id=$1 AND lease_owner=$2 AND status='sending'`, [deliveryId, owner, result.messageId ? "accepted" : "unconfirmed", result.messageId || null, result.messageId ? null : "SEND_UNCONFIRMED"]));
+    return this.platform(async (client) => {
+      const delivery = await readGroupDelivery(client, uuid(deliveryId));
+      if (!delivery || delivery.lease_owner !== owner || delivery.status !== "sending") return;
+      const parts = (await client.query("SELECT status,message_id FROM group_notifier_delivery_parts WHERE delivery_id=$1 ORDER BY position", [deliveryId])).rows;
+      let status = result.messageId ? "accepted" : "unconfirmed", error = result.messageId ? null : "SEND_UNCONFIRMED";
+      if (parts.length) {
+        status = parts.some((part) => ["sending", "unconfirmed", "cancelled"].includes(part.status)) ? "unconfirmed"
+          : parts.some((part) => part.status === "pending") ? "pending" : "accepted";
+        error = status === "unconfirmed" ? "PART_SEND_UNCONFIRMED" : null;
+      }
+      await client.query(`UPDATE group_notifier_deliveries SET status=$3,message_id=$4,error_code=$5,updated_at=now()
+        WHERE id=$1 AND lease_owner=$2 AND status='sending'`, [deliveryId, owner, status, parts.find((part) => part.message_id)?.message_id || result.messageId || null, error]);
+    });
   }
   deferCandidate(owner, epoch, deliveryId) {
     return this.platform(async (client) => {

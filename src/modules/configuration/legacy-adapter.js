@@ -101,6 +101,8 @@ export function adaptLegacyTenantDefinitionToV2(definition, {
       fallbackMessage: legacy.ai?.fallbackMessage || runtime.identity?.fallbackMessage,
       followUpQuestion: legacy.ai?.followUpQuestion,
       ...(legacy.ai?.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: legacy.ai.responseDelayEnabled }),
+      ...(legacy.ai?.contextualServiceEnabled === undefined ? {} : { contextualServiceEnabled: legacy.ai.contextualServiceEnabled }),
+      ...(legacy.ai?.leadImageHandoffEnabled === undefined ? {} : { leadImageHandoffEnabled: legacy.ai.leadImageHandoffEnabled }),
       ...(legacy.ai?.catalogSalesEnabled === undefined ? {} : { catalogSalesEnabled: legacy.ai.catalogSalesEnabled }),
       ...(legacy.ai?.leadIntakeOnlyEnabled === undefined ? {} : { leadIntakeOnlyEnabled: legacy.ai.leadIntakeOnlyEnabled }),
       ...(legacy.ai?.tradeInEvaluationEnabled === undefined ? {} : { tradeInEvaluationEnabled: legacy.ai.tradeInEvaluationEnabled, tradeInEvaluationClosing: legacy.ai.tradeInEvaluationClosing }),
@@ -186,6 +188,8 @@ export function materializeLegacyTenantDefinition(compiled, { payment: paymentBi
     ai: {
       enabled: config.ai.enabled,
       ...(config.ai.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: config.ai.responseDelayEnabled }),
+      ...(config.ai.contextualServiceEnabled === undefined ? {} : { contextualServiceEnabled: config.ai.contextualServiceEnabled }),
+      ...(config.ai.leadImageHandoffEnabled === undefined ? {} : { leadImageHandoffEnabled: config.ai.leadImageHandoffEnabled }),
       ...(config.ai.catalogSalesEnabled === undefined ? {} : { catalogSalesEnabled: config.ai.catalogSalesEnabled }),
       ...(config.ai.leadIntakeOnlyEnabled === undefined ? {} : { leadIntakeOnlyEnabled: config.ai.leadIntakeOnlyEnabled }),
       ...(config.ai.tradeInEvaluationEnabled === undefined ? {} : { tradeInEvaluationEnabled: config.ai.tradeInEvaluationEnabled, tradeInEvaluationClosing: config.ai.tradeInEvaluationClosing }),

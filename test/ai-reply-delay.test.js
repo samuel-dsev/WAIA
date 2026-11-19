@@ -4,7 +4,7 @@ import { createWorkerHandlers } from "../src/modules/jobs/handlers.js";
 import { compileTenantRuntimeConfigV2, materializeLegacyTenantDefinition } from "../src/modules/configuration/index.js";
 import { createJobProcessor, MemoryJobRepository, MemoryLockManager } from "../src/modules/jobs/index.js";
 
-function fixture({ delayMs = 10_000, source = "ai", responseDelayEnabled } = {}) {
+function fixture({ delayMs = 10_000, source = "ai", responseDelayEnabled, contextualServiceEnabled } = {}) {
   let now = Date.parse("2026-10-11T12:00:00Z");
   let prepared = null, aiCalls = 0, draws = 0, allowed = true, failSend = false;
   const conversation = { mode: "bot" };
@@ -15,7 +15,7 @@ function fixture({ delayMs = 10_000, source = "ai", responseDelayEnabled } = {})
     schemaVersion: 2, identity: { name: "Teste" }, modules: ["catalog", "human_handoff", "ai_freeform"],
     menu: { text: "Menu", options: [{ id: "equipe", label: "Equipe", action: "human_handoff.request", params: {} }] },
     routing: { greetings: ["oi"], aliases: [], fallbackAction: "ai_freeform.reply" },
-    ai: { enabled: true, provider: "simulated", model: "test", prompt: "Atenda a empresa", keyMode: "simulated", ...(responseDelayEnabled === undefined ? {} : { responseDelayEnabled }) },
+    ai: { enabled: true, provider: "simulated", model: "test", prompt: "Atenda a empresa", keyMode: "simulated", ...(responseDelayEnabled === undefined ? {} : { responseDelayEnabled }), ...(contextualServiceEnabled === undefined ? {} : { contextualServiceEnabled }) },
   }, { empresaId: "tenant", configVersion: 1, draftVersion: 1 }));
   const repository = {
     async inboundMessage() { return message; }, async statusEvent() {},
@@ -40,11 +40,13 @@ function fixture({ delayMs = 10_000, source = "ai", responseDelayEnabled } = {})
     block() { allowed = false; }, failSend(value) { failSend = value; },
     state: () => ({ prepared, aiCalls, draws }),
     setDelayEnabled(value) { definition.ai.responseDelayEnabled = value; },
+    setContextual(value) { definition.ai.contextualServiceEnabled = value; },
   };
 }
 
-function burstFixture() {
-  const f = fixture({ responseDelayEnabled: false });
+function burstFixture({ initialText, ...options } = {}) {
+  const f = fixture({ responseDelayEnabled: false, ...options });
+  if (initialText) f.message.text = initialText;
   const messages = [{ ...f.message, sequence: 1, at: f.now() }];
   let covered = 0;
   f.dependencies.repository.inboundMessage = async ({ messageId }) => messages.find((item) => item.id === messageId);
@@ -95,6 +97,22 @@ test("turno espera 15 segundos desde a última mensagem e gera uma resposta com 
   // Every following job shares the already answered watermark.
   assert.equal((await f.handler()(last)).resumed, true);
   assert.equal(f.sent.length, 1);
+});
+
+test("modo contextual também agrupa saudação com a pergunta e ignora notificações sem texto", async () => {
+  const f = burstFixture({ contextualServiceEnabled: true, initialText: "oi" });
+  const calls = [];
+  f.dependencies.aiService.reply = async (input) => { calls.push(input); return { text: "Ficamos em Taubaté.", source: "ai" }; };
+  f.add("Qual cidade fica a loja?");
+  assert.ok((await f.handler()(f.reference)).deferUntil);
+  assert.equal(calls.length, 0); f.advance(15_000);
+  assert.equal((await f.handler()(f.reference)).replied, true);
+  assert.deepEqual(calls[0].turnMessages.map((part) => part.text), ["oi", "Qual cidade fica a loja?"]);
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].text, "Ficamos em Taubaté.");
+  const notification = fixture({ contextualServiceEnabled: true });
+  notification.message.type = "system"; notification.message.text = "";
+  assert.deepEqual(await notification.handler()(notification.reference), { skipped: true, reason: "no_customer_content" });
+  assert.equal(notification.state().aiCalls, 0); assert.equal(notification.state().prepared, null); assert.equal(notification.sent.length, 0);
 });
 
 test("mensagem recebida durante inferência descarta o resultado e reprocessa o turno inteiro", async () => {

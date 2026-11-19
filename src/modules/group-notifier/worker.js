@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createWhatsAppWebGroupSession } from "../../integrations/whatsapp-web/group-session.js";
 import { notificationText } from "./qualification.js";
 
-export function createGroupNotifierWorker({ repository, sessionFactory = createWhatsAppWebGroupSession, owner = randomUUID(), clock = () => Date.now(), logger = {} }) {
+export function createGroupNotifierWorker({ repository, mediaStore = null, sessionFactory = createWhatsAppWebGroupSession, owner = randomUUID(), clock = () => Date.now(), logger = {} }) {
   let session = null, epoch = null, busy = false, closed = false, owned = false, nextGroupsAt = 0;
   let activeTick = null, closing = null;
   const pulses = new Set();
-  const codes = new Set(["GROUPS_UNAVAILABLE", "GROUP_UNAVAILABLE", "GROUP_SEND_FORBIDDEN", "NOT_CONNECTED", "NOTIFIER_LEASE_LOST", "SEND_UNCONFIRMED"]);
+  const codes = new Set(["GROUPS_UNAVAILABLE", "GROUP_UNAVAILABLE", "GROUP_SEND_FORBIDDEN", "NOT_CONNECTED", "NOTIFIER_LEASE_LOST", "SEND_UNCONFIRMED", "MEDIA_STORAGE_NOT_CONFIGURED"]);
   const notice = (event, stage, error) => logger.warn?.(event, { stage, code: codes.has(error?.code) ? error.code : "OPERATION_FAILED" });
   async function pulse() {
     if (closed) return;
@@ -57,6 +57,10 @@ export function createGroupNotifierWorker({ repository, sessionFactory = createW
         if (closed || !owned || session?.snapshot().phase !== "connected") return;
         stage = "candidate";
         const candidate = await repository.candidate(owner, epoch); if (!candidate) return;
+        if (candidate.multipart && (typeof mediaStore?.read !== "function" || typeof session.sendImage !== "function")) {
+          notice("group_notifier_media_unavailable", stage, { code: "MEDIA_STORAGE_NOT_CONFIGURED" });
+          await repository.deferCandidate(owner, epoch, candidate.id); return;
+        }
         stage = "group_metadata";
         try { await session.groupMetadata(candidate.group_id); }
         catch (error) {
@@ -70,9 +74,30 @@ export function createGroupNotifierWorker({ repository, sessionFactory = createW
         let result = {};
         stage = "send";
         try {
-          if (!closed && owned && session.snapshot().phase === "connected") result = await session.sendText(delivery.group_id, notificationText({
-            companyName: delivery.company_name, name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
-          }));
+          if (delivery.multipart) {
+            for (let count = 0; count < 20 && !closed && owned && session.snapshot().phase === "connected"; count++) {
+              stage = "begin_part";
+              const part = await repository.beginPart(owner, epoch, candidate.id); if (!part) break;
+              let accepted = {};
+              try {
+                stage = "read_part";
+                const data = part.kind === "image" ? await mediaStore.read({ empresaId: delivery.empresa_id,
+                  storageKey: part.storage_key, expectedSha256: part.sha256 }) : null;
+                stage = "send_part";
+                if (!closed && owned && session.snapshot().phase === "connected" && await repository.canSendPart(owner, epoch, candidate.id, part)) {
+                  accepted = part.kind === "image" ? await session.sendImage(delivery.group_id, {
+                    data, mimeType: part.mime_type, caption: `Imagem enviada pelo lead: ${delivery.name}\nWhatsApp: +${delivery.phone}`,
+                  }) : await session.sendText(delivery.group_id, notificationText({ companyName: delivery.company_name,
+                    name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone }));
+                }
+              } catch { notice("group_notifier_send_unconfirmed", stage, { code: "SEND_UNCONFIRMED" }); }
+              stage = "complete_part";
+              await repository.completePart(owner, epoch, candidate.id, part.id, accepted);
+              if (!accepted.messageId) break;
+            }
+          } else if (!closed && owned && session.snapshot().phase === "connected") result = await session.sendText(delivery.group_id, notificationText({
+              companyName: delivery.company_name, name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
+            }));
         } catch { notice("group_notifier_send_unconfirmed", stage, { code: "SEND_UNCONFIRMED" }); }
         stage = "complete";
         await repository.complete(owner, candidate.id, result);

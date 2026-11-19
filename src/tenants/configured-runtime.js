@@ -261,6 +261,15 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
   });
 
   async function route(input) {
+    if (hasScript && definition.ai?.contextualServiceEnabled === true) {
+      // Service/status notifications carry no customer request. Never answer
+      // them with the configured greeting or manufacture content for the model.
+      if (!String(input?.text || "").trim() && !String(input?.selectionId || "").trim() && input?.type !== "image") {
+        return { source: "deterministic", module: null, code: "NO_CUSTOMER_CONTENT", text: "", buttons: [] };
+      }
+      return router.handle({ ...input, action: "ai_freeform.reply", selectionId: undefined,
+        text: input.text || input.selectionId || "[Imagem recebida; conteúdo visual não analisado]", actionSource: "contextual" });
+    }
     const hasExplicitCommand = Boolean(String(input?.action || input?.selectionId || "").trim());
     if (hasExplicitCommand) return router.handle(input);
     const text = normalized(input?.text);
@@ -296,6 +305,9 @@ export function createConfiguredTenantRuntime({ definition, stateRepository, ...
   async function handle(input) {
     const reply = await route(input);
     if (!websiteCatalog || (!hasWebsiteCatalogLink(reply.text) && !reply.messages?.some((part) => hasWebsiteCatalogLink(part.text)))) return reply;
+    if (hasScript && definition.ai?.contextualServiceEnabled === true) {
+      throw Object.assign(new Error("A resposta contextual contém redirecionamento de catálogo não permitido."), { code: "AI_INVALID_CATALOG_SELECTION" });
+    }
     const { messages, catalogBrowse, websiteInteraction, ...rest } = reply;
     return { ...rest, text: "Posso conferir o estoque com a equipe. Qual modelo ou faixa de preço você prefere?", buttons: [] };
   }
