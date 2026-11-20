@@ -155,6 +155,18 @@ test("contingência única sobrevive à recriação do serviço e não bloqueia 
   assert.equal(next.source, "ai"); assert.equal(next.code, undefined); assert.match(next.text, /Obrigada, Ana/u);
 });
 
+test("dúvida de financiamento após contingência reavalia coleta indevida com motivo explícito", async () => {
+  const entries = [history("assistant", "Posso ajudar com uma simulação. Gostaria?"), history("assistant", CONTEXTUAL_CONTINGENCY)];
+  const answer = "As condições para financiar o valor inteiro dependem da análise dos bancos parceiros. Gostaria de fazer uma simulação?";
+  const f = service(async call => f.factory.requests.length === 1
+    ? response("Para continuar, informe CPF e nascimento.", { ids: [item.id] })
+    : (assert.match(call.instructions, /Não há aceite comprovado de simulação/u),
+      assert.match(call.instructions, /não peça CPF, nascimento ou documentos/u), response(answer)), entries);
+  const reply = await f.ai.reply(request("Quero saber se posso financiar o valor inteiro.", { context: { catalog: { ...catalog, financingSession: null } } }));
+  assert.equal(f.factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.text, answer);
+  assert.equal(reply.code, undefined); assert.equal(reply.leadQualification, undefined); assert.notEqual(reply.websiteInteraction?.step, "finance_accepted");
+});
+
 test("texto genérico repetido pela IA é substituído uma vez e reavaliado sem efeitos", async () => {
   const generic = "Pode confirmar sua resposta para eu continuar?\n\nPode confirmar sua resposta para eu continuar? Gostaria?";
   for (const entries of [[], [history("assistant", CONTEXTUAL_CONTINGENCY)]]) {

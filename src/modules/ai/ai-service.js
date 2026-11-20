@@ -487,7 +487,9 @@ export class MultiTenantAiService {
               || /\b(?:cpf|nascimento)\b[^.!?\n]{0,80}(?:por favor|\?)/iu.test(structured.text));
           if (prematureCollection || websiteCatalog && structured.catalogAction === "finance" && !financingVehicles.length) {
             if (attempt === 0) {
-              ({ response, text } = await requestResponse(true));
+              ({ response, text } = await requestResponse(true, config.contextualServiceEnabled
+                ? "Não há aceite comprovado de simulação para esse veículo. Uma dúvida sobre possibilidade, valor integral ou condições de financiamento não autoriza coleta. Responda à pergunta atual pelo roteiro e contexto, usando catalogAction=none e leadQualification=collecting; não peça CPF, nascimento ou documentos, não conclua ficha e não presuma que o cliente escolheu um modelo. Pode oferecer a simulação como próximo passo, aguardando aceite explícito. Não envie contingência para uma pergunta compreensível."
+                : ""));
               continue;
             }
             if (config.contextualServiceEnabled) throw Object.assign(new Error("Coleta sem aceite contextual."), { code: "AI_INVALID_CATALOG_SELECTION" });
