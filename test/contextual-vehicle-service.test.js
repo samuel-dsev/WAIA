@@ -167,6 +167,27 @@ test("dúvida de financiamento após contingência reavalia coleta indevida com 
   assert.equal(reply.code, undefined); assert.equal(reply.leadQualification, undefined); assert.notEqual(reply.websiteInteraction?.step, "finance_accepted");
 });
 
+test("resposta útil sobre financiamento sobrevive à coleta indevida repetida sem autorizar ações", async () => {
+  const useful = "Financiar o valor inteiro depende da análise dos bancos parceiros.\n\nGostaria de fazer uma simulação?";
+  for (const answer of [useful + " Se sim, informe seu CPF e nascimento.",
+    useful.replaceAll("\n", "\\n") + " Se sim, por favor, me informe seu CPF e data de nascimento."]) {
+    const f = service(async () => response(answer, { ids: [item.id] }), [history("assistant", CONTEXTUAL_CONTINGENCY)]);
+    const reply = await f.ai.reply(request("É possível financiar o valor inteiro sem entrada?", { context: { catalog: { ...catalog, financingSession: null } } }));
+    assert.equal(f.factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.text, useful);
+    assert.equal(reply.code, undefined); assert.equal(reply.leadQualification, undefined); assert.equal(reply.messages, undefined);
+    assert.notEqual(reply.websiteInteraction?.step, "finance_accepted");
+  }
+});
+
+test("retirar coleta não transforma texto vazio ou ficha não comprovada em resposta válida", async () => {
+  for (const answer of ["Informe seu CPF e nascimento.", "Gostaria? Informe seu CPF e nascimento."]) {
+    const f = service(async () => response(answer), [history("assistant", CONTEXTUAL_CONTINGENCY)]);
+    const reply = await f.ai.reply(request("É possível financiar o valor inteiro?", { context: { catalog: { ...catalog, financingSession: null } } }));
+    assert.equal(reply.source, "fallback"); assert.equal(reply.text, ""); assert.equal(reply.code, "AI_CONTINGENCY_ALREADY_SENT");
+    assert.equal(reply.leadQualification, undefined);
+  }
+});
+
 test("texto genérico repetido pela IA é substituído uma vez e reavaliado sem efeitos", async () => {
   const generic = "Pode confirmar sua resposta para eu continuar?\n\nPode confirmar sua resposta para eu continuar? Gostaria?";
   for (const entries of [[], [history("assistant", CONTEXTUAL_CONTINGENCY)]]) {

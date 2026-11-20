@@ -64,6 +64,16 @@ function fallback(config, reason, extra = {}) {
   });
 }
 
+function withoutFinancingDocumentRequests(text) {
+  // Preserve the model's useful answer when only its final data request lacks
+  // consent. Never turn this prose into a finance action or a validated card.
+  const answer = String(text || "").replaceAll("\\n", "\n").split(/\n\s*\n/u)
+    .map(paragraph => paragraph.split(/(?<=[.!?])\s+/u)
+      .filter(sentence => !/\b(?:cpf|nascimento)\b/iu.test(sentence)).join(" ").trim())
+    .filter(Boolean).join("\n\n");
+  return answer && !/^(?:Gostaria|Pode ser)\?$/iu.test(answer) ? answer : null;
+}
+
 export class MultiTenantAiService {
   draftFollowUp(input) { return draftLegacyFollowUp(this, input); }
   constructor({
@@ -492,20 +502,26 @@ export class MultiTenantAiService {
                 : ""));
               continue;
             }
-            if (config.contextualServiceEnabled) throw Object.assign(new Error("Coleta sem aceite contextual."), { code: "AI_INVALID_CATALOG_SELECTION" });
-            structured.catalogAction = "none";
-            const focusIds = selectedIds.length > 0 && selectedIds.length <= 3 ? selectedIds : websiteCatalog.interaction?.productIds || [];
-            const focus = focusIds.length <= 3 ? websiteCatalog.items.filter((item) => focusIds.includes(item.id)) : [];
-            structured.productIds = focus.map((item) => item.id);
-            structured.text = focus.length
-              ? "Sobre " + focus.map((item) => item.name).join(" e ") + ", você quer fazer uma simulação ou tirar outra dúvida?"
-              : "Para quais modelos você quer a simulação?";
-            if (evaluationEnabled && currentEvaluation) {
-              structured.text = "Você prefere enviar fotos para uma análise inicial ou solicitar uma avaliação presencial?";
-              evaluationState = null;
+            if (config.contextualServiceEnabled) {
+              const answer = prematureCollection && structured.catalogAction === "none" && structured.leadQualification?.status === "collecting"
+                ? withoutFinancingDocumentRequests(structured.text) : null;
+              if (!answer) throw Object.assign(new Error("Coleta sem aceite contextual."), { code: "AI_INVALID_CATALOG_SELECTION" });
+              structured.text = answer;
+            } else {
+              structured.catalogAction = "none";
+              const focusIds = selectedIds.length > 0 && selectedIds.length <= 3 ? selectedIds : websiteCatalog.interaction?.productIds || [];
+              const focus = focusIds.length <= 3 ? websiteCatalog.items.filter((item) => focusIds.includes(item.id)) : [];
+              structured.productIds = focus.map((item) => item.id);
+              structured.text = focus.length
+                ? "Sobre " + focus.map((item) => item.name).join(" e ") + ", você quer fazer uma simulação ou tirar outra dúvida?"
+                : "Para quais modelos você quer a simulação?";
+              if (evaluationEnabled && currentEvaluation) {
+                structured.text = "Você prefere enviar fotos para uma análise inicial ou solicitar uma avaliação presencial?";
+                evaluationState = null;
+              }
+              financingVehicles = [];
+              mayQualify = false;
             }
-            financingVehicles = [];
-            mayQualify = false;
           }
           try {
             let card = evaluationQualifies && structured.leadQualification?.status === "qualified"
