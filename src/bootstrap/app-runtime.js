@@ -4,6 +4,7 @@ import { createAccountRouter, createCustomerRouter } from "../modules/accounts/h
 import { startAccountEmailWorker } from "../integrations/email/transport.js";
 import express from "express";
 import helmet from "helmet";
+import { createStaticAssetRouter } from "../operations/static-assets.js";
 import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "node:url";
 import { assertMetricsConfiguration, assertRuntimeConfiguration, config as defaultConfig } from "../config.js";
@@ -581,7 +582,7 @@ export function createApiApp({
     ? createOperationalMetricsCollector({ metrics: runtime.metrics, pool: runtime.pool, queue: runtime.queue, redis: runtime.redis })
     : null;
   app.disable("x-powered-by");
-  app.set("trust proxy", 1);
+  app.set("trust proxy", config.security.trustProxy || false);
   app.use(helmet({
     contentSecurityPolicy: false,
   }));
@@ -623,13 +624,9 @@ export function createApiApp({
     : (_request, response) => response.status(404).end());
   app.get("/privacy", createLegalPageHandler({ file: "privacy.html", config: config.legal }));
   app.get("/data-deletion", createLegalPageHandler({ file: "data-deletion.html", config: config.legal }));
-  app.use("/panel", express.static(panelDirectory, { index: "index.html" }));
+  app.use('/panel', createStaticAssetRouter({ surface: 'panel', directory: panelDirectory }));
   if (runtime.accounts) {
-    app.use('/portal', (_req, res, next) => {
-      res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
-        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
-      next();
-    }, express.static(fileURLToPath(new URL('../../portal', import.meta.url))));
+    app.use('/portal', createStaticAssetRouter({ surface: 'portal', directory: fileURLToPath(new URL('../../portal', import.meta.url)) }));
     const customerApi = express();
     customerApi.set('trust proxy', config.security.trustProxy || false);
     customerApi.use('/account/v1', createAccountRouter({ service: runtime.accounts.service, secure: config.security.cookieSecure }));
