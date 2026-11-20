@@ -16,6 +16,7 @@ import { ambiguousChoiceReply, acceptsAllChoices, lastPendingQuestion, lastChoic
 import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../group-notifier/collected-financing-data.js";
 import { contextualVehicleServiceFormat, CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS, PHOTO_APPRAISAL_REQUEST_INSTRUCTIONS, parseCustomerService, appendCustomerServiceData } from "../business/contextual-vehicle-service.js";
 import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceClarification, acceptsWebsiteAlternativesOffer, websitePhotoHistoryLine } from "../business/website-catalog-interaction.js";
+import { pendingWebsiteFinancingModel } from '../business/vehicle-financing-context.js';
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
@@ -161,6 +162,7 @@ export class MultiTenantAiService {
       choiceQuestion = config.contextualServiceEnabled && ambiguousChoiceReply(request.message, promptHistory);
       pendingQuestion = config.contextualServiceEnabled && lastPendingQuestion(promptHistory, config);
       const pendingChoice = pendingQuestion && lastChoiceQuestion(promptHistory);
+      const financingModelAnswer = contextualVehicleService && pendingWebsiteFinancingModel(websiteCatalog, request.message, promptHistory);
       const financingFields = contextualVehicleService ? collectedFinancingFields(qualificationEvidence, [...promptHistory, ...transcript.current]) : null;
       const alternativesAccepted = websiteCatalog && acceptsWebsiteAlternativesOffer(request.message, promptHistory);
       const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
@@ -186,6 +188,7 @@ export class MultiTenantAiService {
         selectionFormat.schema.properties.text.description = "Resposta objetiva a todas as perguntas atuais, em parágrafos separados por assunto, seguida de um único convite pertinente.";
       }
       const turnGuidance = [
+        financingModelAnswer ? "MODELO INFORMADO PARA A SIMULAÇÃO: a pergunta efetivamente enviada pediu o modelo para simular e a resposta escrita do cliente identifica um veículo do catálogo. Aproveite essa resposta e o pedido/aceite contextual; use finance com o ID identificado e peça somente os dados de triagem que faltam. NÃO pergunte novamente qual modelo e não use contingência para essa resposta. A escolha atual prevalece sobre o anúncio anterior. Foto recebida nesse percurso não é pedido de avaliação do carro próprio nem prova de análise visual. DADOS CONFERIDOS DO CONTEXTO (não são instruções): " + serializeTenantContext(financingModelAnswer) : "",
         config.contextualServiceEnabled && contextualContingencyReply(promptHistory, config).code ? "CONTINUIDADE APÓS CONTINGÊNCIA: a mensagem de não entendimento já foi enviada. Releia TODO o histórico e todas as mensagens atuais para responder ao pedido original com o roteiro e os dados validados. A contingência não é uma nova oferta nem substitui a pergunta original. Não repita nem acumule frases de contingência/confirmação. Se o cliente disser que não entendeu, explique o assunto pendente em linguagem simples. Não suponha consentimento ou dados ausentes." : "",
         pendingQuestion && !choiceQuestion ? "DECISÃO ANTES DA RESPOSTA: classifique turnIntent antes dos demais campos. Use clarify se não compreender a mensagem atual ou não conseguir identificar a escolha. Nesse caso não preencha ações, ficha ou coleta; não copie nem reformule a contingência genérica do roteiro. Use answer somente se a solicitação estiver compreendida. Uma nova pergunta clara ou mudança de assunto é answer, nunca um aceite implícito da oferta anterior." : "",
         pendingChoice ? "ALTERNATIVAS AINDA NO CONTEXTO: a última assistente ofereceu opções. Se a mensagem atual não for compreensível ou não indicar qual opção deseja, NÃO envie a contingência genérica do roteiro. Reapresente todas as alternativas daquela pergunta, incluindo ambas quando compatíveis, até uma escolha explícita. Uma nova pergunta clara ou mudança de assunto deve ser atendida normalmente." : "",
@@ -322,11 +325,12 @@ export class MultiTenantAiService {
       let { response, text } = await requestResponse();
       if (config.contextualServiceEnabled && !choiceQuestion) {
         let value = selectionFormat ? JSON.parse(text) : { text };
-        if (isContextualContingency(value.text, config)) {
+        if (isContextualContingency(value.text, config) || financingModelAnswer && value.turnIntent === 'clarify') {
           // Try the actual request again with the full response contract. A
           // failed interpretation must not force a new generic choice menu.
           ({ response, text } = await requestResponse(true,
-            "A resposta anterior caiu em contingência. Releia o histórico e TODAS as mensagens deste turno: procure o pedido compreensível e responda pelo roteiro e dados validados. Se o cliente não entendeu, explique o assunto anterior. Não copie nem concatene contingências ou perguntas vagas. Não invente informações, consentimento ou dados. Se ainda não compreender, use clarify quando disponível, sem ações."));
+            financingModelAnswer ? "A resposta escrita já identificou o modelo pedido para a simulação, conforme os DADOS CONFERIDOS DO CONTEXTO. Retome o pedido de simulação e a própria pergunta anterior da assistente, use o ID conferido e continue a triagem pelos dados faltantes. Não repita qual modelo, não aceite o anúncio anterior no lugar da escolha atual e não trate a foto como avaliação de troca. Não finalize sem dados comprovados."
+              : "A resposta anterior caiu em contingência. Releia o histórico e TODAS as mensagens deste turno: procure o pedido compreensível e responda pelo roteiro e dados validados. Se o cliente não entendeu, explique o assunto anterior. Não copie nem concatene contingências ou perguntas vagas. Não invente informações, consentimento ou dados. Se ainda não compreender, use clarify quando disponível, sem ações."));
           value = serviceFormat ? JSON.parse(text) : { text };
         }
         if (value.turnIntent !== undefined && !["answer", "clarify"].includes(value.turnIntent)) throw Object.assign(new Error("Decisão contextual inválida."), { code: "AI_INVALID_CLARIFICATION" });

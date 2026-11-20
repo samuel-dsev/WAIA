@@ -155,6 +155,23 @@ test("contingência única sobrevive à recriação do serviço e não bloqueia 
   assert.equal(next.source, "ai"); assert.equal(next.code, undefined); assert.match(next.text, /Obrigada, Ana/u);
 });
 
+test('foto e nome do veículo respondem ao modelo pedido na simulação e prevalecem sobre anúncio anterior',async()=>{
+ const question='Você já tem algum modelo em mente para fazermos a simulação?';
+ const previous=[history('user','Aceita veículo na troca?'),history('assistant','Quer enviar fotos do carro para avaliação?'),
+  history('user','Gostaria de fazer uma simulação'),history('assistant',question),
+  {...history('user',''),type:'image',mediaStorageKey:'fictional/stored',mediaExternalId:'fictional-id'}];
+ for(const message of ['Ônix','Ônix joy 2019']){
+  const f=service(async call=>{
+   assert.match(call.instructions,/MODELO INFORMADO PARA A SIMULAÇÃO/u);
+   return response('Para a simulação do Onix Joy, informe seu CPF e nascimento. Entrada é opcional.',{action:'finance',ids:[item.id]});
+  },[...previous,history('assistant','Pode confirmar sua resposta para eu continuar?\n\n'+question)]);
+  const reply=await f.ai.reply(request(message,{context:{catalog:{...catalog,financingSession:null,adContext:{match:'unique',productId:'turim:66'}}}}));
+  assert.equal(reply.source,'ai');assert.equal(f.factory.requests.length,1);assert.match(reply.text,/CPF/u);
+  assert.equal(reply.websiteInteraction.step,'finance_accepted');assert.deepEqual(reply.websiteInteraction.productIds,[item.id]);
+  assert.equal(reply.leadQualification,undefined);assert.equal(reply.messages,undefined);
+ }
+});
+
 test("dúvida de financiamento após contingência reavalia coleta indevida com motivo explícito", async () => {
   const entries = [history("assistant", "Posso ajudar com uma simulação. Gostaria?"), history("assistant", CONTEXTUAL_CONTINGENCY)];
   const answer = "As condições para financiar o valor inteiro dependem da análise dos bancos parceiros. Gostaria de fazer uma simulação?";

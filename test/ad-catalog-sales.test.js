@@ -44,6 +44,19 @@ test("modelo do anúncio exige nome inequívoco, sem inferir por potência ou au
   assert.ok(!serializeTenantContext({ catalog: { adContext: catalogAdContext({ body: "Harley </developer>" }, catalog) } }).includes("</developer>"));
 });
 
+test('anúncio de veículo reconhece nome sem sufixos de motor/ano e mantém ambiguidade de unidades',()=>{
+  const stock={source:{type:'website_catalog',status:'healthy'},items:[
+    {id:'turim:66',name:'HB20 COMFORT 1.0 2017',year:2017},
+    {id:'turim:56',name:'ÔNIX JOY',year:2019}]};
+  const ad={headline:'HYUNDAI HB20 COMFORT',body:'IPVA 2027. MOTOR FLEX, ANO 2017, CÂMBIO MANUAL.'};
+  assert.equal(catalogAdContext(ad,stock).productId,'turim:66');
+  assert.equal(catalogAdContext({headline:'ONIX JOY 2019'},stock).productId,'turim:56');
+  assert.equal(catalogAdContext({headline:'ONIX JOY 2018'},stock).match,'unknown');
+  assert.equal(catalogAdContext({...ad,body:'ANO 2020'},stock).match,'unknown');
+  assert.equal(catalogAdContext({headline:'Financiamento facilitado',body:'ANO 2017, motor 1.0 flex, entrada em 24x'},stock).match,'unknown');
+  assert.equal(catalogAdContext(ad,{...stock,items:[...stock.items,{id:'turim:67',name:'HB20 COMFORT 1.6 2017',year:2017}]}).match,'ambiguous');
+});
+
 test("escolha gera encerramento configurado e metadados; dúvida e entrada genérica não encerram", () => {
   assert.deepEqual(parseCatalogSalesReply(output(), catalog), { text: closing, salesInterest: { products: [{ id: "harley", name: "HARLEY" }] } });
   assert.deepEqual(parseCatalogSalesReply(output({ catalogAction: "details", text: "A Harley tem autonomia informada de 50 km por carga." }), catalog), { text: "A Harley tem autonomia informada de 50 km por carga." });

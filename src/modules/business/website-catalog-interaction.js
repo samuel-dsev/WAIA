@@ -1,6 +1,7 @@
 import { availableCatalogProducts } from "./catalog-messages.js";
 import { vehicleFactsText } from "../../core/vehicle-facts.js";
 import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion } from "../ai/choice-clarification.js";
+import { pendingWebsiteFinancingModel } from './vehicle-financing-context.js';
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const STEPS = ["list", "gallery", "discussion", "photo_offer", "finance_offer", "finance_accepted", "closed", "declined"];
@@ -188,6 +189,7 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
     || /^(?:nao quero|nao vou|nao preciso)[.! ]*$/u.test(answer)) return false;
   if (catalog.financingSession?.productIds?.includes(productId) || catalog.financingSession?.productId === productId
     || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds.includes(productId)) return true;
+  if (pendingWebsiteFinancingModel(catalog, message, history)?.productIds.includes(productId)) return true;
   if (/\b(?:quero|gostaria|vamos|preciso|aceito|pode(?: me)?|poderia)\b.{0,60}\b(?:simular|simulacao|financiar|financiamento)\b/u.test(answer)) return true;
   const last = history.findLast((item) => item.role === "assistant")?.content || "";
   const offer = catalog.interaction?.step === "finance_offer" && catalog.interaction.direct
