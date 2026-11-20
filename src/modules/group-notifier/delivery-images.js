@@ -3,16 +3,25 @@ import { verifyCompiledTenantRuntimeConfigV2 } from "../configuration/compiler.j
 export const LEAD_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export async function readGroupDelivery(client, id) {
-  return (await client.query(`SELECT d.*,l.name,l.summary,l.qualification,l.phone,l.redacted_at,l.config_version,l.conversa_id,
+  return (await client.query(`SELECT d.*,l.name,coalesce(l.summary,h.summary) AS summary,
+    CASE WHEN h.id IS NOT NULL THEN 'Baixa qualificação — triagem incompleta após follow-up.' ELSE l.qualification END AS qualification,
+    coalesce(l.phone,h.phone) AS phone,coalesce(l.redacted_at,h.redacted_at) AS redacted_at,coalesce(l.config_version,h.config_version) AS config_version,
+    coalesce(l.conversa_id,h.conversa_id) AS conversa_id,
+    (EXISTS(SELECT 1 FROM qualified_leads q WHERE q.empresa_id=h.empresa_id AND q.conversa_id=h.conversa_id)
+      OR EXISTS(SELECT 1 FROM mensagens source WHERE source.empresa_id=h.empresa_id AND source.id=ANY(h.source_message_ids)
+        AND (source.redacted_at IS NOT NULL OR source.expires_at<=now()))) AS superseded,
+    (l.id IS NOT NULL AND EXISTS(SELECT 1 FROM follow_up_cycles f JOIN follow_up_actions a ON a.empresa_id=f.empresa_id AND a.cycle_id=f.id
+      WHERE f.empresa_id=l.empresa_id AND f.conversa_id=l.conversa_id AND a.state='accepted')) AS follow_up_recovered,
     e.nome_exibicao AS company_name,e.status AS company_status,e.deleted_at AS company_deleted,
     e.configuracao_runtime_modo,e.versao_configuracao,e.configuracao_ativa_versao,
     c.status AS conversation_status,ct.deleted_at AS contact_deleted,ct.bloqueado AS blocked,ct.anonimizado_at,
     ct.bot_pausado AS contact_paused,n.status AS number_status,n.deleted_at AS number_deleted,
     r.enabled AS route_enabled,r.group_id AS current_group,r.revision AS current_revision,r.sender_phone AS current_sender,
     s.desired,s.phone AS actual_sender,s.phase,s.lease_until,cr.configuracao_compilada AS compiled
-    FROM group_notifier_deliveries d JOIN qualified_leads l ON l.empresa_id=d.empresa_id AND l.id=d.lead_id
-    JOIN empresas e ON e.id=d.empresa_id JOIN conversas c ON c.empresa_id=l.empresa_id AND c.id=l.conversa_id
-    JOIN contatos ct ON ct.empresa_id=l.empresa_id AND ct.id=l.contato_id
+    FROM group_notifier_deliveries d LEFT JOIN qualified_leads l ON l.empresa_id=d.empresa_id AND l.id=d.lead_id
+    LEFT JOIN follow_up_handoffs h ON h.empresa_id=d.empresa_id AND h.id=d.follow_up_handoff_id
+    JOIN empresas e ON e.id=d.empresa_id JOIN conversas c ON c.empresa_id=d.empresa_id AND c.id=coalesce(l.conversa_id,h.conversa_id)
+    JOIN contatos ct ON ct.empresa_id=d.empresa_id AND ct.id=coalesce(l.contato_id,h.contato_id)
     JOIN numeros_whatsapp n ON n.empresa_id=c.empresa_id AND n.id=c.numero_whatsapp_id
     LEFT JOIN group_notifier_routes r ON r.empresa_id=d.empresa_id JOIN group_notifier_connection s ON s.id
     LEFT JOIN configuracoes_revisoes cr ON cr.empresa_id=e.id AND cr.config_version=e.configuracao_ativa_versao
@@ -23,7 +32,7 @@ export function groupDeliveryAllowed(row) {
   return Boolean(row && row.configuracao_runtime_modo === "versionado" && Number(row.versao_configuracao) === Number(row.configuracao_ativa_versao)
     && row.compiled && verifyCompiledTenantRuntimeConfigV2(row.compiled)
     && row.compiled.empresaId === row.empresa_id && row.compiled.configVersion === Number(row.config_version)
-    && row.compiled.configuration.ai.enabled && row.compiled.configuration.ai.leadQualificationEnabled === true
+    && row.compiled.configuration.ai.enabled && (row.follow_up_handoff_id ? !row.superseded : row.compiled.configuration.ai.leadQualificationEnabled === true)
     && row.company_status === "ativa" && !row.company_deleted && row.conversation_status === "aberta"
     && !row.contact_deleted && !row.blocked && !row.anonimizado_at && !row.contact_paused && !row.redacted_at
     && row.number_status === "ativo" && !row.number_deleted && row.route_enabled

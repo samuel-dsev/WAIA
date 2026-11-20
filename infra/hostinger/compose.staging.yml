@@ -21,6 +21,7 @@ services:
     environment:
       # O default reservado bloqueia administração se a allowlist real faltar.
       ADMIN_NETWORK_ALLOWLIST: ${ADMIN_NETWORK_ALLOWLIST:-192.0.2.1/32}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       DATABASE_POOL_MAX: "5"
       NODE_OPTIONS: "--max-old-space-size=256"
 

@@ -1,3 +1,15 @@
+.follow-up-control { min-width: 0; display: grid; gap: 12px; overflow-wrap: anywhere; }
+#detailDialog:has(.follow-up-control) .dialog-card { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+.follow-up-control :is(input:not([type=checkbox]),select) { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--control-border); border-radius: 8px; padding: 9px; font: inherit; background: var(--surface); color: var(--ink); }
+.follow-up-control label { display: block; }
+.follow-up-control button { white-space: normal; }
+.follow-up-period { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 14px; margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.follow-up-period > input { grid-column: 1 / -1; }
+.follow-up-period > details { grid-column: 1 / -1; min-width: 0; }
+.follow-up-period summary { cursor: pointer; color: var(--muted); }
+.follow-up-period details input { margin-top: 8px; }
+@media(max-width:600px) { .follow-up-period { grid-template-columns: minmax(0,1fr); } }
+
 :root {
   color-scheme: light;
   --ink: #17212b;

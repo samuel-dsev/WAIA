@@ -489,6 +489,9 @@ async function navigate(view, { updateHash = true } = {}) {
 }
 
 function addViewActions(view) {
+  if (['contacts','conversations'].includes(view) && state.selectedEmpresaId && allowed('platform')) {
+    elements.viewActions.append(button('Follow-up da empresa', openCompanyFollowUp, 'button button-secondary'));
+  }
   if (view === "companies" && allowed("platform")) {
     elements.viewActions.append(button("Nova empresa", () => openCreateTenant(), "button button-primary"));
   }
@@ -671,6 +674,15 @@ function rowActions(view, item) {
   const id = item.id || item.empresaId;
   if (view === "conversations") {
     group.append(button("Abrir", () => openConversation(id), "button button-secondary button-small"));
+    group.append(button('Follow-up', () => openConversation(id), 'button button-secondary button-small'));
+  } else if (view === 'contacts') {
+    group.append(button('Follow-up', async () => {
+      try {
+        const payload = await apiFetch(`/tenants/${encodeURIComponent(state.selectedEmpresaId)}/conversations?contactId=${encodeURIComponent(id)}&status=aberta`);
+        const conversation = listFrom(payload)[0];
+        if (conversation) await openConversation(conversation.id); else toast('Nenhuma conversa aberta para este contato.');
+      } catch (error) { toast(error.message); }
+    }, 'button button-secondary button-small'));
   } else if (view === "failedJobs") {
     group.append(button("Analisar", () => openFailedJob(id), "button button-secondary button-small"));
   } else {
@@ -1267,6 +1279,90 @@ function conversationMessage(message) {
   return item;
 }
 
+async function openCompanyFollowUp() {
+  const empresaId = state.selectedEmpresaId;
+  if (!empresaId) return;
+  const mount = node('section');
+  elements.detailTitle.textContent = 'Follow-up da empresa';
+  elements.detailContent.replaceChildren(mount);
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  await mountFollowUp(mount, null, () => elements.detailDialog.open && mount.isConnected && state.selectedEmpresaId === empresaId);
+}
+
+async function mountFollowUp(root, conversationId, current) {
+  root.classList.add('follow-up-control');
+  const empresaId = state.selectedEmpresaId;
+  const base = `/tenants/${encodeURIComponent(empresaId)}`;
+  const path = conversationId ? `${base}/conversations/${encodeURIComponent(conversationId)}/follow-up` : `${base}/follow-up`;
+  root.replaceChildren(paragraph('Carregando follow-up…'));
+  const labels = { pending: 'Agendado', prepared: 'Preparado', started: 'Envio iniciado', accepted: 'Aceito pelo provedor', uncertain: 'Confirmação pendente',
+    cancelled: 'Cancelado', blocked: 'Bloqueado', completed: 'Concluído', awaiting_route: 'Aguardando destino do grupo' };
+  try {
+    const data = await apiFetch(path);
+    if (!current()) return;
+    const hint = paragraph('Novos contatos começam desmarcados. O ciclo começa ao ativar o contato; pausar o bot cancela o ciclo.');
+    const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = data.contact.enabled;
+    const label = nodeWithText('label', ' Ativar follow-up para este contato'); label.prepend(checkbox);
+    checkbox.disabled = !data.settings.enabled && !data.contact.enabled;
+    const result = paragraph(''); result.setAttribute('role','status');
+    const schedule = node('ul');
+    for (const action of data.contact.actions) schedule.append(nodeWithText('li', `${action.isClosure ? 'Fechamento' : `Mensagem ${action.slot + 1}`}: ${new Date(action.dueAt).toLocaleString('pt-BR')} · ${labels[action.state] || action.state}${action.reason === 'APPROVED_TEMPLATE_REQUIRED' ? ' — precisa de template aprovado fora de 24h' : ''}`));
+    if (data.contact.notificationStatus) result.textContent = `Resumo: ${labels[data.contact.notificationStatus] || data.contact.notificationStatus}.`;
+    const company = node('div');
+    if (allowed('platform')) {
+      const enabled = node('input'); enabled.type = 'checkbox'; enabled.checked = data.settings.enabled;
+      const companyLabel = nodeWithText('label', ' Habilitar follow-up da empresa'); companyLabel.prepend(enabled);
+      const profile = node('select'); profile.setAttribute('aria-label','Intervalos do follow-up');
+      for (const [value,text] of [['test','Teste: 2, 5, 10 e 15 minutos · resumo em 20 min'],['standard','Normal: 2h, 1, 2 e 3 dias · resumo no dia 4'],['custom','Períodos personalizados em horas']]) {
+        const option = nodeWithText('option', text); option.value = value; profile.append(option);
+      }
+      profile.value = data.settings.profile;
+      const editorRoot=node('div');
+      let editor=followUpPeriodsEditor(editorRoot,data.settings,()=>{profile.value='custom';});
+      profile.addEventListener('change',()=>{
+        if(profile.value==='custom')return;
+        editor=followUpPeriodsEditor(editorRoot,{periodsHours:profile.value==='test'?[2/60,5/60,10/60,15/60]:[2,24,48,72],closeAfterHours:profile.value==='test'?20/60:96},()=>{profile.value='custom';});
+      });
+      const save = button('Salvar follow-up da empresa', async () => {
+        save.disabled = true;
+        try {
+          await apiFetch(`${base}/follow-up`, { method: 'PUT', body: { enabled: enabled.checked, profile: profile.value, ...editor.read(), expectedVersion: data.settings.version } });
+          if (current()) await mountFollowUp(root, conversationId, current);
+        } catch (e) { if (current()) { result.textContent = e.message; save.disabled = false; } }
+      }, 'button button-secondary button-small');
+      company.append(companyLabel,profile,editorRoot,save,paragraph('Salvar cancela ciclos em andamento. Todos os contatos continuam desmarcados até ativação individual.'));
+    }
+    root.replaceChildren(nodeWithText('h3','Follow-up automático'), ...(conversationId ? [label] : []), hint, schedule, company, result);
+    checkbox.addEventListener('change', async () => {
+      checkbox.disabled = true;
+      try {
+        await apiFetch(path, { method: 'PUT', body: { enabled: checkbox.checked, expectedVersion: data.contact.version } });
+        if (current()) await mountFollowUp(root, conversationId, current);
+      } catch (e) { if (current()) { checkbox.checked = data.contact.enabled; checkbox.disabled = false; result.textContent = e.message; } }
+    });
+  } catch (e) { if (current()) root.replaceChildren(paragraph(e.message || 'Follow-up indisponível.')); }
+}
+
+function followUpPeriodsEditor(root,settings,onEdit){
+  const rows=[],list=node('div'),close=node('input');close.type='number';close.step='any';close.min='0.0166666667';close.value=settings.closeAfterHours;
+  const closeLabel=nodeWithText('label','Fechar ciclo e avaliar resumo após (horas) ');closeLabel.append(close);close.addEventListener('input',onEdit);
+  function add(hour,template=null){
+    const row=node('div','follow-up-period'),input=node('input');input.type='number';input.step='any';input.min='0.0166666667';input.value=hour;input.setAttribute('aria-label','Prazo do follow-up em horas');
+    const label=nodeWithText('label','Após (horas) ');label.append(input);
+    const name=node('input');name.value=template?.name||'';name.placeholder='Template aprovado (opcional)';name.maxLength=512;name.setAttribute('aria-label','Nome do template aprovado');
+    const language=node('input');language.value=template?.language||'pt_BR';language.maxLength=5;language.setAttribute('aria-label','Idioma do template');
+    const item={row,input,name,language};rows.push(item);
+    for(const el of [input,name,language])el.addEventListener('input',onEdit);
+    const advanced=node('details');advanced.append(nodeWithText('summary',template?.name?`Template: ${template.name}`:'Mensagem fora de 24h (opcional)'),name,language);
+    row.append(label,button('Remover período',()=>{rows.splice(rows.indexOf(item),1);row.remove();onEdit();},'button button-secondary button-small'),advanced);list.append(row);
+  }
+  (settings.periodsHours||[]).forEach((h,i)=>add(h,settings.templates?.[i]));
+  const addButton=button('Adicionar período',()=>{if(rows.length>=20)return;const hour=Math.max(0,...rows.map(r=>Number(r.input.value)))+24;add(hour);if(Number(close.value)<=hour)close.value=hour+24;onEdit();},'button button-secondary button-small');
+  root.replaceChildren(paragraph('Prazos desde a ativação. Aceita frações: 0,5 hora = 30 minutos. Até 20 mensagens.'),list,addButton,closeLabel,
+    paragraph('Fora de 24h: template de marketing aprovado com uma variável de texto no corpo. Sem template disponível, o envio fica bloqueado.'));
+  return{read:()=>({periodsHours:rows.map(r=>Number(r.input.value)),closeAfterHours:Number(close.value),templates:rows.map(r=>r.name.value.trim()?{name:r.name.value.trim(),language:r.language.value.trim()}:null)})};
+}
+
 async function openConversation(id) {
   const base = endpointFor(VIEW_DEFINITIONS.conversations);
   if (!base) return;
@@ -1325,7 +1421,9 @@ async function openConversation(id) {
       button("Editar nome", () => editContactName(conversation), "button button-secondary button-small"),
       button("Excluir número", () => forgetContact(conversation), "button button-danger button-small"),
     );
-    content.replaceChildren(details, older, messages, tools, humanMessageComposer(id, conversation));
+    const followUp = node("section");
+    content.replaceChildren(details, older, messages, tools, followUp, humanMessageComposer(id, conversation));
+    void mountFollowUp(followUp, id, current);
   } catch (error) {
     if (current()) content.replaceChildren(paragraph(error.message || "Não foi possível abrir a conversa."));
   }

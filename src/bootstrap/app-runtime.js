@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { FollowUpRepository } from '../modules/follow-up/repository.js';
+import { createFollowUpHandler } from '../modules/follow-up/worker.js';
 import { createAccountsRuntime } from "../modules/accounts/runtime.js";
 import { createAccountRouter, createCustomerRouter } from "../modules/accounts/http.js";
 import { startAccountEmailWorker } from "../integrations/email/transport.js";
@@ -455,6 +457,7 @@ export function createPostgresRuntime({
   });
   return Object.freeze({
     pool,
+    followUpRepository: new FollowUpRepository({ pool }),
     redis,
     logger: runtimeLogger,
     logSink,
@@ -662,6 +665,7 @@ export function createApiApp({
   app.use("/api/admin", adminNetwork, createAdminRouter({
     adminService: runtime.adminService,
     groupNotifierService: runtime.groupNotifierService,
+    followUpRepository: runtime.followUpRepository,
     authenticate: createAuthMiddleware({ authService: runtime.authService }),
     csrf: requireCsrf({ authService: runtime.authService }),
     sensitiveRateLimit: rateLimit({
@@ -704,6 +708,8 @@ export function createWorkerRuntime({
     repository: jobRepository,
     handlers: createWorkerHandlers({
       repository: handlerRepository,
+      followUpRepository: runtime.followUpRepository,
+      followUpHandler: createFollowUpHandler({ repository: runtime.followUpRepository, aiService: runtime.aiService, metaGateway: runtime.metaGateway }),
       conversationService: runtime.conversationService,
       tenantDefinitionRepository: runtime.tenantDefinitionRepository,
       metaGateway: runtime.metaGateway,

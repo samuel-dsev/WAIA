@@ -8,6 +8,7 @@ import { createWhatsAppReplyPayload } from "../../modules/whatsapp/outbound.js";
 import { createYCloudClient } from "../ycloud/client.js";
 import { normalizeYCloudMediaReference } from "../ycloud/media-reference.js";
 import { createHash } from "node:crypto";
+import { approvedFollowUpTemplate, templatePayload } from '../../modules/follow-up/templates.js';
 
 function requiredText(value, field, max = 4096) {
   const text = String(value || "").trim();
@@ -273,5 +274,22 @@ export function createMetaGateway({
     }
   }
 
-  return Object.freeze({ sendReply, sendStatus, markRead: sendStatus, downloadMedia, health });
+  async function readFollowUpTemplate(context, descriptor) {
+    if (!/^[a-z0-9_]{1,512}$/u.test(descriptor?.name || '') || !/^[a-z]{2}(?:_[A-Z]{2})?$/u.test(descriptor?.language || '')) return null;
+    const scoped = await resolve(context), { credentials } = scoped;
+    if (!credentials?.wabaId) return null;
+    const data = credentials.provider === 'ycloud' ? await ycloud.readFollowUpTemplate(credentials, descriptor)
+      : (await request(context, `${credentials.wabaId}/message_templates?name=${encodeURIComponent(descriptor.name)}&fields=name,language,status,category,components&limit=100`, { method: 'GET', operation: 'follow_up_template_read' }, scoped))?.data
+        ?.find(t => t.name === descriptor.name && t.language === descriptor.language);
+    return approvedFollowUpTemplate(data, descriptor, credentials.wabaId);
+  }
+  async function sendFollowUpTemplate(context, { to, template, text }) {
+    const scoped = await resolve(context), { credentials } = scoped;
+    if (!credentials || String(credentials.wabaId) !== template.wabaId) throw new IntegrationError('Template pertence a outro canal.', { code: 'FOLLOW_UP_TEMPLATE_CHANNEL_CHANGED', retryable: false });
+    const payload = templatePayload(template, text);
+    if (credentials.provider === 'ycloud') return ycloud.sendFollowUpTemplate(credentials, { to, template: payload });
+    return request(context, `${credentials.phoneNumberId}/messages`, { method: 'POST', operation: 'follow_up_template_send',
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template: payload }) }, scoped);
+  }
+  return Object.freeze({ sendReply, sendStatus, markRead: sendStatus, downloadMedia, health, readFollowUpTemplate, sendFollowUpTemplate });
 }

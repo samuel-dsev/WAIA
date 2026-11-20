@@ -1,4 +1,5 @@
 import { sanitizeError } from "../../security/redaction.js";
+import { draftLegacyFollowUp } from '../follow-up/ai.js';
 import { assertAiDependencies, normalizeAiConfig, requireAiRequest } from "./contracts.js";
 import {
   allowlistedTenantContext,
@@ -64,6 +65,7 @@ function fallback(config, reason, extra = {}) {
 }
 
 export class MultiTenantAiService {
+  draftFollowUp(input) { return draftLegacyFollowUp(this, input); }
   constructor({
     configResolver,
     conversationService,

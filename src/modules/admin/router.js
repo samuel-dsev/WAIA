@@ -1,11 +1,12 @@
 import express from "express";
+import { createFollowUpRouter } from '../follow-up/http.js';
 import { publicAdminError } from "./errors.js";
 
 const asyncRoute = (handler) => async (request, response, next) => {
   try { await handler(request, response); } catch (error) { next(error); }
 };
 
-export function createAdminRouter({ adminService, groupNotifierService = null, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
+export function createAdminRouter({ adminService, groupNotifierService = null, followUpRepository = null, authenticate, csrf, sensitiveRateLimit = (_request, _response, next) => next() } = {}) {
   const router = express.Router();
   router.use(authenticate);
   router.use((request, _response, next) => {
@@ -13,6 +14,7 @@ export function createAdminRouter({ adminService, groupNotifierService = null, a
     return csrf(request, _response, next);
   });
   router.get("/session", (request, response) => response.json(adminService.session(request.auth)));
+  if (followUpRepository) router.use(createFollowUpRouter({ repository: followUpRepository }));
   if (groupNotifierService) {
     const action = (method) => asyncRoute(async (req, res) => { res.set("Cache-Control", "private, no-store"); res.json(await method(req)); });
     router.get("/group-notifier", action((req) => groupNotifierService.status(req.auth)));

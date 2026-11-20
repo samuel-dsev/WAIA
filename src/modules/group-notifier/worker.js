@@ -88,7 +88,8 @@ export function createGroupNotifierWorker({ repository, mediaStore = null, sessi
                   accepted = part.kind === "image" ? await session.sendImage(delivery.group_id, {
                     data, mimeType: part.mime_type, caption: `Imagem enviada pelo lead: ${delivery.name}\nWhatsApp: +${delivery.phone}`,
                   }) : await session.sendText(delivery.group_id, notificationText({ companyName: delivery.company_name,
-                    name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone }));
+                    name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
+                    followUpRecovered: delivery.follow_up_recovered === true }));
                 }
               } catch { notice("group_notifier_send_unconfirmed", stage, { code: "SEND_UNCONFIRMED" }); }
               stage = "complete_part";
@@ -97,6 +98,7 @@ export function createGroupNotifierWorker({ repository, mediaStore = null, sessi
             }
           } else if (!closed && owned && session.snapshot().phase === "connected") result = await session.sendText(delivery.group_id, notificationText({
               companyName: delivery.company_name, name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
+              followUpHandoff: Boolean(delivery.follow_up_handoff_id), followUpRecovered: delivery.follow_up_recovered === true,
             }));
         } catch { notice("group_notifier_send_unconfirmed", stage, { code: "SEND_UNCONFIRMED" }); }
         stage = "complete";

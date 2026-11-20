@@ -192,6 +192,15 @@ export class PostgresGroupNotifierRepository {
       await client.query(`UPDATE qualified_leads l SET name=NULL,summary=NULL,qualification=NULL,phone=NULL,redacted_at=now()
         FROM empresas e WHERE e.id=l.empresa_id AND l.redacted_at IS NULL
         AND l.created_at<now()-make_interval(days=>e.retencao_mensagens_dias)`);
+      await client.query(`UPDATE follow_up_handoffs h SET summary=NULL,phone=NULL,redacted_at=now() FROM empresas e
+        WHERE e.id=h.empresa_id AND h.redacted_at IS NULL AND h.created_at<now()-make_interval(days=>e.retencao_mensagens_dias)`);
+      // A missing route leaves a durable pending card. When the operator enables
+      // the route through the panel, the same card can be delivered once.
+      await client.query(`INSERT INTO group_notifier_deliveries(empresa_id,follow_up_handoff_id,group_id,route_revision,sender_phone)
+        SELECT h.empresa_id,h.id,r.group_id,r.revision,r.sender_phone FROM follow_up_handoffs h
+        JOIN group_notifier_routes r ON r.empresa_id=h.empresa_id AND r.enabled
+        WHERE h.redacted_at IS NULL AND NOT EXISTS(SELECT 1 FROM group_notifier_deliveries d WHERE d.empresa_id=h.empresa_id AND d.follow_up_handoff_id=h.id)
+        ON CONFLICT DO NOTHING`);
       return (await client.query(`SELECT d.id,d.group_id,EXISTS(SELECT 1 FROM group_notifier_delivery_parts p WHERE p.delivery_id=d.id) AS multipart
         FROM group_notifier_deliveries d WHERE d.status='pending' AND d.available_at<=now() ORDER BY d.created_at,d.id LIMIT 1`)).rows[0] || null;
     });

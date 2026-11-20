@@ -55,5 +55,15 @@ export function createYCloudClient({ fetchImpl = globalThis.fetch, timeoutMs = 1
     if (status !== "read" || typeof messageId !== "string" || !messageId || messageId.length > 512) throw new TypeError("Status de leitura inválido.");
     return request(credentials.accessToken, `whatsapp/inboundMessages/${encodeURIComponent(messageId)}/markAsRead`, {});
   }
-  return Object.freeze({ checkConnection, sendReply, markRead });
+  async function readFollowUpTemplate(credentials, { name, language }) {
+    return request(credentials.accessToken, `whatsapp/templates/${encodeURIComponent(credentials.wabaId)}/${encodeURIComponent(name)}/${encodeURIComponent(language)}`);
+  }
+  async function sendFollowUpTemplate(credentials, { to, template }) {
+    const data = await request(credentials.accessToken, 'whatsapp/messages/sendDirectly', {
+      from: phone(credentials.phoneNumber), to: phone(to), type: 'template', template,
+    });
+    if (data.error || data.status === 'failed' || !data.wamid) throw new IntegrationError('Envio de template não confirmado.', { code: 'YCLOUD_TEMPLATE_UNCONFIRMED', retryable: false });
+    return { messages: [{ id: data.wamid }] };
+  }
+  return Object.freeze({ checkConnection, sendReply, markRead, readFollowUpTemplate, sendFollowUpTemplate });
 }

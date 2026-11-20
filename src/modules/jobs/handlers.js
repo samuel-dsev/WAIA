@@ -1,4 +1,5 @@
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
+import { handleFollowUpDecline } from '../follow-up/decline.js';
 import { createRuntimeStateRepository } from "../business/repositories.js";
 import { createConfiguredTenantRuntime } from "../../tenants/configured-runtime.js";
 import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
@@ -486,6 +487,8 @@ export function createWorkerHandlers({
   appointmentRepository,
   handoffRepository,
   flowRepository,
+  followUpRepository,
+  followUpHandler,
   mediaStore,
   googleSheetsIntegration,
   logger = console,
@@ -543,6 +546,10 @@ export function createWorkerHandlers({
     message = await storeMedia(message);
     if (message.type === "image" && message.mediaStorageKey && conversation.mode !== "bot") {
       await repository.queueLeadImages?.({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id });
+    }
+    if (followUpRepository && message.type === 'text') {
+      const declined = await handleFollowUpDecline(followUpRepository, { empresaId: reference.empresaId, message, metaGateway, canContinue: execution.canContinue });
+      if (declined) return declined;
     }
     if (conversation.mode !== "bot") {
       await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
@@ -872,6 +879,7 @@ export function createWorkerHandlers({
   }
 
   return Object.freeze({
+    process_follow_up: (reference, record, execution) => followUpHandler?.(reference, record, execution) || { skipped: true },
     process_inbound_message: processInboundMessage,
     apply_whatsapp_status: applyWhatsappStatus,
     send_human_message: sendHumanMessage,

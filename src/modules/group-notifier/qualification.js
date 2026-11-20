@@ -74,6 +74,8 @@ export function qualificationContinuation(text, validationReason) {
   return "Qual é o principal ponto sobre o qual você busca orientação?";
 }
 
-export function notificationText({ companyName, name, summary, qualification, phone }) {
+export function notificationText({ companyName, name, summary, qualification, phone, followUpHandoff = false, followUpRecovered = false }) {
+  if (followUpHandoff) return `FOLLOW-UP — BAIXA QUALIFICAÇÃO — ${companyName}\n\nTriagem incompleta: cliente interagiu além da mensagem inicial e não concluiu a coleta.\nInteresse/contexto informado: ${summary}\nQualificação: baixa, por dados insuficientes; silêncio não comprova desinteresse.\nWhatsApp: +${phone}\n\nAnálise humana disponível. Não há promessa de retorno ao cliente.`;
+  if (followUpRecovered) return `TRIAGEM CONCLUÍDA — BOA QUALIFICAÇÃO — ${companyName}\n\nNome: ${name}\nInformações coletadas: ${summary}\nQualificação: ${qualification}\nWhatsApp: +${phone}\n\nCliente retomou após follow-up. Triagem para análise humana.`;
   return `NOVO LEAD QUALIFICADO — ${companyName}\n\nNome: ${name}\nResumo do caso: ${summary}\nQualificação: ${qualification}\nWhatsApp: +${phone}\n\nTriagem para análise humana.`;
 }

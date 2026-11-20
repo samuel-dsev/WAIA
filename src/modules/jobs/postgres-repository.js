@@ -108,6 +108,7 @@ export class PostgresJobRepository {
                  AND current_job.conversa_id IS NOT NULL
                  AND (earlier.created_at, earlier.id) < (current_job.created_at, current_job.id)
                  AND earlier.status NOT IN ('concluido', 'falhou')
+                 AND earlier.job_type <> 'process_follow_up'
             )
         RETURNING current_job.*`,
         [reference.empresaId, reference.jobId, attempt, leaseMs],
