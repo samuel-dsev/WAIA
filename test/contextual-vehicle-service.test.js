@@ -9,6 +9,7 @@ import { parseCatalogSalesReply } from "../src/modules/business/catalog-sales.js
 import { matchesWebsiteGalleryPart, websiteCatalogListText } from "../src/modules/business/website-catalog-interaction.js";
 import { replyFromRow, websiteListFormatMetadata } from "../src/modules/jobs/reply-batch.js";
 import { notificationText } from "../src/modules/group-notifier/qualification.js";
+import { CONTEXTUAL_CONTINGENCY } from "../src/modules/ai/choice-clarification.js";
 
 const noDownPayment = { status: "not_informed", amount: null, evidence: null };
 const noWarranty = { status: "none", requestEvidence: null, offerEvidence: null, consentEvidence: null };
@@ -62,12 +63,12 @@ test("aceite vago de opções chama IA apenas para esclarecer e repete até esco
   assert.equal(reply.source, "ai"); assert.equal(reply.websiteInteraction.step, "finance_accepted");
 });
 
-test("contingência de opções usa pergunta original mesmo se IA falhar e não executa efeitos", async () => {
+test("falha usa somente a nova contingência, sem pergunta concatenada ou efeitos", async () => {
   const offer = "Você prefere fotos do veículo ou uma simulação?";
   for (const responder of [async () => { throw Error("falha fictícia"); }, async () => response("Envie CPF.", { action: "finance", ids: [item.id] })]) {
     const { ai } = service(responder, [history("assistant", offer)], { contingencyMessage: "CONTINGÊNCIA GENÉRICA ANTIGA" });
     const result = await ai.reply(request("sim"));
-    assert.equal(result.source, "fallback"); assert.ok(result.text.includes(offer));
+    assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_CONTINGENCY);
     assert.doesNotMatch(result.text, /GENÉRICA|CPF/u);
     for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(result[key], undefined);
   }
@@ -86,14 +87,14 @@ test("escolher ambas envia fotos e preserva simulação aceita; não escolhe amb
   assert.equal(result.leadQualification, undefined);
 });
 
-test("contingência da IA diante de resposta inesperada é reavaliada com a pergunta pendente", async () => {
+test("contingência da IA é reavaliada com o contrato completo para responder ao pedido pelo contexto", async () => {
   const generic = "Não entendi. Você procura qual assunto?";
-  const question = "Você quer fotos, simulação ou as duas?";
+  const answer = "Podemos verificar a simulação sem entrada, sujeita à análise dos bancos parceiros.";
   const { ai, factory } = service(async (call) => factory.requests.length === 1 ? response(generic)
-    : (assert.equal(call.text.format.name, "choice_clarification"), { output_text: JSON.stringify({ text: question }) }),
+    : (assert.ok(call.text.format.schema.properties.customerService), response(answer)),
   [history("assistant", "Gostaria das fotos ou de uma simulação?")], { contingencyMessage: generic });
-  const result = await ai.reply(request("asdfg"));
-  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai"); assert.equal(result.text, question);
+  const result = await ai.reply(request("É possível financiar o valor inteiro?"));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai"); assert.equal(result.text, answer);
   assert.equal(result.websiteInteraction, undefined); assert.equal(result.leadQualification, undefined);
 });
 
@@ -109,8 +110,69 @@ test("decisão de esclarecer é tomada antes dos efeitos; reavaliação não ult
     ? response("Envie CPF.", { action: "products", ids: [item.id] })
     : { output_text: JSON.stringify({ ...JSON.parse(response("Qual opção?").output_text), turnIntent: "clarify" }) }, [history("assistant", offer)]);
   const blocked = await retry.ai.reply(request("asdfg"));
-  assert.equal(retry.factory.requests.length, 2); assert.equal(blocked.source, "fallback"); assert.ok(blocked.text.includes(offer));
+  assert.equal(retry.factory.requests.length, 2); assert.equal(blocked.source, "fallback"); assert.equal(blocked.text, CONTEXTUAL_CONTINGENCY);
   assert.equal(blocked.messages, undefined); assert.equal(blocked.leadQualification, undefined);
+});
+
+test("histórico da repetição preserva perguntas sobre financiamento e permite explicar e finalizar", async () => {
+  const entries = [history("assistant", "Se desejar, posso ajudar com a simulação de financiamento para algum deles. Gostaria?"),
+    history("user", "Poderia ver meu cpf\nÉ possível financiar valor inteiro"),
+    history("assistant", "Pode confirmar sua resposta para eu continuar?\n\nGostaria?"),
+    history("user", "Poderia fazer branco"),
+    history("assistant", "Pode confirmar sua resposta para eu continuar?\n\nPode confirmar sua resposta para eu continuar? Gostaria?")];
+  const answer = "Para financiar o valor inteiro, a proposta precisa passar pela análise dos bancos parceiros. Podemos simular em até 60 parcelas.";
+  const explained = service(async (call) => {
+    assert.ok(call.text.format.schema.properties.customerService);
+    assert.match(call.instructions, /CONTINUIDADE APÓS CONTINGÊNCIA/u);
+    assert.match(JSON.stringify(call.input), /financiar valor inteiro/u);
+    return response(answer);
+  }, entries);
+  const reply = await explained.ai.reply(request("Não entendi"));
+  assert.equal(reply.text, answer); assert.equal(reply.source, "ai"); assert.equal(explained.factory.requests.length, 1);
+  assert.equal(reply.code, undefined); assert.equal(reply.leadQualification, undefined);
+  const closing = "Obrigada, Ana! Um vendedor retornará sobre a simulação do Onix.";
+  const completed = service(async () => response(closing, { action: "finance", ids: [item.id], qualification: lead }),
+    [...entries, history("user", "Não entendi"), history("assistant", answer), history("user", "Quero simular o Onix Joy"),
+      history("assistant", "Informe seu CPF e nascimento. Como posso te chamar?")]);
+  const result = await completed.ai.reply(request("Ana Teste. CPF 00000000000. Nascimento 01011990."));
+  assert.equal(result.source, "ai"); assert.equal(result.text, closing);
+  assert.equal(result.leadQualification.name, "Ana Teste"); assert.equal(result.websiteInteraction.step, "closed");
+});
+
+test("contingência única sobrevive à recriação do serviço e não bloqueia resposta útil posterior", async () => {
+  const entries = [history("assistant", "Como posso te chamar?")];
+  const first = service(async () => { throw Error("falha fictícia"); }, entries);
+  const initial = await first.ai.reply(request("asdfg"));
+  assert.equal(initial.text, CONTEXTUAL_CONTINGENCY);
+  entries.push(history("user", "asdfg"), history("assistant", initial.text), history("user", "qwerty"));
+  const restarted = service(async () => { throw Error("falha fictícia"); }, entries);
+  const repeated = await restarted.ai.reply(request("zxcv"));
+  assert.equal(restarted.factory.requests.length, 1, "A IA continua sendo consultada.");
+  assert.equal(repeated.text, ""); assert.equal(repeated.code, "AI_CONTINGENCY_ALREADY_SENT");
+  for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(repeated[key], undefined);
+  const recovered = service(async () => response("Obrigada, Ana. Informe seu CPF e nascimento.", { action: "finance", ids: [item.id] }), entries);
+  const next = await recovered.ai.reply(request("Ana Teste, desculpe não me apresentei."));
+  assert.equal(next.source, "ai"); assert.equal(next.code, undefined); assert.match(next.text, /Obrigada, Ana/u);
+});
+
+test("texto genérico repetido pela IA é substituído uma vez e reavaliado sem efeitos", async () => {
+  const generic = "Pode confirmar sua resposta para eu continuar?\n\nPode confirmar sua resposta para eu continuar? Gostaria?";
+  for (const entries of [[], [history("assistant", CONTEXTUAL_CONTINGENCY)]]) {
+    const { ai, factory } = service(async () => response(generic, { action: "products", ids: [item.id], qualification: lead }), entries);
+    const reply = await ai.reply(request("asdfg"));
+    assert.equal(factory.requests.length, 2);
+    assert.equal(reply.text, entries.length ? "" : CONTEXTUAL_CONTINGENCY);
+    assert.equal(reply.code, entries.length ? "AI_CONTINGENCY_ALREADY_SENT" : undefined);
+    for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(reply[key], undefined);
+  }
+});
+
+test("contingência não entregue não impede a primeira mensagem e quota não a duplica", async () => {
+  const unsent = service(async () => { throw Error("falha fictícia"); }, [{ ...history("assistant", CONTEXTUAL_CONTINGENCY), status: "failed" }]);
+  assert.equal((await unsent.ai.reply(request("asdfg"))).text, CONTEXTUAL_CONTINGENCY);
+  const limited = service(async () => assert.fail("Quota esgotada não chama provedor."), [history("assistant", CONTEXTUAL_CONTINGENCY)], { monthlyTokenLimit: 1 });
+  const reply = await limited.ai.reply(request("asdfg"));
+  assert.equal(reply.reason, "monthly_limit"); assert.equal(reply.code, "AI_CONTINGENCY_ALREADY_SENT"); assert.equal(reply.text, "");
 });
 
 test("modo contextual atravessa compilação e envia saudações, aliases, menu e escolhas para IA", async () => {
@@ -511,10 +573,10 @@ test("nome mal extraído é reprocessado semanticamente antes de pedir de novo",
   assert.equal(factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.leadQualification.name, "Caio");
 });
 
-test("falha ao processar resposta em frase conserva a pergunta implícita, não o menu genérico", async () => {
+test("falha na pergunta implícita usa a frase única solicitada, sem menu ou pergunta anexada", async () => {
   const { ai } = service(async () => { throw Error("falha fictícia"); }, [history("assistant", "Para continuar, só preciso saber como posso te chamar, por favor.")]);
   const result = await ai.reply(request("Não entendi direito"));
-  assert.equal(result.source, "fallback"); assert.match(result.text, /como posso te chamar/iu); assert.doesNotMatch(result.text, /estoque|pós-venda|modelo que procura/iu);
+  assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_CONTINGENCY);
   assert.equal(result.leadQualification, undefined);
 });
 

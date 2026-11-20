@@ -194,6 +194,7 @@ export function createTenantRuntimeRouter({
       module: command.module.key,
       text: outcome.reply?.text || "",
       buttons: outcome.reply?.buttons || [],
+      ...(outcome.reply?.code === "AI_CONTINGENCY_ALREADY_SENT" ? { code: outcome.reply.code } : {}),
       ...(outcome.reply?.messages ? { messages: outcome.reply.messages } : {}),
       ...(outcome.reply?.catalogBrowse ? { catalogBrowse: outcome.reply.catalogBrowse } : {}),
       ...(outcome.reply?.websiteInteraction ? { websiteInteraction: outcome.reply.websiteInteraction } : {}),

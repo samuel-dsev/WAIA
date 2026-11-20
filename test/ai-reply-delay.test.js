@@ -238,6 +238,17 @@ test("resposta determinística e contingência não recebem espera de IA", async
   assert.equal(f.state().draws, 0);
 });
 
+test("worker não prepara nem envia contingência repetida e continua atendendo depois", async () => {
+  const f = fixture({ contextualServiceEnabled: true });
+  f.dependencies.aiService.reply = async () => ({ text: "", source: "fallback", code: "AI_CONTINGENCY_ALREADY_SENT" });
+  assert.deepEqual(await f.handler()(f.reference), { skipped: true, reason: "ai_contingency_already_sent" });
+  assert.equal(f.state().prepared, null); assert.equal(f.sent.length, 0);
+  f.dependencies.aiService.reply = async () => ({ text: "Resposta pelo contexto", source: "ai" });
+  f.setDelayEnabled(false);
+  assert.equal((await f.handler()({ ...f.reference, jobId: "next" })).replied, true);
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].text, "Resposta pelo contexto");
+});
+
 test("worker libera lock e slot durante a espera, preservando ordem sem consumir falhas", async () => {
   const f = fixture();
   const repository = new MemoryJobRepository({ now: f.now }); repository.seed(f.reference);

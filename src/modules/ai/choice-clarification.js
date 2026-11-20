@@ -1,10 +1,31 @@
 const normalize = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 
+export const CONTEXTUAL_CONTINGENCY = "Não entendi, pode ser mais claro na sua solicitação?";
+const contingencyPhrases = /(?:Não entendi, pode ser mais claro na sua solicitação\?|Pode confirmar sua resposta para eu continuar\?|Pode confirmar qual opção você deseja\?\s*Se desejar mais de uma opção, me diga quais\.)/giu;
+const deliveredBody = (part) => String(part?.content || "").split("\n[Em resposta à mensagem:")[0].trim();
+
+export function isContextualContingency(text, config = {}) {
+  return String(text || "").search(contingencyPhrases) >= 0 || isConfiguredContingency(text, config);
+}
+
+export function contextualContingencyReply(history, config = {}) {
+  const previous = history.findLast((part) => part.role === "assistant");
+  // Delivered history is the checkpoint: no process-local flag or tenant state.
+  return isContextualContingency(deliveredBody(previous), config)
+    ? { text: "", code: "AI_CONTINGENCY_ALREADY_SENT" }
+    : { text: CONTEXTUAL_CONTINGENCY };
+}
+
 /** Only delivered assistant text from the conversation loader is eligible.
  * Keep the offered choices verbatim rather than reconstructing a sales scenario. */
-export function lastPendingQuestion(history) {
-  let body = String(history.findLast((part) => part.role === "assistant")?.content || "")
-    .split("\n[Em resposta à mensagem:")[0].trim();
+export function lastPendingQuestion(history, config = {}) {
+  const index = history.findLastIndex((part) => part.role === "assistant");
+  if (index < 0) return null;
+  const original = deliveredBody(history[index]);
+  let body = original.replace(contingencyPhrases, "").trim();
+  if (!body || isConfiguredContingency(body, config) || isContextualContingency(original, config) && /^(?:Gostaria\?|Pode ser\?)$/iu.test(body)) {
+    return lastPendingQuestion(history.slice(0, index), config);
+  }
   const end = body.lastIndexOf("?");
   if (end >= 0 && /^(?:por favor[, ]+)?(?:me (?:informe|diga)|aguardo)\b/iu.test(body.slice(end + 1).trim())) body = body.slice(0, end + 1);
   if (!body.endsWith("?")) {
@@ -16,7 +37,10 @@ export function lastPendingQuestion(history) {
   }
   const sentences = body.split(/(?<=[.!?])\s+|\n\s*\n/u);
   const statement = sentences.findLastIndex((sentence) => !sentence.trim().endsWith("?"));
-  const question = sentences.slice(statement + 1).join(" ").trim();
+  let question = sentences.slice(statement + 1).join(" ").trim();
+  // A bare invitation needs its actual proposal, e.g. "Posso ajudar com a
+  // simulação de financiamento para algum deles. Gostaria?".
+  if (/^(?:Gostaria|Pode ser)\?$/iu.test(question) && statement >= 0) question = sentences.slice(statement).join(" ").trim();
   if (!question || question.length > 1000) return null;
   return question;
 }
@@ -58,12 +82,6 @@ export function parseChoiceClarification(text) {
     throw Object.assign(new Error("Esclarecimento de opções inválido."), { code: "AI_INVALID_CLARIFICATION" });
   }
   return { text: value.text.trim() };
-}
-
-export function choiceClarificationFallback(question) {
-  return (lastChoiceQuestion([{ role: "assistant", content: question }])
-    ? "Pode confirmar qual opção você deseja? Se desejar mais de uma opção, me diga quais."
-    : "Pode confirmar sua resposta para eu continuar?") + "\n\n" + question;
 }
 
 export function isConfiguredContingency(text, config) {

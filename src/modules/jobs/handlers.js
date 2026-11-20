@@ -716,6 +716,7 @@ export function createWorkerHandlers({
         return { skipped: true, reason: "handoff_cooldown" };
       }
       if (reply.code === "NO_CUSTOMER_CONTENT") return { skipped: true, reason: "no_customer_content" };
+      if (reply.code === "AI_CONTINGENCY_ALREADY_SENT") return { skipped: true, reason: "ai_contingency_already_sent" };
       if (generatedByAi) {
         if (typeof repository.prepareReply !== "function") throw permanent("Persistência da resposta da IA não configurada.", "BOT_REPLY_CHECKPOINT_REQUIRED");
         const delayMs = !inboundTurn && responseDelayEnabled ? aiReplyDelayMs() : 0;
