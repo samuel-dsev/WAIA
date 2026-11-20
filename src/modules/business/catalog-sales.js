@@ -1,5 +1,6 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
 import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification, WEBSITE_CATALOG_LIST_FORMAT_VERSION, CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION, validCatalogContinuation } from "./website-catalog-interaction.js";
+import { isPropertyCatalog, propertyFilters, realEstateSalesFormat, parseRealEstateReply } from './real-estate-catalog.js';
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -17,15 +18,18 @@ function filters(value) {
 
 export function normalizeCatalogBrowseState(value) {
   if (value == null) return null;
-  if (!plain(value) || !Array.isArray(value.seenProductIds) || value.seenProductIds.length > 100
+  const realEstate = plain(value?.filters) && Object.hasOwn(value.filters, 'operation');
+  const maxItems = realEstate ? 500 : 100;
+  if (!plain(value) || !Array.isArray(value.seenProductIds) || value.seenProductIds.length > maxItems
     || value.seenProductIds.some((id) => typeof id !== "string" || !id || id.length > 200)) throw invalid();
-  if (value.presentedProductIds != null && (!Array.isArray(value.presentedProductIds) || value.presentedProductIds.length > 100
+  if (value.presentedProductIds != null && (!Array.isArray(value.presentedProductIds) || value.presentedProductIds.length > maxItems
     || value.presentedProductIds.some((id) => typeof id !== "string" || !id || id.length > 200))) throw invalid();
-  return { filters: filters(value.filters), seenProductIds: [...new Set(value.seenProductIds)],
+  return { filters: realEstate ? propertyFilters(value.filters) : filters(value.filters), seenProductIds: [...new Set(value.seenProductIds)],
     ...(value.presentedProductIds != null ? { presentedProductIds: [...new Set(value.presentedProductIds)] } : {}) };
 }
 
 export function catalogSalesFormat(catalog) {
+  if (isPropertyCatalog(catalog)) return realEstateSalesFormat(catalog);
   const products = availableCatalogProducts(catalog);
   if (!["google_sheets", "website_catalog"].includes(catalog?.source?.type)
     || catalog.source.status !== "healthy" || !products.length) return null;
@@ -164,6 +168,7 @@ export function websiteCatalogBudget(message) {
 }
 
 export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabled = false, contextualServiceEnabled = false, message } = {}) {
+  if (isPropertyCatalog(catalog)) return parseRealEstateReply(output, catalog);
   let value;
   try { value = JSON.parse(output); } catch { throw invalid(); }
   const products = availableCatalogProducts(catalog), byId = new Map(products.map((item) => [item.id, item]));

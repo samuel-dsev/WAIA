@@ -767,6 +767,9 @@ export function parseTenantRuntimeConfigV2(input) {
     integrations: parseIntegrations(object.integrations, "/integrations"),
   };
 
+  if (parsed.integrations.filter(item => item.enabled && ['website_catalog', 'real_estate_catalog'].includes(item.type)).length > 1) {
+    fail('CATALOG_SOURCE_CONFLICT', '/integrations', 'Selecione uma única fonte de catálogo de site por empresa.');
+  }
   if (enabled.has("payments") && !parsed.payments.credentialRef) {
     fail("PAYMENT_CREDENTIAL_REFERENCE_REQUIRED", "/payments/credentialRef", "Pagamentos exigem uma referência de credencial.");
   }

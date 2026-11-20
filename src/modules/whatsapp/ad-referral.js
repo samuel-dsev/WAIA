@@ -15,7 +15,12 @@ export function catalogAdContext(value, catalog, { current = false } = {}) {
   const referral = normalizeAdReferral(value);
   if (!referral) return null;
   const copy = words(`${referral.headline || ""} ${referral.body || ""}`);
-  const matches = (catalog?.items || []).filter((item) => item.active !== false && item.name && words(item.name).trim().length >= 3 && copy.includes(words(item.name)));
+  const references = catalog?.source?.type === 'real_estate_catalog'
+    ? [...new Set([...`${referral.headline || ''} ${referral.body || ''}`.matchAll(/\b(?:ref(?:er[eê]ncia)?|c[oó]digo|im[oó]vel)\s*[:#-]?\s*([1-9]\d*)\b/giu)].map(match => match[1]))] : [];
+  if (references.length > 1) return { referral, current, match: 'ambiguous', productId: null };
+  const reference = references[0];
+  const matches = (catalog?.items || []).filter((item) => item.active !== false && (reference ? item.reference === reference
+    : item.name && words(item.name).trim().length >= 3 && copy.includes(words(item.name))));
   return { referral, current, match: matches.length === 1 ? "unique" : matches.length ? "ambiguous" : "unknown",
     productId: matches.length === 1 ? matches[0].id : null };
 }

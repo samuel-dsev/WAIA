@@ -13,12 +13,14 @@ const galleryQuestion = "Você gostou desse veículo?";
 const normalize = (text) => String(text || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/gu, " ");
 
 export function normalizeWebsiteInteraction(value) {
+  const propertyIds = Array.isArray(value?.productIds) && value.productIds.some(id => /^imo:filaretti:[1-9]\d*$/u.test(id));
   if (!value || !STEPS.includes(value.step) || !Array.isArray(value.productIds)
     || value.productIds.length < 1 || value.productIds.length > 100
     || (["photo_offer", "finance_offer"].includes(value.step) && value.productIds.length !== 1)
     || (value.step !== "list" && value.productIds.length > 3)
     || new Set(value.productIds).size !== value.productIds.length
-    || value.productIds.some((id) => typeof id !== "string" || !/^turim:[1-9]\d*$/u.test(id))) return null;
+    || propertyIds && !['list', 'gallery', 'discussion'].includes(value.step)
+    || value.productIds.some((id) => typeof id !== "string" || !(propertyIds ? /^imo:filaretti:[1-9]\d*$/u : /^turim:[1-9]\d*$/u).test(id))) return null;
   return { step: value.step, productIds: [...value.productIds] };
 }
 

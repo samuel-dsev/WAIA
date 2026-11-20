@@ -1,6 +1,7 @@
 import { withTenantTransaction } from "../infra/postgres/transaction.js";
 import { catalogFromProductsCache } from "../integrations/google-sheets/products-snapshot.js";
 import { websiteCatalogFromCache } from "../integrations/website-catalog/stock.js";
+import { realEstateCatalogFromCache } from "../integrations/real-estate-catalog/source.js";
 import {
   materializeLegacyTenantDefinition,
   verifyCompiledTenantRuntimeConfigV2,
@@ -85,6 +86,19 @@ async function loadGoogleSheetsProducts(client, empresaId, publishedIntegrations
   return row ? catalogFromProductsCache(row) : null;
 }
 
+export async function loadRealEstateCatalog(client, empresaId, publishedIntegrations) {
+  const bindings = publishedIntegrations?.filter(({ type, enabled }) => enabled && type === 'real_estate_catalog') || [];
+  if (!bindings.length) return null;
+  if (bindings.length !== 1) return realEstateCatalogFromCache();
+  const binding = bindings[0].id, reference = binding.replace(/^integration:/u, '');
+  const id = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(reference) ? reference : null;
+  if (!id && binding.startsWith('integration:')) return realEstateCatalogFromCache();
+  const { rows: [row] } = await client.query(`SELECT status, cache_snapshot, last_success_at FROM integracoes
+    WHERE empresa_id = $1 AND tipo = 'real_estate_catalog' AND habilitada AND deleted_at IS NULL
+      AND ($2::uuid IS NULL OR id = $2)`, [empresaId, id]);
+  return realEstateCatalogFromCache(row);
+}
+
 export async function loadWebsiteCatalog(client, empresaId) {
   const { rows: [row] } = await client.query(
     `SELECT status, cache_snapshot, last_success_at FROM integracoes
@@ -153,7 +167,8 @@ async function loadVersionedDefinition(client, company, empresaId, paymentResolv
   const sheetProducts = compiled.configuration.modules.includes("catalog") || usesGoogleSheetsAgenda(compiled)
     ? await loadGoogleSheetsProducts(client, empresaId, compiled.configuration.integrations) : null;
   const catalog = compiled.configuration.modules.includes("catalog")
-    ? await loadWebsiteCatalog(client, empresaId) || sheetProducts : null;
+    ? await loadRealEstateCatalog(client, empresaId, compiled.configuration.integrations)
+      || await loadWebsiteCatalog(client, empresaId) || sheetProducts : null;
   const usesAgenda = !sheetProducts && usesGoogleSheetsAgenda(compiled);
   if (!usesAgenda && !catalog) return definition;
   const events = usesAgenda ? await loadGoogleSheetsEvents(client, company, empresaId) : null;

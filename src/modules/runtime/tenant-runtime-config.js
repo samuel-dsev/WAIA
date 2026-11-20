@@ -1,6 +1,8 @@
 import { MODULE_KEYS } from "../../core/contracts.js";
 import { WEBSITE_CATALOG_TEXT_MAX_LENGTH } from "../../core/catalog-limits.js";
 import { websiteVehicleFacts } from "../../core/vehicle-facts.js";
+import { propertyFacts } from "../../core/property-facts.js";
+import { propertyUrl, propertyImageUrl } from "../../integrations/real-estate-catalog/source.js";
 import { parseFlowDefinition } from "../flows/index.js";
 
 const MODULE_SET = new Set(MODULE_KEYS);
@@ -81,12 +83,13 @@ function parseMenuOption(value, path, enabledModules) {
   };
 }
 
-function parseCatalogItem(value, path, website = false) {
+function parseCatalogItem(value, path, website = false, realEstate = false) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} deve ser um objeto.`);
   return {
     id: stringId(value.id, `${path}.id`),
     name: requiredText(value.name, `${path}.name`, { max: 160 }),
-    description: optionalText(value.description, `${path}.description`, { max: website ? WEBSITE_CATALOG_TEXT_MAX_LENGTH : 500 }),
+    description: optionalText(value.description, `${path}.description`, { max: website || realEstate ? WEBSITE_CATALOG_TEXT_MAX_LENGTH : 500 }),
+    ...(realEstate ? { ...propertyFacts(value), url: propertyUrl(value.url) } : {}),
     ...(website ? websiteVehicleFacts(value) : {}),
     ...(website && value.introduction != null ? { introduction: optionalText(value.introduction, `${path}.introduction`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
     ...(website && value.details != null ? { details: optionalText(value.details, `${path}.details`, { max: WEBSITE_CATALOG_TEXT_MAX_LENGTH }) } : {}),
@@ -99,9 +102,9 @@ function parseCatalogItem(value, path, website = false) {
     ...(value.autonomyKm != null ? { autonomyKm: finiteAmount(value.autonomyKm, `${path}.autonomyKm`) } : {}),
     ...(value.availability ? { availability: requiredText(value.availability, `${path}.availability`, { max: 20 }) } : {}),
     ...(value.units ? { units: list(value.units, `${path}.units`, (unit, unitPath) => requiredText(unit, unitPath, { max: 100 }), { max: 20 }) } : {}),
-    ...(value.imageUrl ? { imageUrl: requiredText(value.imageUrl, `${path}.imageUrl`, { max: 2000 }) } : {}),
+    ...(value.imageUrl ? { imageUrl: realEstate ? propertyImageUrl(value.imageUrl, value.reference) : requiredText(value.imageUrl, `${path}.imageUrl`, { max: 2000 }) } : {}),
     ...(value.model ? { model: requiredText(value.model, `${path}.model`, { max: 160 }) } : {}),
-    ...(value.imageUrls ? { imageUrls: list(value.imageUrls, `${path}.imageUrls`, (url, urlPath) => requiredText(url, urlPath, { max: 2000 }), { max: 100 }) } : {}),
+    ...(value.imageUrls ? { imageUrls: list(value.imageUrls, `${path}.imageUrls`, (url, urlPath) => realEstate ? propertyImageUrl(url, value.reference) : requiredText(url, urlPath, { max: 2000 }), { max: 100 }) } : {}),
   };
 }
 
@@ -174,7 +177,7 @@ export function parseTenantRuntimeConfig(input) {
   const options = list(input.menu?.options, "menu.options", (option, path) => parseMenuOption(option, path, enabledSet), { max: 30 });
   unique(options, (option) => option.id, "menu.options");
 
-  const items = list(input.catalog?.items, "catalog.items", (item, path) => parseCatalogItem(item, path, input.catalog?.source?.type === "website_catalog"));
+  const items = list(input.catalog?.items, "catalog.items", (item, path) => parseCatalogItem(item, path, input.catalog?.source?.type === "website_catalog", input.catalog?.source?.type === "real_estate_catalog"));
   const events = list(input.events?.items, "events.items", parseEvent);
   const services = list(input.appointments?.services, "appointments.services", parseService);
   const flows = list(input.flows?.definitions, "flows.definitions", (definition) => parseFlowDefinition(definition), { max: 100 });
@@ -206,7 +209,7 @@ export function parseTenantRuntimeConfig(input) {
     },
     catalog: {
       items,
-      ...(["google_sheets", "website_catalog"].includes(input.catalog?.source?.type) ? { source: {
+      ...(["google_sheets", "website_catalog", "real_estate_catalog"].includes(input.catalog?.source?.type) ? { source: {
         type: input.catalog.source.type,
         status: input.catalog.source.status === "healthy" ? "healthy" : "unavailable",
         lastSyncedAt: optionalText(input.catalog.source.lastSyncedAt, "catalog.source.lastSyncedAt", { max: 80 }),

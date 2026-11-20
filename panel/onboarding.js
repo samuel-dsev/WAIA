@@ -691,7 +691,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
       },
       integration: {
         title: "integração", target: state.configuration.integrations,
-        schema: [{ name: "name", label: "Nome", required: true }, { name: "type", label: "Tipo", type: "select", options: [["google_sheets", "Google Sheets"], ["webhook", "Webhook administrado"], ["other", "Outro conector"]] }, { name: "enabled", label: "Ativa", type: "checkbox" }, { name: "required", label: "Obrigatória para operar", type: "checkbox" }],
+        schema: [{ name: "name", label: "Nome", required: true }, { name: "type", label: "Tipo", type: "select", options: [["google_sheets", "Google Sheets"], ["real_estate_catalog", "Catálogo imobiliário do site"], ["webhook", "Webhook administrado"], ["other", "Outro conector"]] }, { name: "enabled", label: "Ativa", type: "checkbox" }, { name: "required", label: "Obrigatória para operar", type: "checkbox" }],
         make: (v) => ({ id: current?.id || slug(v.name, "integracao"), credentialRefs: current?.credentialRefs || [], ...v }),
       },
     };

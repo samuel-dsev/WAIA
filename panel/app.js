@@ -1,4 +1,4 @@
-import { createOnboardingWizard } from "./onboarding.js";
+import { createOnboardingWizard } from "./onboarding.js?v=1.27.0";
 import { renderGroupNotifier } from "./group-notifier.js";
 import { createAttendanceScriptEditor, scriptSaveRequest } from "./attendance-script.js";
 
@@ -919,6 +919,7 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
   const integrations = listFrom(integrationPayload);
   const googleSheetsIntegration = integrations.find((integration) => integration.type === "google_sheets");
   const websiteCatalog = integrations.find((integration) => integration.type === "website_catalog");
+  const realEstateCatalog = integrations.find(integration => integration.type === 'real_estate_catalog');
   for (const integration of integrations) {
     integrationList.append(nodeWithText("dt", integration.name || integration.provider || "Integração"), valueNode(integration.health || integration.status, "status"));
     if (integration.type === "google_sheets") {
@@ -948,6 +949,18 @@ function settingsForm(modulePayload, aiPayload, integrationPayload, runtimePaylo
     websiteActions.append(button("Habilitar sincronização", () => configureWebsiteCatalog(base, websiteCatalog), actionClass));
   }
   integrationList.append(websiteActions);
+  integrationList.append(nodeWithText('dt', 'Catálogo imobiliário do site'));
+  const propertyActions = node('dd');
+  if (!realEstateCatalog) propertyActions.append(button('Adicionar integração imobiliária', () => configureRealEstateCatalog(base), actionClass));
+  else if (realEstateCatalog.enabled) propertyActions.append(
+    button('Ver imóveis sincronizados', () => openRealEstateCatalog(base), actionClass),
+    button('Pausar sincronização imobiliária', async () => {
+      if (!await confirmAction('Os imóveis deixarão de ser oferecidos até a sincronização ser reativada.', 'Pausar sincronização')) return;
+      await performMutation(`${base}/integrations/${encodeURIComponent(realEstateCatalog.id)}`, { method: 'PATCH',
+        body: { enabled: false, status: 'desabilitada' }, success: 'Sincronização imobiliária pausada.' });
+    }, actionClass));
+  else propertyActions.append(button('Habilitar sincronização imobiliária', () => configureRealEstateCatalog(base, realEstateCatalog), actionClass));
+  integrationList.append(propertyActions);
   if (!googleSheetsIntegration) {
     if (!integrationList.children.length) integrationList.append(nodeWithText("dt", "Estado"), valueNode("not_configured", "status"));
     integrationList.append(
@@ -1029,6 +1042,51 @@ function openPaymentCredential() {
       success: "Chave PIX cadastrada no cofre. O valor não será exibido novamente.",
     });
   });
+}
+
+function configureRealEstateCatalog(base, integration) {
+  openFormDialog('Catálogo imobiliário do site', [['name', 'Nome da integração', 'text', true]], async ({ name }) => {
+    const path = `${base}/integrations`;
+    await apiFetch(integration ? `${path}/${encodeURIComponent(integration.id)}` : path, {
+      method: integration ? 'PATCH' : 'POST', body: {
+        ...(integration ? {} : { type: 'real_estate_catalog', requiredForConfirmation: false, configuration: {} }),
+        name, enabled: true, status: 'nao_configurada',
+      },
+    });
+    await loadCurrentView();
+    return () => openRealEstateCatalog(base, { sync: true });
+  }, { name: integration?.name || 'Catálogo imobiliário do site' });
+}
+
+async function openRealEstateCatalog(base, { sync = false } = {}) {
+  const path = `${base}/integrations/real-estate-catalog`;
+  elements.detailTitle.textContent = 'Catálogo imobiliário do site';
+  const content = node('div'), status = paragraph(sync ? 'Sincronizando o catálogo público…' : 'Carregando…');
+  status.setAttribute('role', 'status'); content.append(status);
+  elements.detailContent.replaceChildren(content);
+  if (!elements.detailDialog.open) elements.detailDialog.showModal();
+  try {
+    const result = sync ? await apiFetch(`${path}/sync`, { method: 'POST', body: {} }) : null;
+    const stock = await apiFetch(`${path}/stock`);
+    content.append(paragraph(`Fonte: ${stock.sourceUrl}`));
+    status.textContent = stock.health === 'healthy' ? `${stock.items.length} imóvel(is) · atualizado em ${formatDate(stock.lastSyncedAt)}`
+      : stock.health === 'not_configured' ? 'Integração desabilitada.' : 'O catálogo está indisponível; imóveis desatualizados não serão oferecidos.';
+    if (result?.errorCode) status.append(` (${result.errorCode})`);
+    const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }), list = node('ul');
+    for (const item of stock.items) {
+      const row = node('li'), link = nodeWithText('a', `Ref. ${item.reference} — ${item.name}`);
+      link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      row.append(link, paragraph([item.propertySubtype, item.neighborhood, item.city].filter(Boolean).join(' · ')));
+      for (const [operation, field, label] of [['sale', 'salePrice', 'Venda'], ['rent', 'rentPrice', 'Aluguel mensal'], ['seasonal', 'seasonalPrice', 'Temporada']]) {
+        if (item.operations.includes(operation)) row.append(paragraph(`${label}: ${item[field] == null ? 'Sob consulta' : money.format(item[field])}`));
+      }
+      row.append(paragraph(`${item.imageUrls?.length || 0} foto(s) · ${item.description || 'Descrição não informada'}`));
+      list.append(row);
+    }
+    if (stock.items.length) content.append(list);
+  } catch (error) { status.textContent = error.message || 'Não foi possível ler o catálogo imobiliário.'; }
+  content.append(button('Sincronizar imóveis agora', () => openRealEstateCatalog(base, { sync: true }), 'button button-secondary'));
+  if (sync && content.isConnected) await loadCurrentView();
 }
 
 function configureWebsiteCatalog(base, integration) {

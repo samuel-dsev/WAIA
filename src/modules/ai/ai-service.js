@@ -9,6 +9,7 @@ import {
 import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, catalogSalesInstructions, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
+import { isPropertyCatalog, REAL_ESTATE_SALES_INSTRUCTIONS } from '../business/real-estate-catalog.js';
 import { loadConversationContext } from "./conversation-context.js";
 import { ambiguousChoiceReply, acceptsAllChoices, lastPendingQuestion, lastChoiceQuestion, isConfiguredContingency, clarificationAwareFormat, choiceClarificationFormat, parseChoiceClarification, choiceClarificationFallback } from "./choice-clarification.js";
 import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../group-notifier/collected-financing-data.js";
@@ -134,11 +135,12 @@ export class MultiTenantAiService {
         ? { ...suppliedContext, catalog: { ...suppliedContext.catalog, interestHandoff: { enabled: false, message: "" } } }
         : suppliedContext;
       const websiteCatalog = safeContext.catalog?.source?.type === "website_catalog" ? safeContext.catalog : null;
+      const realEstateCatalog = isPropertyCatalog(safeContext.catalog) ? safeContext.catalog : null;
       const websiteDetails = websiteCatalog && asksForWebsiteVehicleDetails(request.message);
       const contextualVehicleService = config.contextualServiceEnabled && websiteCatalog && qualifies && !intakeOnly;
       let financingVehicles = [];
       const evaluationEnabled = config.tradeInEvaluationEnabled && qualifies && !intakeOnly;
-      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: evaluationEnabled || Boolean(contextualVehicleService) });
+      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: evaluationEnabled || Boolean(contextualVehicleService) || Boolean(realEstateCatalog && config.contextualServiceEnabled) });
       const photoHandoff = { photosHandoffEnabled: config.leadImageHandoffEnabled && evaluationEnabled, storedPhotos: transcript.storedPhotos };
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       const promptHistory = transcript.input;
@@ -149,7 +151,9 @@ export class MultiTenantAiService {
       const alternativesAccepted = websiteCatalog && acceptsWebsiteAlternativesOffer(request.message, promptHistory);
       const photoHistoryLine = websiteCatalog ? websitePhotoHistoryLine(websiteCatalog) : "";
       // The model selects an exact ID. Only the runtime needs the gallery URLs.
-      const modelContext = websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
+      const modelContext = realEstateCatalog ? { ...safeContext, catalog: { ...realEstateCatalog,
+        items: realEstateCatalog.items.map(({ imageUrl, imageUrls, ...item }) => ({ ...item, photoCount: imageUrls?.length || (imageUrl ? 1 : 0) })),
+      } } : websiteCatalog ? { ...safeContext, catalog: { ...websiteCatalog,
         items: websiteCatalog.items.map(({ imageUrl, imageUrls, introduction, details, vehicleFactsSources, vehicleFactsWarnings, ...item }) => item),
       } } : safeContext;
       const contextContent = `TENANT_DATA_START\n${serializeTenantContext(modelContext)}\nTENANT_DATA_END`;
@@ -190,7 +194,7 @@ export class MultiTenantAiService {
         + (photoHandoff.photosHandoffEnabled ? "\nEXCEÇÃO DE AVALIAÇÃO POR FOTOS: fotos armazenadas e nome informado permitem concluir em photos_received. Essa regra substitui a orientação anterior de manter coleta por fotos. Reconheça o recebimento, aproveite o nome conhecido e encerre conforme o modelo, sem exigir modelo de compra, visita ou financiamento. Responda antes a qualquer outra pergunta atual." : "")
         + (turnGuidance ? "\n" + turnGuidance : "")
         + (contextualVehicleService ? "\nReavalie também customerService com evidências literais, a entrada opcional, o aceite específico de contato sobre garantia e o encerramento natural em text. Se o cliente já aceitou contato sobre garantia e depois informou o nome, preserve o aceite ORIGINAL: warranty.status=accepted, offerEvidence e consentEvidence copiam aquela oferta e aquele aceite completos. Não volte a offered porque a mensagem atual contém somente o nome. Se não houve aceite, mantenha collecting e não anuncie retorno. Não use finance para encerrar um pedido de garantia; não exija dados de financiamento nesse encaminhamento. Em browse/more/products, text deve conter a continuidade contextual, sem repetir as fichas. Se não houver unidades ou fotos compatíveis, use none e responda naturalmente." : "");
-      const instructions = [buildInstructions(config), catalogFormat ? salesMode ? catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
+      const instructions = [buildInstructions(config), catalogFormat ? salesMode ? realEstateCatalog ? REAL_ESTATE_SALES_INSTRUCTIONS : catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
         catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",
@@ -386,7 +390,7 @@ export class MultiTenantAiService {
               "O cliente escolheu explicitamente FOTOS E SIMULAÇÃO. Não deixe uma solicitação pendente sem orientação. Use products com os IDs corretos para enviar primeiro as fotos; text será a legenda da última imagem e deve pedir CPF e data de nascimento para a simulação já aceita, com a entrada opcional conforme o roteiro. Não pergunte novamente se aceita simular e não diga somente que vai enviar fotos. Não finalize sem nome e dados."));
             continue;
           }
-          if (config.contextualServiceEnabled && websiteCatalog && structured.catalogAction === "products"
+          if (config.contextualServiceEnabled && (websiteCatalog || realEstateCatalog) && structured.catalogAction === "products"
             && !hasWebsitePhotoConsent(request.message, promptHistory)) {
             if (attempt === 0) { ({ response, text } = await requestResponse(true)); continue; }
             throw Object.assign(new Error("Galeria sem pedido ou aceite de fotos."), { code: "AI_INVALID_CATALOG_SELECTION" });
@@ -459,7 +463,7 @@ export class MultiTenantAiService {
               "CPF e nascimento já foram fornecidos para a simulação aceita. A entrada é opcional e não pode ser perguntada novamente nem adiar a ficha. Reavalie os critérios com os dados do histórico: se o nome já foi informado, conclua leadQualification como qualified com a ficha completa e o encerramento do roteiro; se faltar somente o nome, pergunte apenas como pode chamar. Sem declaração de entrada, registre Cliente não informou sobre valores de entrada. Responda primeiro a qualquer outra solicitação atual. Não use texto pronto de contingência."));
             continue;
           }
-          let mayQualify = !websiteCatalog && !currentEvaluation || financingVehicles.length > 0
+          let mayQualify = !websiteCatalog && !(realEstateCatalog && ['browse', 'more', 'products'].includes(structured.catalogAction)) && !currentEvaluation || financingVehicles.length > 0
             || (evaluationQualifies || customerService?.warrantyAccepted) && !websitePresentation && (!websiteDetails || customerService?.warrantyAccepted);
           const prematureCollection = websiteCatalog && !financingVehicles.length && !websitePresentation
             && (/\b(?:informe|envie|manda?|passe|diga|preciso|me fale|qual(?: é)?)\b[^.!?\n]{0,100}\b(?:cpf|nascimento)\b/iu.test(structured.text)
@@ -565,7 +569,7 @@ export class MultiTenantAiService {
           if (!leadQualification && !qualificationIssue && !structured.text.trim() && !catalogFormat) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
           delete structured.leadQualification;
           parsedText = catalogFormat && !qualificationIssue ? JSON.stringify(structured) : structured.text.trim();
-          if (websiteCatalog && salesMode && !leadQualification && !qualificationIssue) {
+          if ((websiteCatalog || realEstateCatalog) && salesMode && !leadQualification && !qualificationIssue) {
             try {
               validatedCatalogReply = parseCatalogSalesReply(parsedText, safeContext.catalog, { leadQualificationEnabled: qualifies, contextualServiceEnabled: config.contextualServiceEnabled, message: request.message });
             } catch (error) {

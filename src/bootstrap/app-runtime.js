@@ -107,6 +107,7 @@ import {
 import { GoogleSheetsClient } from "../google-sheets.js";
 import { startIntegrationSyncScheduler } from "../integrations/google-sheets/sync-runner.js";
 import { WebsiteCatalogIntegration } from "../integrations/website-catalog/integration.js";
+import { RealEstateCatalogIntegration } from '../integrations/real-estate-catalog/integration.js';
 import { createYCloudClient } from "../integrations/ycloud/client.js";
 import QRCode from "qrcode";
 import { PostgresGroupNotifierRepository } from "../modules/group-notifier/postgres-repository.js";
@@ -167,6 +168,7 @@ export function createOnboardingPreflightProbes({
   metaHealthService,
   googleSheetsIntegration,
   websiteCatalogIntegration,
+  realEstateCatalogIntegration,
   credentialVault,
   sharedOpenAiKey,
   environment,
@@ -177,6 +179,10 @@ export function createOnboardingPreflightProbes({
     if (target.type === "website_catalog" && websiteCatalogIntegration) {
       const result = await websiteCatalogIntegration.read(empresaId);
       return { success: !signal.aborted && result.health === "healthy" };
+    }
+    if (target.type === 'real_estate_catalog' && realEstateCatalogIntegration) {
+      const result = await realEstateCatalogIntegration.read(empresaId);
+      return { success: !signal.aborted && result.health === 'healthy' };
     }
     if (target.type !== "google_sheets") return { success: false };
     const result = await googleSheetsIntegration.health({ empresaId, signal });
@@ -287,6 +293,7 @@ export function createPostgresRuntime({
     : null;
   const googleSheetsConfigurationResolver = new PostgresGoogleSheetsConfigurationResolver(pool);
   const websiteCatalogIntegration = new WebsiteCatalogIntegration({ pool, logger: runtimeLogger });
+  const realEstateCatalogIntegration = new RealEstateCatalogIntegration({ pool, logger: runtimeLogger });
   const googleSheetsSnapshotMapper = new PostgresGoogleSheetsSnapshotMapper(pool);
   const googleSheetsIntegration = createGoogleSheetsIntegration({
     configurationResolver: googleSheetsConfigurationResolver,
@@ -321,6 +328,7 @@ export function createPostgresRuntime({
       metaHealthService,
       googleSheetsIntegration,
       websiteCatalogIntegration,
+      realEstateCatalogIntegration,
       credentialVault,
       sharedOpenAiKey: config.openai.apiKey,
       environment: config.environment,
@@ -378,6 +386,7 @@ export function createPostgresRuntime({
     mediaStore,
     googleSheetsIntegration,
     websiteCatalogIntegration,
+    realEstateCatalogIntegration,
     metaAppRepository,
     metaHealthService,
   });
@@ -469,6 +478,7 @@ export function createPostgresRuntime({
     googleSheetsIntegration,
     googleSheetsConfigurationResolver,
     websiteCatalogIntegration,
+    realEstateCatalogIntegration,
   });
 }
 
@@ -747,6 +757,9 @@ export function createWorkerRuntime({
   const websiteCatalog = startIntegrationSyncScheduler(runtime.websiteCatalogIntegration, {
     integration: "website_catalog", intervalMs: 120_000, logger,
   });
+  const realEstateCatalog = startIntegrationSyncScheduler(runtime.realEstateCatalogIntegration, {
+    integration: 'real_estate_catalog', intervalMs: 300_000, logger,
+  });
   const heartbeat = startWorkerHeartbeat(runtime.redis, {
     intervalMs: config.maintenance.heartbeatIntervalMs,
     ttlMs: config.maintenance.heartbeatTtlMs,
@@ -767,6 +780,7 @@ export function createWorkerRuntime({
       await retention.close();
       await googleSheets.close();
       await websiteCatalog.close();
+      await realEstateCatalog.close();
       await heartbeat.close();
       await worker.close();
       await runtime.queue.close();

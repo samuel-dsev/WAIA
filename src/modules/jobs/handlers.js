@@ -16,7 +16,20 @@ import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
 import { matchesWebsiteGalleryPart, normalizeWebsiteInteraction, pendingWebsiteFinancingSession, websiteCatalogListText, websiteCatalogSelectionPrompt, normalizeWebsiteListFormatVersion, validCatalogContinuation } from "../business/website-catalog-interaction.js";
 import { loadWebsiteCatalog } from "../../tenants/postgres-config-loader.js";
 
+import { isRealEstateCatalogPart, canDispatchRealEstateReply } from './real-estate-dispatch.js';
+
 async function canDispatchWebsiteReply(client, empresaId, part) {
+  if (isRealEstateCatalogPart(part)) {
+    let payload = part;
+    // The stable worker hydrates parts separately. Recover the parent/query
+    // checkpoint before revalidating captions, including partial-batch retries.
+    if (part.id) {
+      const { rows: [row] } = await client.query('SELECT corpo,outbound_payload FROM mensagens WHERE empresa_id=$1 AND id=$2', [empresaId, part.id]);
+      if (!row || row.corpo !== part.text) return false;
+      payload = row.outbound_payload;
+    }
+    return canDispatchRealEstateReply(client, empresaId, { outbound_payload: payload, corpo: part.text });
+  }
   const productId = part.catalogProductId;
   const websiteCard = /^turim:[1-9]\d*$/u.test(productId);
   const redirect = hasWebsiteCatalogLink(part.text);
@@ -616,7 +629,8 @@ export function createWorkerHandlers({
               const qualifiesLeads = definition.ai?.leadQualificationEnabled === true;
               const websiteCatalog = config.catalog.source?.type === "website_catalog" && config.enabledModules.includes("catalog");
               const sheetSales = config.catalog.source?.type === "google_sheets" && definition.ai?.catalogSalesEnabled === true;
-              const salesMode = !intakeOnly && (websiteCatalog || sheetSales) && config.catalog.source.status === "healthy";
+              const realEstateCatalog = config.catalog.source?.type === 'real_estate_catalog' && config.enabledModules.includes('catalog');
+              const salesMode = !intakeOnly && (websiteCatalog || realEstateCatalog || sheetSales) && config.catalog.source.status === "healthy";
               const referral = qualifiesLeads || salesMode
                 ? message.adReferral || await repository.adReferral?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id })
                 : null;
@@ -629,9 +643,9 @@ export function createWorkerHandlers({
                 if (typeof repository.catalogBrowseState !== "function") throw permanent("Paginação persistida do catálogo não configurada.", "CATALOG_BROWSE_STATE_REQUIRED");
                 browseState = await repository.catalogBrowseState({ empresaId: config.empresaId, conversationId: input.conversationId });
               }
-              const interaction = websiteCatalog && !currentReferral ? await repository.websiteInteraction?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
+              const interaction = (websiteCatalog || realEstateCatalog) && !currentReferral ? await repository.websiteInteraction?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
               const financingSession = websiteCatalog ? await repository.financingSession?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
-              const photoHistoryProductIds = websiteCatalog ? await repository.catalogPhotosPresented?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
+              const photoHistoryProductIds = websiteCatalog || realEstateCatalog ? await repository.catalogPhotosPresented?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id }) : null;
               const catalogContext = { ...config.catalog, ...(interaction ? { interaction } : {}), ...(financingSession ? { financingSession } : {}), ...(photoHistoryProductIds?.length ? { photoHistoryProductIds } : {}), ...(salesMode ? { salesMode: true, browseState,
                 quotedProductId: await repository.quotedCatalogProduct?.({ empresaId: config.empresaId, conversationId: input.conversationId, messageId: message.id, externalMessageId: message.replyToExternalMessageId }) || null,
                 adContext: catalogAdContext(referral, config.catalog, { current: currentReferral }),

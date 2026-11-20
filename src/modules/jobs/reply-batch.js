@@ -62,11 +62,12 @@ export async function loadCatalogBrowseState(client, empresaId, conversationId) 
        WHERE empresa_id = $1 AND conversa_id = $2 AND direcao = 'saida' AND origem_resposta IN ('ia', 'fluxo_deterministico')
          AND redacted_at IS NULL AND external_message_id IS NOT NULL AND product.id IS NOT NULL
          AND status IN ('enviada','entregue','lida')
-       GROUP BY product.id ORDER BY min(sequence), product.id LIMIT 100`, [empresaId, conversationId],
+       GROUP BY product.id ORDER BY min(sequence), product.id LIMIT 500`, [empresaId, conversationId],
   )).rows.map((part) => part.catalog_product_id);
+  const maxItems = Object.hasOwn(previous.filters, 'operation') ? 500 : 100;
   return normalizeCatalogBrowseState({ filters: previous.filters,
-    seenProductIds: [...new Set([...previous.seenProductIds.filter((id) => history.includes(id)), ...confirmed])].slice(0, 100),
-    presentedProductIds: [...new Set([...history, ...confirmed])].slice(0, 100) });
+    seenProductIds: [...new Set([...previous.seenProductIds.filter((id) => history.includes(id)), ...confirmed])].slice(0, maxItems),
+    presentedProductIds: [...new Set([...history, ...confirmed])].slice(0, maxItems) });
 }
 
 export async function hydrateReply(client, empresaId, row) {

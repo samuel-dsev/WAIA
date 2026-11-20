@@ -282,7 +282,7 @@ function rethrowMetaError(error) {
 }
 
 export class AdminService {
-  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, websiteCatalogIntegration, metaAppRepository, metaHealthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
+  constructor({ repository, onboardingService = null, credentialVault, conversationService, healthService, mediaStore, googleSheetsIntegration, websiteCatalogIntegration, realEstateCatalogIntegration, metaAppRepository, metaHealthService, clock = () => new Date(), idGenerator = randomUUID } = {}) {
     assertRepository(repository);
     this.repository = repository;
     this.onboardingService = onboardingService;
@@ -292,6 +292,7 @@ export class AdminService {
     this.mediaStore = mediaStore;
     this.googleSheetsIntegration = googleSheetsIntegration;
     this.websiteCatalogIntegration = websiteCatalogIntegration;
+    this.realEstateCatalogIntegration = realEstateCatalogIntegration;
     this.metaAppRepository = metaAppRepository;
     this.metaHealthService = metaHealthService;
     this.clock = clock;
@@ -936,6 +937,21 @@ export class AdminService {
     await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { action: "website_catalog.read", resource: "integrations" });
     if (!this.websiteCatalogIntegration) throw new AdminValidationError("Sincronização de estoque indisponível.");
     return this.websiteCatalogIntegration.read(empresaId);
+  }
+
+  async readRealEstateCatalog({ auth, empresaId }) {
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { action: 'real_estate_catalog.read', resource: 'integrations' });
+    if (!this.realEstateCatalogIntegration) throw new AdminValidationError('Sincronização imobiliária indisponível.');
+    return this.realEstateCatalogIntegration.read(empresaId);
+  }
+
+  async syncRealEstateCatalog({ auth, empresaId, correlationId }) {
+    const action = 'real_estate_catalog.sync', resource = 'integrations';
+    await this.#tenant(auth, empresaId, ADMIN_RESOURCES.integrations, { write: true, action, resource });
+    if (!this.realEstateCatalogIntegration) throw new AdminValidationError('Sincronização imobiliária indisponível.');
+    const result = await this.realEstateCatalogIntegration.syncTenant(empresaId);
+    await this.#audit({ auth, empresaId, action, resource, result: result.health === 'healthy' ? 'success' : 'failure', correlationId });
+    return result;
   }
 
   async syncWebsiteCatalog({ auth, empresaId, correlationId }) {

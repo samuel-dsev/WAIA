@@ -22,16 +22,16 @@ export function isPromptInjectionAttempt(message) {
   return INJECTION_PATTERNS.some((pattern) => pattern.test(String(message || "")));
 }
 
-function safeValue(value, depth = 0) {
+function safeValue(value, depth = 0, path = '', realEstate = false) {
   if (depth > 6) return "[MAX_DEPTH]";
   if (value == null || typeof value === "boolean" || typeof value === "number") return value;
   if (typeof value === "string") return value.slice(0, 4_000);
-  if (Array.isArray(value)) return value.slice(0, 100).map((item) => safeValue(item, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, realEstate && path === 'catalog.items' ? 500 : 100).map((item) => safeValue(item, depth + 1, path + '[]', realEstate));
   if (typeof value !== "object") return undefined;
   const output = {};
   for (const [key, item] of Object.entries(value).slice(0, 100)) {
     if (isSensitiveKey(key)) continue;
-    const sanitized = safeValue(item, depth + 1);
+    const sanitized = safeValue(item, depth + 1, path ? path + '.' + key : key, realEstate);
     if (sanitized !== undefined) output[key] = sanitized;
   }
   return output;
@@ -41,7 +41,7 @@ export function allowlistedTenantContext(context, allowedKeys) {
   const output = {};
   for (const key of allowedKeys) {
     if (isSensitiveKey(key) || !Object.hasOwn(context, key)) continue;
-    output[key] = safeValue(context[key]);
+    output[key] = safeValue(context[key], 0, key, context.catalog?.source?.type === 'real_estate_catalog');
   }
   return redactSensitive(output);
 }
