@@ -1,6 +1,6 @@
 # Plano ativo — WAIA 2.0.0
 
-**Manutenção da linha estável, 24/11/2026:** preparada `1.28.5` sobre a produção `1.28.4/7956dc4`, somente para habilitar follow-up por padrão em novos leads elegíveis, preservando a política e as seleções existentes. Estado, validações e limites na [entrada atual do relatório](RELATORIO.md#padrão-de-follow-up-para-novos-leads--candidata-estável-1285-24112026). O planejamento 2.0 abaixo é histórico e não foi implementado por este pedido.
+**Manutenção da linha estável, 24/11/2026:** publicada `1.28.5/2f97f27` sobre `1.28.4/7956dc4`, somente para habilitar follow-up por padrão em novos leads elegíveis. Política personalizada e nove ciclos ativos preservados; imagem aprovada em 750 testes e 20 verificações PostgreSQL, backup local/cópia cifrada e serviços/HTTPS conferidos. [Publicação e evidências](docs/DEPLOY_1.28.5.md); estado na [entrada atual do relatório](RELATORIO.md#padrão-de-follow-up-para-novos-leads--estável-1285-24112026). O planejamento 2.0 abaixo é histórico e não foi implementado por este pedido.
 
 Atualizado em 23/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).
 Estado e histórico resumido: [RELATORIO.md](RELATORIO.md).

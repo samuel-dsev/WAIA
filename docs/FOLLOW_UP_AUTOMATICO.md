@@ -1,6 +1,6 @@
 # Follow-up individual — linha estável
 
-**Ajuste 1.28.5, preparado em 24/11/2026 sobre 1.28.4:** novas conversas recebidas pelo webhook iniciam o follow-up por padrão quando a empresa já o habilitou e os critérios de disponibilidade estão atendidos. Usa os períodos e o fechamento já salvos no painel, inclusive o perfil personalizado. Nenhuma configuração, seleção individual ou ciclo existente é atualizado retroativamente. A publicação deste ajuste ainda está pendente.
+**Ajuste 1.28.5, publicado em 24/11/2026 sobre 1.28.4:** novas conversas recebidas pelo webhook iniciam o follow-up por padrão quando a empresa já o habilitou e os critérios de disponibilidade estão atendidos. Usa os períodos e o fechamento já salvos no painel, inclusive o perfil personalizado. Nenhuma configuração, seleção individual ou ciclo existente é atualizado retroativamente. Na publicação, os nove ciclos ativos e a política personalizada da Turim foram preservados; [evidências e limites](DEPLOY_1.28.5.md).
 
 Implementação autorizada em 20/11/2026, incluindo a alteração posterior para períodos editáveis em horas. Escopo: follow-up individual; campanhas em massa/E9A integral continuam fora desta entrega. Atendimento padrão, roteiro, critérios, catálogo e fechamento preservados.
 
@@ -49,7 +49,7 @@ Dispatch revalida conversa/geração, configuração, política, canal, privacid
 
 Testes PostgreSQL reutilizam `waia-test`/`waia_v2_upgrade`, com rollback de fixtures e hashes/contagens das tabelas existentes. Revisão visual usa APIs fictícias locais; não certifica banco ou fornecedor. Contagens e evidências finais no relatório ativo. Prova externa de IA real, recebimento de WhatsApp/template e entrega ao grupo permanecem pendentes.
 
-## Turim e publicação
+## Histórico do piloto e da publicação inicial
 
 Nenhuma configuração da Turim foi alterada e nenhum contato foi marcado. O titular escolheu marcar contatos pessoalmente. Após autorização específica e gates operacionais: portar o incremento à linha estável, publicar imagem aprovada e, **pelo painel**, habilitar apenas Turim no preset de teste, preservando revisão/roteiro, contas, credenciais, limites e grupo. Conferir contatos desmarcados; ativação individual cabe ao titular.
 
