@@ -19,7 +19,7 @@ import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceCla
 import { pendingWebsiteFinancingModel } from '../business/vehicle-financing-context.js';
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
-import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, contextualQualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
+import { qualificationFormat, qualificationInstructions, parseQualification, asksOnlyForCustomerName, qualificationContinuation, contextualQualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
 function normalizeUsage(response) {
@@ -214,6 +214,7 @@ export class MultiTenantAiService {
         + (photoHandoff.photosHandoffEnabled ? "\nEXCEÇÃO DE AVALIAÇÃO POR FOTOS: fotos armazenadas e nome informado permitem concluir em photos_received. Essa regra substitui a orientação anterior de manter coleta por fotos. Reconheça o recebimento, aproveite o nome conhecido e encerre conforme o modelo, sem exigir modelo de compra, visita ou financiamento. Responda antes a qualquer outra pergunta atual." : "")
         + (turnGuidance ? "\n" + turnGuidance : "")
         + (contextualVehicleService ? "\nReavalie também customerService com evidências literais, a entrada opcional, o aceite específico de contato sobre garantia e o encerramento natural em text. Se o cliente já aceitou contato sobre garantia e depois informou o nome, preserve o aceite ORIGINAL: warranty.status=accepted, offerEvidence e consentEvidence copiam aquela oferta e aquele aceite completos. Não volte a offered porque a mensagem atual contém somente o nome. Se não houve aceite, mantenha collecting e não anuncie retorno. Não use finance para encerrar um pedido de garantia; não exija dados de financiamento nesse encaminhamento. Em browse/more/products, text deve conter a continuidade contextual, sem repetir as fichas. Se não houver unidades ou fotos compatíveis, use none e responda naturalmente." : "");
+      const pendingNameInstructions = qualifies ? "REGRA FINAL DE NOME PENDENTE: quando as orientações acima disserem collecting por falta de nome, substitua por awaiting_name SOMENTE se todos os demais critérios, dados e consentimentos estiverem completos. Preencha a ficha interna e pergunte somente o nome, sem encerrar agora. Preserve os metadados de avaliação/financiamento/garantia e seus guardas. Se faltar outro dado, mantenha collecting. Nome já informado permite qualified, nunca awaiting_name." : "";
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? realEstateCatalog ? REAL_ESTATE_SALES_INSTRUCTIONS : catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
@@ -226,6 +227,7 @@ export class MultiTenantAiService {
         turnGuidance,
         contextualVehicleService ? CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS : "",
         contextualVehicleService && photoHandoff.photosHandoffEnabled ? PHOTO_APPRAISAL_REQUEST_INSTRUCTIONS : "",
+        pendingNameInstructions,
       ].filter(Boolean).join("\n\n");
       const inputMessages = [
         { role: "developer", content: contextContent },
@@ -241,7 +243,7 @@ export class MultiTenantAiService {
       // Reserve the bounded repair budget before any provider call. Unused budget
       // is released by the same finalization; actual usage is summed below.
       const mayRepair = qualifies || Boolean(pendingQuestion) || config.contextualServiceEnabled;
-      const repairInputTokens = mayRepair ? estimatedInputTokens + estimateTokens(recheckInstructions) : 0;
+      const repairInputTokens = mayRepair ? estimatedInputTokens + estimateTokens(recheckInstructions + pendingNameInstructions) : 0;
       const estimatedTokens = estimatedInputTokens + repairInputTokens + config.maxOutputTokens * (mayRepair ? 2 : 1);
       const estimatedCost = calculateCost(pricing, {
         inputTokens: estimatedInputTokens + repairInputTokens,
@@ -302,7 +304,7 @@ export class MultiTenantAiService {
         const groundedRequest = choiceQuestion ? { ...providerRequest, input: [...providerRequest.input,
           { role: "developer", content: "PENDING_QUESTION_DATA_START\n" + serializeTenantContext({ question: choiceQuestion }) + "\nPENDING_QUESTION_DATA_END" }] } : providerRequest;
         const response = await responseWithTimeout(client, repair
-          ? { ...groundedRequest, instructions: `${instructions}\n\n${recheckInstructions}${feedback ? `\n\nCORREÇÃO DESTE TURNO: ${feedback}` : ""}`,
+          ? { ...groundedRequest, instructions: `${instructions}\n\n${recheckInstructions}${feedback ? `\n\nCORREÇÃO DESTE TURNO: ${feedback}` : ""}${pendingNameInstructions ? `\n\n${pendingNameInstructions}` : ""}`,
             ...(repairFormat ? { text: { format: repairFormat } } : {}) } : groundedRequest,
         remainingMs, { headers: { "X-Client-Request-Id": repair
           ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
@@ -349,7 +351,7 @@ export class MultiTenantAiService {
           text = serviceFormat ? JSON.stringify(value) : String(value.text || "").trim();
         }
       }
-      let parsedText = text, leadQualification, qualificationIssue, nonLeadHandoff, validatedCatalogReply, evaluationState, evaluationAnswer, contextualClosing;
+      let parsedText = text, leadQualification, pendingNameQualification, qualificationIssue, nonLeadHandoff, validatedCatalogReply, evaluationState, evaluationAnswer, contextualClosing;
       if (choiceQuestion) {
         // A clarification never carries catalog, qualification or trade-in effects.
         validatedCatalogReply = parseChoiceClarification(text);
@@ -370,6 +372,7 @@ export class MultiTenantAiService {
             structured.text = intakeQuestion(qualificationIssue);
           }
           if (intake?.status === "qualified") leadQualification = intake.leadQualification;
+          if (intake?.status === "awaiting_name" && asksOnlyForCustomerName(structured.text)) pendingNameQualification = intake.leadQualification;
           if (intake?.status === "not_qualified") {
             nonLeadHandoff = { configVersion: config.version };
             parsedText = config.nonLeadHandoffMessage;
@@ -394,6 +397,7 @@ export class MultiTenantAiService {
         }
       } else if (qualifies) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
+          pendingNameQualification = undefined;
           const structured = JSON.parse(text);
           if (!structured || typeof structured !== "object" || Array.isArray(structured)
             || typeof structured.text !== "string" || structured.text.length > 4096) throw Object.assign(new Error("Resposta inválida."), { code: "AI_INVALID_LEAD_QUALIFICATION" });
@@ -477,7 +481,7 @@ export class MultiTenantAiService {
           const completesPendingFinance = websiteCatalog && !websiteDetails && !evaluationProposal
             && (!config.contextualServiceEnabled || hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current]))
             && !customerService?.warrantyAccepted
-            && structured.catalogAction === "none" && structured.leadQualification?.status === "qualified"
+            && structured.catalogAction === "none" && ["qualified", "awaiting_name"].includes(structured.leadQualification?.status)
             && !request.turnMessages?.some((part) => part.type === "image")
             && pendingFinanceIds.length > 0 && pendingFinanceIds.length <= 3
             && selectedIds.every((id) => pendingFinanceIds.includes(id));
@@ -531,24 +535,29 @@ export class MultiTenantAiService {
             }
           }
           try {
-            let card = evaluationQualifies && structured.leadQualification?.status === "qualified"
+            const readyCard = ["qualified", "awaiting_name"].includes(structured.leadQualification?.status);
+            let card = evaluationQualifies && readyCard
               ? evaluationLeadCard(structured.leadQualification, currentEvaluation, safeContext, qualificationEvidence) : structured.leadQualification;
-            if (leadPhotosEnabled && card?.status === "qualified" && typeof card.summary === "string" && transcript.storedPhotos > 0) {
+            if (leadPhotosEnabled && readyCard && typeof card.summary === "string" && transcript.storedPhotos > 0) {
               const summary = card.summary, line = "Imagens recebidas do cliente: " + transcript.storedPhotos + ".";
               if (!summary.includes(line) && summary.length + line.length + 1 <= 1600) card = { ...card, summary: summary + "\n" + line };
             }
-            if ((financingVehicles.length || customerService?.warrantyAccepted) && card?.status === "qualified") card = preserveCollectedFinancingData(card, qualificationEvidence, [...promptHistory, ...transcript.current]);
-            if (contextualVehicleService && card?.status === "qualified") {
+            if ((financingVehicles.length || customerService?.warrantyAccepted) && readyCard) card = preserveCollectedFinancingData(card, qualificationEvidence, [...promptHistory, ...transcript.current]);
+            if (contextualVehicleService && readyCard) {
               const ad = websiteCatalog.adContext;
               const possibleInterest = ad?.match === "unique" ? websiteCatalog.items.find((item) => item.id === ad.productId)?.name : "";
               card = appendCustomerServiceData(card, customerService, { financing: financingVehicles.length > 0, photoHistoryLine,
                 possibleInterest: customerService.warrantyAccepted ? possibleInterest : "" });
             }
-            if (!contextualVehicleService && financingVehicles.length && card?.status === "qualified" && photoHistoryLine && !String(card.summary || "").includes(photoHistoryLine)) {
+            if (!contextualVehicleService && financingVehicles.length && readyCard && photoHistoryLine && !String(card.summary || "").includes(photoHistoryLine)) {
               card = { ...card, summary: String(card.summary || "") + "\n" + photoHistoryLine };
             }
             leadQualification = mayQualify ? parseQualification(card, { configVersion: config.version,
               evidence: qualificationEvidence }) : null;
+            if (mayQualify && card?.status === "awaiting_name" && asksOnlyForCustomerName(structured.text)
+              && (!financingVehicles.length || hasCollectedFinancingDocuments(qualificationEvidence, [...promptHistory, ...transcript.current]))) {
+              pendingNameQualification = parseQualification(card, { configVersion: config.version, allowMissingName: true });
+            }
             if (leadQualification && config.contextualServiceEnabled) {
               const closing = evaluationAnswerWithoutFollowUp(structured.text).trim();
               structured.text = closing;
@@ -657,6 +666,8 @@ export class MultiTenantAiService {
         throw Object.assign(new Error("Contingência sem contextualização."), { code: "AI_NEEDS_CLARIFICATION" });
       }
       if (!reply.messages && evaluationState) Object.assign(reply, evaluationMetadata);
+      if (pendingNameQualification && !leadQualification && !nonLeadHandoff && !reply.messages
+        && asksOnlyForCustomerName(reply.text)) reply.pendingNameQualification = pendingNameQualification;
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
       const finalized = await this.ledger.finalize({

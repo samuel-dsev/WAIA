@@ -41,6 +41,34 @@ const request = (message, extra = {}) => ({ empresaId: "test", conversationId: "
   context: { catalog }, ...extra });
 const history = (role, body) => ({ type: "text", direction: role === "user" ? "inbound" : "outbound", status: "sent", body });
 
+test("simulação completa sem nome prepara espera e preserva documentos, entrada e veículo", async () => {
+  const pending = { status: "awaiting_name", name: null, summary: "Cliente pediu simulação do Onix Joy.", qualification: "Simulação aceita e dados fornecidos." };
+  const entries = [history("user", "Quero simular o Onix Joy."), history("assistant", "Informe CPF e nascimento para a simulação.")];
+  const { ai } = service(async () => response("Para finalizar, como posso te chamar?", { qualification: pending, action: "finance", ids: [item.id] }), entries);
+  const result = await ai.reply(request("000.000.000-00\n01/01/1990"));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification, undefined);
+  assert.equal(result.pendingNameQualification.name, null);
+  for (const data of ["000.000.000-00", "01/01/1990", "Cliente não informou sobre valores de entrada", "Onix Joy"]) assert.ok(result.pendingNameQualification.summary.includes(data));
+  assert.equal(result.websiteInteraction.step, "finance_accepted");
+  const incomplete = service(async () => response("Qual é o seu nome?", { qualification: pending, action: "finance", ids: [item.id] }), entries);
+  assert.equal((await incomplete.ai.reply(request("Ainda não informei os documentos."))).pendingNameQualification, undefined);
+});
+
+test("avaliação por fotos sem nome prepara a ficha mantendo consentimento e anexos", async () => {
+  const pending = { status: "awaiting_name", name: null, summary: "Cliente quer avaliar seu carro como parte do pagamento.", qualification: "Pedido de avaliação confirmado e fotos recebidas." };
+  const original = "Quero saber quanto vocês oferecem no meu carro para dar como parte do pagamento.";
+  const { ai } = service(async () => response("Recebi as fotos. Qual é o seu nome?", { qualification: pending,
+    evaluation: { step: "photos_received", interestName: null, interestSource: "unknown" },
+    tradeRequest: { status: "photo_appraisal_requested", requestEvidence: original } }), [history("user", original)],
+  { tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true });
+  const result = await ai.reply(request("", { turnMessages: [{ id: "photo1", type: "image", text: "", mediaStored: true }, { id: "photo2", type: "image", text: "", mediaStored: true }],
+    context: { catalog, tradeInEvaluation: { session: { step: "collect_photos", interestName: null, interestSource: "unknown" } } } }));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification, undefined);
+  assert.equal(result.pendingNameQualification.name, null);
+  assert.match(result.pendingNameQualification.summary, /Imagens recebidas do cliente: 2/u);
+  assert.equal(result.tradeInEvaluation.step, "photos_received");
+});
+
 test("aceite vago de opções chama IA apenas para esclarecer e repete até escolha clara", async () => {
   const offer = "O Onix custa R$ 55.900,00.\n\nGostaria de fotos dele? Ou deseja simular um financiamento?";
   const question = "Você gostaria das fotos, da simulação de financiamento ou das duas opções?";

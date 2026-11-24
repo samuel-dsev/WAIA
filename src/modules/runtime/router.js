@@ -201,6 +201,7 @@ export function createTenantRuntimeRouter({
       ...(outcome.reply?.tradeInEvaluation ? { tradeInEvaluation: outcome.reply.tradeInEvaluation } : {}),
       ...(outcome.reply?.salesInterest ? { salesInterest: outcome.reply.salesInterest } : {}),
       ...(outcome.reply?.leadQualification ? { leadQualification: outcome.reply.leadQualification } : {}),
+      ...(outcome.reply?.pendingNameQualification ? { pendingNameQualification: outcome.reply.pendingNameQualification } : {}),
       ...(outcome.reply?.nonLeadHandoff ? { nonLeadHandoff: outcome.reply.nonLeadHandoff } : {}),
     };
   }

@@ -11,6 +11,7 @@ import { queueLeadImages } from "../group-notifier/delivery-images.js";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState, websiteListFormatMetadata } from "./reply-batch.js";
 import { normalizeAdReferral, catalogAdContext } from "../whatsapp/ad-referral.js";
 import { acknowledgeReply } from "./sales-interest.js";
+import { completeLeadNameTimeout } from "../group-notifier/pending-name.js";
 import { directCatalogInterest } from "../business/catalog-interest.js";
 import { productMessage } from "../business/catalog-messages.js";
 import { hasWebsiteCatalogLink } from "../business/catalog-sales.js";
@@ -98,9 +99,15 @@ function permanent(message, code) {
 export class PostgresJobHandlerRepository {
   inboundTurn(input) { return loadInboundTurn(this.pool, input); }
   tradeInEvaluationSession(input) { return loadTradeInEvaluationSession(this.pool, input); }
-  constructor(pool) {
+  completeLeadNameTimeout(reference, payload) {
+    return withTenantTransaction(this.pool, { empresaId: reference.empresaId }, ({ client }) => completeLeadNameTimeout(client,
+      { empresaId: reference.empresaId, conversationId: reference.conversationId,
+        replyId: payload?.replyId, generation: payload?.generation, now: this.clock() }));
+  }
+  constructor(pool, { clock = () => new Date() } = {}) {
     if (!pool?.connect) throw new TypeError("Pool PostgreSQL invalido.");
     this.pool = pool;
+    this.clock = clock;
   }
 
   inboundMessage({ empresaId, messageId }) {
@@ -338,6 +345,7 @@ export class PostgresJobHandlerRepository {
             ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
+            ...(reply.pendingNameQualification ? { pendingNameQualification: reply.pendingNameQualification } : {}),
             ...(reply.websiteInteraction ? { websiteInteraction: normalizeWebsiteInteraction(reply.websiteInteraction) } : {}),
             ...(reply.tradeInEvaluation ? { tradeInEvaluation: normalizeTradeInEvaluation(reply.tradeInEvaluation) } : {}),
             ...(reply.nonLeadHandoff ? { nonLeadHandoff: reply.nonLeadHandoff } : {}) }),
@@ -723,7 +731,7 @@ export function createWorkerHandlers({
         if (delayMs && (!Number.isInteger(delayMs) || delayMs < 10_000 || delayMs > 15_000)) throw new TypeError("Espera da IA deve ficar entre 10 e 15 segundos.");
         reply = { ...reply, sendNotBefore: new Date(clock().getTime() + delayMs).toISOString() };
       }
-      if (reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff) {
+      if (reply.salesInterest || reply.leadQualification || reply.pendingNameQualification || reply.nonLeadHandoff) {
         if (typeof repository.prepareReply !== "function" || typeof repository.markReplySent !== "function" || typeof repository.canSendBotReply !== "function") {
           throw permanent("Persistência e permissão do encerramento comercial obrigatórias.", "BOT_REPLY_CHECKPOINT_REQUIRED");
         }
@@ -795,7 +803,7 @@ export function createWorkerHandlers({
     });
     if (!dispatch.allowed) return dispatch.uncertain ? { reconciliationRequired: true } : { skipped: true, reason: 'bot_reply_cancelled' };
     const externalMessageId = firstMetaMessageId(dispatch.result);
-    if ((reply.salesInterest || reply.leadQualification || reply.nonLeadHandoff || reply.websiteInteraction?.step === "closed")
+    if ((reply.salesInterest || reply.leadQualification || reply.pendingNameQualification || reply.nonLeadHandoff || reply.websiteInteraction?.step === "closed")
       && (typeof externalMessageId !== "string" || !externalMessageId)) throw permanent("Provedor não confirmou o identificador da mensagem.", "BOT_REPLY_SEND_ID_MISSING");
     if (prepared && repository.markReplySent) {
       await repository.markReplySent({ empresaId: reference.empresaId, replyId: prepared.id, externalMessageId });
@@ -880,6 +888,7 @@ export function createWorkerHandlers({
   }
 
   return Object.freeze({
+    process_lead_name_timeout: (reference, record) => repository.completeLeadNameTimeout(reference, record.payload),
     process_follow_up: (reference, record, execution) => followUpHandler?.(reference, record, execution) || { skipped: true },
     process_inbound_message: processInboundMessage,
     apply_whatsapp_status: applyWhatsappStatus,

@@ -50,14 +50,14 @@ export async function queueLeadImages(client, { empresaId, conversationId, messa
       JOIN mensagens anchor ON anchor.empresa_id=l.empresa_id AND anchor.conversa_id=l.conversa_id AND anchor.id=$3
       JOIN contatos ct ON ct.empresa_id=l.empresa_id AND ct.id=l.contato_id
       JOIN conversas c ON c.empresa_id=l.empresa_id AND c.id=l.conversa_id
-    WHERE l.empresa_id=$1 AND l.conversa_id=$2 AND l.redacted_at IS NULL AND l.name IS NOT NULL
+    WHERE l.empresa_id=$1 AND l.conversa_id=$2 AND l.redacted_at IS NULL
       AND e.status='ativa' AND e.deleted_at IS NULL AND e.configuracao_runtime_modo='versionado'
       AND e.versao_configuracao=e.configuracao_ativa_versao AND l.config_version=e.configuracao_ativa_versao
       AND ct.deleted_at IS NULL AND ct.anonimizado_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
       AND c.status='aberta' AND anchor.direcao='entrada' AND anchor.redacted_at IS NULL
       AND (anchor.expires_at IS NULL OR anchor.expires_at>now())`, [empresaId, conversationId, messageId])).rows[0];
   if (!lead || !verifyCompiledTenantRuntimeConfigV2(lead.compiled) || lead.compiled.empresaId !== empresaId
-    || lead.compiled.configuration.ai.leadImageHandoffEnabled !== true || !lead.name.trim()) return { queued: 0 };
+    || lead.compiled.configuration.ai.leadImageHandoffEnabled !== true) return { queued: 0 };
   await client.query(`INSERT INTO group_notifier_deliveries(empresa_id,lead_id,group_id,route_revision,sender_phone)
     VALUES($1,$2,$3,$4,$5) ON CONFLICT(empresa_id,lead_id) DO NOTHING`, [empresaId, lead.id, lead.group_id, lead.revision, lead.sender_phone]);
   const delivery = (await client.query(`SELECT * FROM group_notifier_deliveries WHERE empresa_id=$1 AND lead_id=$2 FOR UPDATE`, [empresaId, lead.id])).rows[0];

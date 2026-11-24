@@ -86,7 +86,7 @@ export function createGroupNotifierWorker({ repository, mediaStore = null, sessi
                 stage = "send_part";
                 if (!closed && owned && session.snapshot().phase === "connected" && await repository.canSendPart(owner, epoch, candidate.id, part)) {
                   accepted = part.kind === "image" ? await session.sendImage(delivery.group_id, {
-                    data, mimeType: part.mime_type, caption: `Imagem enviada pelo lead: ${delivery.name}\nWhatsApp: +${delivery.phone}`,
+                    data, mimeType: part.mime_type, caption: `${delivery.name ? `Imagem enviada pelo lead: ${delivery.name}` : 'Imagem enviada pelo cliente — nome não informado'}\nWhatsApp: +${delivery.phone}`,
                   }) : await session.sendText(delivery.group_id, notificationText({ companyName: delivery.company_name,
                     name: delivery.name, summary: delivery.summary, qualification: delivery.qualification, phone: delivery.phone,
                     followUpRecovered: delivery.follow_up_recovered === true }));

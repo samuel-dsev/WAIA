@@ -36,6 +36,22 @@ function fixture(outputs, overrides = {}) {
   return { service, request, ledger, clientFactory, logs, config };
 }
 
+test("triagem simples prepara espera somente quando falta o nome, com cidade e modelo comprovados", async () => {
+  const question = "Para finalizar, qual é o seu nome?";
+  const f = fixture([{ text: question, leadQualification: { ...LEAD, status: "awaiting_name", name: null } }]);
+  f.request.message = "Sou de Taubaté e quero comprar a Harley X15.";
+  const result = await f.service.reply(f.request);
+  assert.equal(result.text, question);
+  assert.equal(result.leadQualification, undefined);
+  assert.deepEqual(result.pendingNameQualification, { name: null, summary: "Cidade: Taubaté\nModelo de interesse: Harley X15",
+    qualification: "Novo cliente com interesse em compra.", configVersion: 2 });
+  for (const patch of [{ city: null }, { model: null }, { name: "Cliente" }]) {
+    const invalid = fixture([{ text: question, leadQualification: { ...LEAD, status: "awaiting_name", name: null, ...patch } }]);
+    invalid.request.message = f.request.message;
+    assert.equal((await invalid.service.reply(invalid.request)).pendingNameQualification, undefined);
+  }
+});
+
 test("triagem simples é opt-in, preserva revisões e exige qualificação e fila humana", () => {
   const old = structuredClone(CONFIG); delete old.ai.leadIntakeOnlyEnabled;
   const prior = compileTenantRuntimeConfigV2(old, { empresaId: "tenant-a", configVersion: 1 });

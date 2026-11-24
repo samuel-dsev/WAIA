@@ -71,6 +71,16 @@ const ownerHistory = [
 const ownerConfig={leadImageHandoffEnabled:true,tradeInEvaluationEnabled:false,
   leadQualificationCriteria:'Captação: intenção de locação, fotos recebidas, localização, valor esperado e nome informado.'};
 
+test('captação imobiliária: dados completos sem nome preparam espera com fotos e sem avaliação automotiva',async()=>{
+  const card={status:'awaiting_name',name:null,summary:'Proprietário quer colocar apartamento para locação na Rua Sintética 20, bairro Exemplo, Taubaté, por R$ 1500 com condomínio incluso.',qualification:'Dados da captação completos, exceto nome.'};
+  const answer='Para finalizar, como posso te chamar?';
+  const {ai}=service(output('none',answer,[],EMPTY_PROPERTY_FILTERS,card),ownerHistory,ownerConfig);
+  const result=await ai.reply(request('Estou pensando em 1500 já incluso o condomínio'));
+  assert.equal(result.source,'ai');assert.equal(result.text,answer);assert.equal(result.leadQualification,undefined);
+  assert.equal(result.pendingNameQualification.name,null);assert.match(result.pendingNameQualification.summary,/Imagens recebidas do cliente: 1/u);
+  assert.equal(result.tradeInEvaluation,undefined);
+});
+
 test('captação imobiliária: valor com condomínio mantém pergunta compreendida após ficha parcial inválida',async()=>{
   const answer='Entendi: R$ 1.500 por mês, incluindo condomínio. Para finalizar, como posso te chamar?';
   for(const card of [{status:'qualified',name:null,summary:'Apartamento para locação por 1500 com condomínio.',qualification:'Captação para locação.'},
