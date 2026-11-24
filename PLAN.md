@@ -1,6 +1,6 @@
-# Plano ativo — WAIA 2.0.0
+# WAIA — manutenção da linha estável
 
-**Triagem sem nome, 24/11/2026, linha estável dev:** nova capacidade 1.29.0 sobre 1.28.6 no checkout principal WAIA. Quando faltar exclusivamente o nome, encaminhar ao grupo após 15 minutos sem nova resposta à pergunta confirmada e pausar apenas esse chat; dados, fotos e critérios preservados. [Contrato](docs/TRIAGEM_SEM_NOME.md). A aplicação inicial na new foi desfeita por solicitação do titular; a linha 2.0 não integra esta entrega. Validações/estado em RELATORIO.md.
+**Triagem sem nome publicada, 24/11/2026, linha estável dev:** capacidade 1.29.0/1f92358 sobre 1.28.6, no checkout principal WAIA. Faltando exclusivamente o nome, encaminha ao grupo após 15 minutos sem nova resposta à pergunta confirmada e pausa apenas esse chat; dados, fotos e critérios preservados. Imagem aprovada em 764 testes e 37 PostgreSQL; backup/cópia cifrada, saúde/HTTPS e configurações/follow-up conferidos. [Contrato](docs/TRIAGEM_SEM_NOME.md) e [publicação](docs/DEPLOY_1.29.0.md). Aplicação inicial na new desfeita; a linha 2.0 não integra esta entrega.
 
 **Correção estável publicada, 24/11/2026:** `1.28.6/bf6b2da` sobre `1.28.5`, com continuidade da triagem imobiliária e fotos da ficha sem avaliação automotiva. 756 testes da imagem e 30 PostgreSQL aprovados; backup/cópia cifrada e HTTPS verificados, configurações/follow-up preservados. [Publicação](docs/DEPLOY_1.28.6.md) e [ativação pendente pelo painel](docs/FILARETTI_IMOVEIS_FOTOS.md); sem mudança na linha 2.0.
 

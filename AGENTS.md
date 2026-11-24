@@ -5,7 +5,8 @@
 ## Início e fonte de verdade
 
 - Ler este arquivo, `PLAN.md` e `RELATORIO.md`; confirmar cwd/Git e comparar documentos com o código antes de implementar.
-- O plano ativo é `WAIA_2.0.0.md`. `PLAN.md` é o índice de fases; `RELATORIO.md` contém estado e histórico resumido; `implementações_finais.md` é referência histórica.
+- Este checkout `WAIA` mantém a linha estável de produção na branch `dev`. A candidata WAIA 2.0 está na pasta e no repositório independentes `../WAIA 2.0`, branch `new`; não desenvolver ou publicar a candidata por este checkout.
+- `PLAN.md` é o índice da manutenção estável e `RELATORIO.md` contém estado e histórico resumido. `WAIA_2.0.0.md` e `implementações_finais.md` são referências históricas neste checkout; não constituem fila de implementação da linha estável.
 - Trabalhar somente na fase autorizada. Planejamento não autoriza implementar todas as fases, contratar serviços ou publicar em produção.
 - Se não houver relatório, informar e não inventar histórico; criar apenas com contexto real ou pedido do usuário.
 - Consolidar relatórios longos preservando fatos úteis, decisões, riscos e pendências; não duplicar especificação em vários documentos.
