@@ -1,6 +1,6 @@
 # Filaretti Imóveis — correção de triagem e fotos da ficha
 
-Correção preparada na linha estável `1.28.6`, sobre a produção `1.28.5`. Sem nova migração, dependência ou alteração automática de configuração de cliente.
+Correção publicada na linha estável `1.28.6`, sobre `1.28.5`, após autorização explícita do titular. Ativação na empresa ainda pendente pelo painel. Sem nova migração, dependência ou alteração automática de configuração de cliente.
 
 ## Diagnóstico e correção
 
@@ -16,17 +16,19 @@ Na ficha válida, a contagem das fotos é acrescentada se houver espaço, sem in
 
 ## Ativação pelo painel
 
-Depois da publicação da 1.28.6:
+A 1.28.6 já está publicada. Para ativar na empresa:
 
 1. Selecionar **Filaretti Imóveis** e conferir revisão ativa, rascunho e eventuais diferenças preexistentes.
 2. Manter **Atendimento contextual** e **Qualificar leads** habilitados, **Avaliação de veículos na troca** desabilitada e os critérios/roteiro atuais preservados.
 3. Marcar somente **Encaminhar fotos recebidas com a ficha do lead**. Salvar, validar e publicar pelo fluxo normal da empresa.
 4. Conferir leitura posterior: flag de fotos ativa, avaliação automotiva desativada, grupo FCI e demais configurações preservados. Não reabrir o atendimento já pausado ou reenviar fotos antigas para testar.
 
-A mudança de capacidade no código não habilita empresas. A configuração deve ser feita pelo painel; não usar SQL, `.env`, seed ou código por tenant como alternativa. O controle do navegador retornou timeout nesta preparação e a ativação não foi concluída.
+A mudança de capacidade no código não habilita empresas. A configuração deve ser feita pelo painel; não usar SQL, `.env`, seed ou código por tenant como alternativa. Após o deploy, a ferramenta informou que o acesso ao navegador está indisponível neste chat; o inventário nativo também retornou timeout. A ativação não foi concluída.
 
 ## Validação e estado
 
-Suíte geral preliminar Node 22: 756 aprovados/32 condicionais ignorados; regressão dirigida final: 105 aprovados, zero falhas. PostgreSQL: 30 casos aprovados, incluindo avaliação automotiva, captação imobiliária sem catálogo/avaliação automotiva, armazenamento e envio dos bytes, ordem resumo/imagens, deduplicação, reinício, anexos posteriores, RLS, revogação entre leitura/envio e regressão do follow-up. As 140 tabelas anteriores foram preservadas por contagem/hash; banco isolado existente reutilizado e serviço devolvido ao estado parado.
+Imagem final Node 22: 756 aprovados/32 condicionais ignorados; regressão dirigida: 105 aprovados; PostgreSQL da mesma imagem: 30 aprovados, zero falhas. Cobertos captação imobiliária sem avaliação automotiva, bytes e ordem dos anexos, restart/deduplicação, fotos posteriores, RLS, revogação e regressão do follow-up. As 140 tabelas anteriores foram preservadas por contagem/hash; banco isolado existente reutilizado e devolvido ao estado parado.
 
-Casos de IA usam provedor e transporte sintéticos. Comprovam contratos e efeitos do pipeline, sem certificar interpretação de uma resposta futura do modelo real ou recebimento no WhatsApp/grupo. Não houve mensagem externa de teste, configuração de tenant por SQL, publicação, push ou alteração na branch `new`/2.0 nesta preparação. A validação final da imagem e a autorização de publicação são registradas no relatório de continuidade.
+Publicação autorizada concluída com a imagem `waia:1.28.6-bf6b2da8cd48`, sem rebuild na VPS. [Operação e provas](DEPLOY_1.28.6.md). Leitura final: Filaretti revisão 5, rascunho 51, fotos desativadas e grupo FCI habilitado/conectado. Nenhuma empresa foi configurada por SQL ou código. Sem reabertura de chat, reenvio antigo, mensagem externa de teste, push ou alteração na branch `new`/2.0.
+
+Testes usam provedor e transporte sintéticos. Comprovam contratos e efeitos do pipeline, sem certificar interpretação futura do modelo real ou recebimento no WhatsApp/grupo. Ativação e conferência posterior pelo painel permanecem pendentes.
