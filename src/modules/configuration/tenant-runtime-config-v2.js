@@ -799,8 +799,9 @@ export function parseTenantRuntimeConfigV2(input) {
   if (parsed.ai.contextualServiceEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled || !parsed.ai.prompt)) {
     fail("CONTEXTUAL_SERVICE_CONFIGURATION_REQUIRED", "/ai/contextualServiceEnabled", "Atendimento contextual exige IA habilitada e roteiro preenchido.");
   }
-  if (parsed.ai.leadImageHandoffEnabled === true && (!parsed.ai.contextualServiceEnabled || !parsed.ai.tradeInEvaluationEnabled)) {
-    fail("LEAD_IMAGES_CONFIGURATION_REQUIRED", "/ai/leadImageHandoffEnabled", "Encaminhamento de imagens exige atendimento contextual e avaliação de troca habilitados.");
+  if (parsed.ai.leadImageHandoffEnabled === true && (!parsed.ai.contextualServiceEnabled || !parsed.ai.leadQualificationEnabled
+    || parsed.ai.leadIntakeOnlyEnabled || !enabled.has("human_handoff"))) {
+    fail("LEAD_IMAGES_CONFIGURATION_REQUIRED", "/ai/leadImageHandoffEnabled", "Encaminhamento de imagens exige atendimento contextual, qualificação completa e atendimento humano habilitados.");
   }
   if (!enabled.has("flows") && parsed.flows.definitions.length > 0) {
     fail("FLOW_CAPABILITY_DISABLED", "/flows/definitions", "Habilite flows antes de configurar definições.");

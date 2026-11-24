@@ -45,6 +45,19 @@ function memoryStateRepository() {
   };
 }
 
+test("fotos da ficha funcionam sem avaliação automotiva e continuam exigindo triagem contextual completa",()=>{
+  const input=minimalConfig({modules:['ai_freeform','human_handoff'],menu:{text:'Como ajudar?',options:[]},
+    ai:{enabled:true,provider:'openai',model:'test',prompt:'Captação imobiliária conforme o roteiro.',
+      contextualServiceEnabled:true,leadQualificationEnabled:true,leadQualificationCriteria:'Nome, fotos, localização e valor esperado.',leadImageHandoffEnabled:true,tradeInEvaluationEnabled:false}});
+  const compiled=compileTenantRuntimeConfigV2(input,{empresaId:'tenant-a',configVersion:2});
+  assert.equal(verifyCompiledTenantRuntimeConfigV2(compiled),true);
+  const legacy=materializeLegacyTenantDefinition(compiled);
+  assert.equal(legacy.ai.leadImageHandoffEnabled,true);assert.equal(legacy.ai.tradeInEvaluationEnabled,false);
+  for(const patch of [{contextualServiceEnabled:false},{leadQualificationEnabled:false},{leadIntakeOnlyEnabled:true}])
+    assert.throws(()=>parseTenantRuntimeConfigV2({...input,ai:{...input.ai,...patch}}));
+  assert.throws(()=>parseTenantRuntimeConfigV2({...input,modules:['ai_freeform']}));
+});
+
 test("avaliação de troca é opcional, validada e preservada na materialização do painel", () => {
   const old = compileTenantRuntimeConfigV2(minimalConfig(), { empresaId: "tenant-a", configVersion: 1 });
   assert.equal(Object.hasOwn(old.configuration.ai, "tradeInEvaluationEnabled"), false);

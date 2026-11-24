@@ -23,7 +23,7 @@ import { createMetaGateway } from "../src/integrations/meta/meta-gateway.js";
 import { createYCloudWebhookService } from "../src/modules/meta/ycloud-webhook-service.js";
 import { ycloudMediaReference } from "./support/ycloud-media-fixtures.js";
 
-test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e fotos posteriores sem reativar bot", {
+for (const property of [false,true]) test(`PostgreSQL: fotos de ${property ? 'captação imobiliária sem avaliação automotiva' : 'avaliação automotiva'}, ficha com anexos e fotos posteriores sem reativar bot`, {
   skip: process.env.RUN_POSTGRES_INTEGRATION !== "true",
 }, async (t) => {
   assert.match(new URL(process.env.DATABASE_URL).pathname, /^\/waia_v2_/u);
@@ -39,20 +39,20 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
     await owner.query("UPDATE group_notifier_connection SET desired=true,phone='+5511000000099',epoch=epoch+1,phase='connected',lease_owner=NULL,lease_until=NULL");
     actorId = (await owner.query("INSERT INTO usuarios(email,nome,password_hash,papel_plataforma) VALUES($1,'Fotos sintéticas','synthetic','administrador') RETURNING id", [randomUUID() + "@example.test"])).rows[0].id;
     empresaId = (await owner.query("INSERT INTO empresas(slug,nome,nome_exibicao,status) VALUES($1,'Loja sintética','Loja sintética','ativa') RETURNING id", ["lead-images-" + randomUUID()])).rows[0].id;
-    const integrationId = (await owner.query("INSERT INTO integracoes(empresa_id,tipo,nome,habilitada) VALUES($1,'website_catalog','Site sintético',true) RETURNING id", [empresaId])).rows[0].id;
-    const compiled = compileTenantRuntimeConfigV2({ schemaVersion: 2, identity: { name: "Loja sintética" }, modules: ["catalog", "ai_freeform", "human_handoff"],
+    const integrationId = property ? null : (await owner.query("INSERT INTO integracoes(empresa_id,tipo,nome,habilitada) VALUES($1,'website_catalog','Site sintético',true) RETURNING id", [empresaId])).rows[0].id;
+    const compiled = compileTenantRuntimeConfigV2({ schemaVersion: 2, identity: { name: "Loja sintética" }, modules: [...(property ? [] : ['catalog']), "ai_freeform", "human_handoff"],
       menu: { text: "Saudação de referência", options: [] }, ai: { enabled: true, provider: "openai", model: "test", maxOutputTokens: 1000,
-        prompt: "Use os modelos do roteiro. Ao receber fotos para avaliação, reconheça e peça nome se faltar; com nome e fotos encerre para retorno de vendedor.",
-        contextualServiceEnabled: true, tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true,
-        leadQualificationEnabled: true, leadQualificationCriteria: "Nome e fotos para avaliação recebidas." },
-      integrations: [{ id: integrationId, type: "website_catalog", name: "Site sintético", enabled: true }] }, { empresaId, configVersion: 1, draftVersion: 1 });
+        prompt: property ? 'Capte imóvel para locação com fotos, localização, valor esperado e nome, conforme o contexto.' : "Use os modelos do roteiro. Ao receber fotos para avaliação, reconheça e peça nome se faltar; com nome e fotos encerre para retorno de vendedor.",
+        contextualServiceEnabled: true, tradeInEvaluationEnabled: !property, leadImageHandoffEnabled: true,
+        leadQualificationEnabled: true, leadQualificationCriteria: property ? 'Intenção, fotos, localização, expectativa de locação e nome.' : "Nome e fotos para avaliação recebidas." },
+      integrations: property ? [] : [{ id: integrationId, type: "website_catalog", name: "Site sintético", enabled: true }] }, { empresaId, configVersion: 1, draftVersion: 1 });
     await owner.query("INSERT INTO configuracoes_revisoes(empresa_id,config_version,schema_version,compiler_version,source_draft_version,checksum,configuracao_compilada,publicada_por) VALUES($1,1,2,1,1,$2,$3::jsonb,$4)", [empresaId, compiled.checksum, JSON.stringify(compiled), actorId]);
     await owner.query("UPDATE empresas SET configuracao_runtime_modo='versionado',versao_configuracao=1,configuracao_ativa_versao=1 WHERE id=$1", [empresaId]);
     const fakeStock = `<script>\nwindow.VEICULOS = ${JSON.stringify([{ id: 49, titulo: "ONIX JOY", modelo: "ONIX JOY", ano: 2019, km: 73000, preco: 55900, cambio: "Manual", combustivel: "Flex", cor: "Prata",
       descricao: "<p>ONIX JOY</p><p>Veículo sintético para o teste de atendimento.</p>", imagens: ["/storage/veiculos/test.jpg"] }])};\n</script>`;
     const integration = new WebsiteCatalogIntegration({ pool, fetchStock: () => fetchWebsiteStock({ fetchImpl: async () => new Response(fakeStock, { headers: { "Content-Type": "text/html" } }) }) });
-    const synchronized = await integration.syncTenant(empresaId);
-    assert.equal(synchronized.health, "healthy", JSON.stringify(synchronized));
+    if(!property){const synchronized = await integration.syncTenant(empresaId);
+      assert.equal(synchronized.health, "healthy", JSON.stringify(synchronized));}
     const numberId = (await owner.query("INSERT INTO numeros_whatsapp(empresa_id,phone_number_id,status) VALUES($1,$2,'ativo') RETURNING id", [empresaId, randomUUID()])).rows[0].id;
     const groupId = "9" + Date.now() + String(Math.random()).slice(2, 8) + "@g.us";
     await owner.query("INSERT INTO group_notifier_routes(empresa_id,group_id,group_name,sender_phone,enabled) VALUES($1,$2,'Grupo sintético','+5511000000099',true)", [empresaId, groupId]);
@@ -80,7 +80,7 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
         signature: `t=${timestamp},s=${createHmac("sha256", "synthetic-signing").update(`${timestamp}.`).update(rawBody).digest("hex")}` });
       return stored;
     };
-    const tradeRequest = "Quero saber quanto oferecem no meu HB20 2016 como parte do pagamento do Onix. Vou mandar as fotos.";
+    const tradeRequest = property ? 'Quero colocar meu apartamento para locação. Fica na Rua Sintética 20, bairro Exemplo, Taubaté. Espero 1500 com condomínio incluso. Vou mandar as fotos.' : "Quero saber quanto oferecem no meu HB20 2016 como parte do pagamento do Onix. Vou mandar as fotos.";
     const first = await inbound(tradeRequest);
     const downloads = [], botMessages = [], groupMessages = [];
     const gateway = createMetaGateway({ logger: { warn() {} }, credentialResolver: { async resolveMeta(scope) {
@@ -93,19 +93,19 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
     } });
     let aiCalls = 0;
     const conversationService = new ConversationService({ repository: new PostgresConversationRepository(pool) });
-    const closing = "Obrigado pelas informações, logo um de nossos vendedores vai entrar em contato com o retorno da avaliação e dará continuidade no seu atendimento.";
+    const closing = property ? 'Obrigada pelas informações, Ana Teste! Um de nossos corretores entrará em contato para continuar o atendimento do seu imóvel.' : "Obrigado pelas informações, logo um de nossos vendedores vai entrar em contato com o retorno da avaliação e dará continuidade no seu atendimento.";
     const aiService = new MultiTenantAiService({ configResolver: new PostgresAiConfigResolver(pool), conversationService,
       clientFactory: new MemoryResponsesClientFactory(async (call) => {
         aiCalls++;
         const named = call.input.some((part) => part.role === "user" && part.content === "Ana Teste, nossa desculpa não me apresentei.");
         return { output_text: JSON.stringify({ text: named ? closing : "Recebi as duas fotos! Para finalizar, como posso te chamar?",
           ...(call.text.format.schema.properties.turnIntent ? { turnIntent: "answer" } : {}),
-          catalogAction: "none", productIds: [], filters: { category: null, minPrice: null, maxPrice: null },
+          ...(!property ? {catalogAction: "none", productIds: [], filters: { category: null, minPrice: null, maxPrice: null },
           customerService: { downPayment: { status: "not_informed", amount: null, evidence: null },
             warranty: { status: "none", requestEvidence: null, offerEvidence: null, consentEvidence: null },
             tradeInRequest: { status: "photo_appraisal_requested", requestEvidence: tradeRequest } },
-          tradeInEvaluation: { step: "photos_received", interestName: "Onix", interestSource: "customer" },
-          leadQualification: named ? { status: "qualified", name: "Ana Teste", summary: "Ana Teste enviou duas fotos para avaliação do HB20 2016 oferecido na troca.", qualification: "Aguarda retorno da avaliação por fotos." }
+          tradeInEvaluation: { step: "photos_received", interestName: "Onix", interestSource: "customer" }} : {}),
+          leadQualification: named ? { status: "qualified", name: "Ana Teste", summary: property ? 'Ana Teste quer disponibilizar apartamento na Rua Sintética 20, bairro Exemplo, Taubaté, para locação por 1500 com condomínio incluso; duas fotos recebidas.' : "Ana Teste enviou duas fotos para avaliação do HB20 2016 oferecido na troca.", qualification: property ? 'Captação para locação.' : "Aguarda retorno da avaliação por fotos." }
             : { status: "collecting", name: null, summary: null, qualification: null } }), usage: { input_tokens: 10, output_tokens: 10 } };
       }), secretResolver: new MemoryAiSecretResolver({ sharedSecret: "fake" }), ledger: new MemoryAiLedger(),
       pricingCatalog: new MemoryPricingCatalog({ test: { inputPerMillion: 1, outputPerMillion: 1, version: "test" } }), logger: { info() {}, warn() {} } });
@@ -114,7 +114,7 @@ test("PostgreSQL: fotos reconhecidas, nome obrigatório, ficha com anexos e foto
       metaGateway: { downloadMedia: gateway.downloadMedia,
         async sendReply(_scope, part) { botMessages.push(part); return { id: "wamid." + randomUUID() }; } } };
     const job = (messageId) => ({ empresaId, messageId, conversationId: first.conversationId });
-    const photo1 = await inbound("", "image", "photo-1"), photo2 = await inbound("Meu carro", "image", "photo-2");
+    const photo1 = await inbound("", "image", "photo-1"), photo2 = await inbound(property ? 'Meu imóvel' : "Meu carro", "image", "photo-2");
     await t.test("todo o lote é armazenado e reconhecido, mas não encaminhado antes do nome", async () => {
       assert.equal((await createWorkerHandlers(dependencies).process_inbound_message(job(photo1.messageId))).replied, true);
       assert.deepEqual(downloads, ["photo-1", "photo-2"]);

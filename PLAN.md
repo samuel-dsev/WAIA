@@ -1,5 +1,7 @@
 # Plano ativo — WAIA 2.0.0
 
+**Correção estável em preparação, 24/11/2026:** `1.28.6` sobre `1.28.5`, com continuidade da triagem imobiliária e fotos da ficha sem avaliação automotiva. [Contrato e ativação](docs/FILARETTI_IMOVEIS_FOTOS.md); estado no relatório. Publicação e ativação da Filaretti pelo painel pendentes; sem mudança na linha 2.0.
+
 **Manutenção da linha estável, 24/11/2026:** publicada `1.28.5/2f97f27` sobre `1.28.4/7956dc4`, somente para habilitar follow-up por padrão em novos leads elegíveis. Política personalizada e nove ciclos ativos preservados; imagem aprovada em 750 testes e 20 verificações PostgreSQL, backup local/cópia cifrada e serviços/HTTPS conferidos. [Publicação e evidências](docs/DEPLOY_1.28.5.md); estado na [entrada atual do relatório](RELATORIO.md#padrão-de-follow-up-para-novos-leads--estável-1285-24112026). O planejamento 2.0 abaixo é histórico e não foi implementado por este pedido.
 
 Atualizado em 23/10/2026. Especificação completa: [WAIA_2.0.0.md](WAIA_2.0.0.md).

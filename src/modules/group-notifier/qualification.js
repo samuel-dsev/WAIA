@@ -10,8 +10,8 @@ export function announcesQualificationClosing(text, configuredClosing) {
   if (closing && value.includes(closing)) return true;
   return /\b(?:anotei|anotamos|registrei|registramos)\b[^.!?]{0,100}\b(?:interesse|contato|caso|pedido)\b/u.test(value)
     || /\b(?:interesse|contato|caso|pedido)\b[^.!?]{0,50}\b(?:foi|esta) (?:registrado|anotado|encaminhado)\b/u.test(value)
-    || /\b(?:vendedor(?:es)?|responsavel|equipe|advogad[oa]s?)\b[^.!?]{0,120}\b(?:entrarao?|retornarao?|vai retornar|irao retornar|vai entrar em contato|irao entrar em contato)\b/u.test(value)
-    || /\b(?:enviei|encaminhei|notifiquei)\b[^.!?]{0,80}\b(?:grupo|equipe|vendedor|responsavel)\b/u.test(value)
+    || /\b(?:vendedor(?:es)?|responsavel|equipe|advogad[oa]s?|corretor(?:a|es|as)?)\b[^.!?]{0,120}\b(?:entrarao?|retornarao?|vai retornar|irao retornar|vai entrar em contato|irao entrar em contato)\b/u.test(value)
+    || /\b(?:enviei|encaminhei|notifiquei)\b[^.!?]{0,80}\b(?:grupo|equipe|vendedor|responsavel|corretor(?:a|es|as)?)\b/u.test(value)
     || /\baguarde (?:o |um )?retorno\b/u.test(value);
 }
 
@@ -72,6 +72,17 @@ export function qualificationContinuation(text, validationReason) {
     && !/encaminh|registr|enviad|enviei|grupo|conclu|qualific|aprov|analis|advog|equipe|retorn|aguard|chance|direito|document|\bcpf\b|bancári|telefone/iu.test(question)) return question;
   if (["NAME", "NAME_EVIDENCE"].includes(validationReason)) return "Qual nome você prefere usar neste atendimento?";
   return "Qual é o principal ponto sobre o qual você busca orientação?";
+}
+
+/** Keep an understood collecting question after a failed card repair. No card
+ * or catalog action is accepted by this recovery path. */
+export function contextualQualificationContinuation(text, configuredClosing) {
+  const value = typeof text === "string" ? text.trim() : "";
+  if (!value || value.length > 1000 || !value.endsWith("?") || (value.match(/\?/gu) || []).length !== 1
+    || announcesQualificationClosing(value, configuredClosing)
+    || /https?:\/\/|\b(?:grupo|enviei|enviad[oa]s?|encaminh\p{L}*|notific\p{L}*|agend\p{L}*|reserv\p{L}*|an[aá]lis\p{L}*)\b/iu.test(value)
+    || /\b\d{3}[. -]?\d{3}[. -]?\d{3}[- ]?\d{2}\b/u.test(value)) return null;
+  return value;
 }
 
 export function notificationText({ companyName, name, summary, qualification, phone, followUpHandoff = false, followUpRecovered = false }) {

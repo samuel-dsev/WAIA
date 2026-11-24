@@ -1,5 +1,14 @@
 # Continuidade — WAIA
 
+## Filaretti Imóveis — triagem e fotos da ficha, candidata estável 1.28.6, 24/11/2026
+
+- **Pedido/base:** corrigir a imobiliária e habilitar fotos no grupo, mantendo a linha de produção. Entrada `codex/onix-context-prod-v1.28.4`/`9a1666e`, runtime publicado `1.28.5/2f97f27`, arquivos versionados limpos e `.tmp/` preservado. Nenhuma alteração na branch `new`/2.0.
+- **Diagnóstico:** revisão 5/rascunho 51, flag de fotos desligada e avaliação automotiva desligada; destino FCI v3 habilitado e remetente conectado. Chat revisado encontrado pausado, com imagens armazenadas, e mantido assim. Falha de qualificação após expectativa de aluguel com condomínio confirmada por código sanitizado, sem prova do campo exato retornado pelo modelo.
+- **Correção:** permite fotos da ficha com qualificação contextual completa e atendimento humano, sem exigir avaliação automotiva. A captação mantém os critérios publicados. Recuperação imobiliária de ficha parcial conserva somente pergunta compreendida e segura do modelo após reavaliação, descartando ficha/ações inválidas; promessas de corretor continuam bloqueadas. Contagem das fotos respeita o limite do resumo. Sem migração, dependência, configuração automática de empresa ou alteração do follow-up.
+- **Arquivos:** `ai-service.js`, contrato de configuração, helper de qualificação, ajuda do painel, três testes e [contrato/ativação](docs/FILARETTI_IMOVEIS_FOTOS.md). Versão `1.28.6`, correção compatível. Título previsto: `v1.28.6 - corrige triagem imobiliaria e fotos da ficha sem avaliacao automotiva`.
+- **Validação:** suíte preliminar Node 22 com 756 aprovados/32 condicionais; regressão dirigida final com 105 aprovados/zero falhas após limitar a recuperação aos percursos previstos; 30 casos PostgreSQL aprovados com 140 tabelas preservadas. Fixture de configuração corrigida para fornecer os critérios obrigatórios, sem relaxar validação. Imagem final ainda em preparação. Evidências `.tmp/filaretti-images/`, `.tmp/filaretti-images-postgres.tap` e diagnósticos sanitizados em `.tmp/follow-up-default/deploy/filaretti-review.log`.
+- **Estado/limites:** somente preparação local; publicação da 1.28.6 ainda depende de autorização específica. Ativação da flag na Filaretti precisa do painel, cujo controle retornou timeout; não foi contornada por SQL ou código. Nenhuma mensagem externa, foto antiga reenviada, chat reaberto, push ou promoção de main.
+
 ## Padrão de follow-up para novos leads — estável 1.28.5, 24/11/2026
 
 - **Escopo/base:** pedido para refazer exclusivamente na linha de produção 1.28.4. Checkout `C:\Users\Samuel\Documents\Projetos\WAIA\.tmp\turim-prod-1.23.5`, branch `codex/onix-context-prod-v1.28.4`, entrada `7956dc4`; arquivos versionados limpos na entrada e `.tmp/` preexistente preservado. Nenhuma implementação ou atualização de versão na branch `new`/2.0.

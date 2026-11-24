@@ -19,7 +19,7 @@ import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, websiteReferenceCla
 import { pendingWebsiteFinancingModel } from '../business/vehicle-financing-context.js';
 import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationInstructions, tradeInTurnInstructions, tradeInOfferFromAnswer, reconcileTradeInEvaluation, hasTradeInEvaluationConsent,
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
-import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
+import { qualificationFormat, qualificationInstructions, parseQualification, qualificationContinuation, contextualQualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
 
 function normalizeUsage(response) {
@@ -155,7 +155,9 @@ export class MultiTenantAiService {
       const contextualVehicleService = config.contextualServiceEnabled && websiteCatalog && qualifies && !intakeOnly;
       let financingVehicles = [];
       const evaluationEnabled = config.tradeInEvaluationEnabled && qualifies && !intakeOnly;
-      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: evaluationEnabled || Boolean(contextualVehicleService) || Boolean(realEstateCatalog && config.contextualServiceEnabled) });
+      const leadPhotosEnabled = config.leadImageHandoffEnabled && config.contextualServiceEnabled && qualifies && !intakeOnly;
+      const recoverPartialQualification = Boolean(realEstateCatalog) || leadPhotosEnabled && !evaluationEnabled;
+      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: leadPhotosEnabled || evaluationEnabled || Boolean(contextualVehicleService) || Boolean(realEstateCatalog && config.contextualServiceEnabled) });
       const photoHandoff = { photosHandoffEnabled: config.leadImageHandoffEnabled && evaluationEnabled, storedPhotos: transcript.storedPhotos };
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       promptHistory = transcript.input;
@@ -215,6 +217,7 @@ export class MultiTenantAiService {
       const instructions = [buildInstructions(config), catalogFormat ? salesMode ? realEstateCatalog ? REAL_ESTATE_SALES_INSTRUCTIONS : catalogSalesInstructions({ contextualServiceEnabled: Boolean(contextualVehicleService) }) : CATALOG_SELECTION_INSTRUCTIONS : "" ,
         intakeOnly ? `${LEAD_INTAKE_INSTRUCTIONS}\nCritérios publicados: ${config.leadQualificationCriteria}`
           : qualifies ? qualificationInstructions(config.leadQualificationCriteria) : "",
+        leadPhotosEnabled ? "ANEXOS DA TRIAGEM: o sistema confirmou " + transcript.storedPhotos + " imagem(ns) do cliente armazenada(s) neste atendimento. Reconheça o recebimento sem análise visual. Fotos não substituem nome, localização, valores ou outros critérios publicados: aproveite os dados conhecidos e peça somente o próximo dado faltante. A ficha e os anexos só são encaminhados pelo sistema depois da conclusão válida. Não prometa envio, recepção pela equipe ou avaliação já realizada. Para imóveis, siga a captação e a continuidade com corretor; não use avaliação de veículos ou financiamento automotivo." : "",
         catalogFormat && salesMode && safeContext.catalog.source?.type === "website_catalog" ? WEBSITE_CATALOG_SALES_INSTRUCTIONS : "",
         evaluationEnabled ? tradeInEvaluationInstructions(photoHandoff)
           + (photoHandoff.photosHandoffEnabled ? "\nReferência para encerramento PRESENCIAL, não para fotos: " : "\nReferência para o encerramento: ")
@@ -530,8 +533,9 @@ export class MultiTenantAiService {
           try {
             let card = evaluationQualifies && structured.leadQualification?.status === "qualified"
               ? evaluationLeadCard(structured.leadQualification, currentEvaluation, safeContext, qualificationEvidence) : structured.leadQualification;
-            if (photoHandoff.photosHandoffEnabled && card?.status === "qualified" && transcript.storedPhotos > 0) {
-              card = { ...card, summary: String(card.summary || "") + "\nImagens recebidas do cliente: " + transcript.storedPhotos + "." };
+            if (leadPhotosEnabled && card?.status === "qualified" && typeof card.summary === "string" && transcript.storedPhotos > 0) {
+              const summary = card.summary, line = "Imagens recebidas do cliente: " + transcript.storedPhotos + ".";
+              if (!summary.includes(line) && summary.length + line.length + 1 <= 1600) card = { ...card, summary: summary + "\n" + line };
             }
             if ((financingVehicles.length || customerService?.warrantyAccepted) && card?.status === "qualified") card = preserveCollectedFinancingData(card, qualificationEvidence, [...promptHistory, ...transcript.current]);
             if (contextualVehicleService && card?.status === "qualified") {
@@ -553,7 +557,7 @@ export class MultiTenantAiService {
                 if (attempt === 0) {
                   leadQualification = undefined;
                   ({ response, text } = await requestResponse(true,
-                    "O encerramento de uma ficha qualified precisa ser corrigido: text deve agradecer e informar que um vendedor retornará sobre o pedido atual, conforme o modelo do roteiro. Não acrescente pergunta, pedido de confirmação, convite de continuidade ou dados pessoais. Não afirme nem prometa envio da ficha/anexos ao grupo, reserva ou horário. Preserve a ficha e os dados confirmados, sem voltar a collecting se os critérios já estão completos."));
+                    "O encerramento de uma ficha qualified precisa ser corrigido: text deve agradecer e informar a continuidade humana do pedido atual conforme o roteiro da empresa (corretor, vendedor ou responsável). Não acrescente pergunta, pedido de confirmação, convite de continuidade ou dados pessoais. Não afirme nem prometa envio da ficha/anexos ao grupo, reserva ou horário. Preserve a ficha e os dados confirmados, sem voltar a collecting se os critérios já estão completos."));
                   continue;
                 }
                 throw Object.assign(new Error("Encerramento contextual inválido."), { code: "AI_INVALID_CUSTOMER_SERVICE" });
@@ -571,7 +575,7 @@ export class MultiTenantAiService {
               evaluationAnswer = structured.text;
             }
           } catch (error) {
-            if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE"].includes(error.validationReason)) throw error;
+            if (error.code !== "AI_INVALID_LEAD_QUALIFICATION" || !["NAME", "SUMMARY", "QUALIFICATION", "NAME_EVIDENCE", ...(config.contextualServiceEnabled && recoverPartialQualification ? ["ENVELOPE"] : [])].includes(error.validationReason)) throw error;
             if (config.contextualServiceEnabled) {
               if (attempt === 0) {
                 const missingName = ["NAME", "NAME_EVIDENCE"].includes(error.validationReason);
@@ -581,14 +585,20 @@ export class MultiTenantAiService {
                   : "Corrija a ficha com os dados originais e os critérios publicados, preservando o pedido atual.", repairFormat));
                 continue;
               }
-              throw error;
+              const continuation = recoverPartialQualification && [undefined, "none", "details"].includes(structured.catalogAction)
+                ? contextualQualificationContinuation(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING) : null;
+              if (!continuation) throw error;
+              leadQualification = undefined;
+              qualificationIssue = error.validationReason;
+              structured.text = continuation;
+            } else {
+              if ((evaluationQualifies || financingVehicles.length) && error.validationReason === "SUMMARY" && attempt === 0) {
+                ({ response, text } = await requestResponse(true)); continue;
+              }
+              qualificationIssue = error.validationReason;
+              structured.text = financingVehicles.length && ["NAME", "NAME_EVIDENCE"].includes(qualificationIssue)
+                ? "Qual é o seu primeiro nome?" : qualificationContinuation(structured.text, qualificationIssue);
             }
-            if ((evaluationQualifies || financingVehicles.length) && error.validationReason === "SUMMARY" && attempt === 0) {
-              ({ response, text } = await requestResponse(true)); continue;
-            }
-            qualificationIssue = error.validationReason;
-            structured.text = financingVehicles.length && ["NAME", "NAME_EVIDENCE"].includes(qualificationIssue)
-              ? "Qual é o seu primeiro nome?" : qualificationContinuation(structured.text, qualificationIssue);
           }
           if (!websitePresentation && !leadQualification && !qualificationIssue && announcesQualificationClosing(structured.text, config.leadQualificationClosing || QUALIFICATION_CLOSING)) {
             if (attempt === 0) {
