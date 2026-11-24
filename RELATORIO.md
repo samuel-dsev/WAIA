@@ -1,5 +1,14 @@
 # Continuidade — WAIA
 
+## Padrão de follow-up para novos leads — candidata estável 1.28.5, 24/11/2026
+
+- **Escopo/base:** pedido para refazer exclusivamente na linha de produção 1.28.4. Checkout `C:\Users\Samuel\Documents\Projetos\WAIA\.tmp\turim-prod-1.23.5`, branch `codex/onix-context-prod-v1.28.4`, entrada `7956dc4`; arquivos versionados limpos na entrada e `.tmp/` preexistente preservado. Nenhuma implementação ou atualização de versão na branch `new`/2.0.
+- **Alteração:** a primeira entrada real que cria uma conversa pode iniciar o follow-up automaticamente, usando exatamente perfil, períodos e fechamento salvos no painel. Exige follow-up da empresa/piloto habilitados, IA ativa, conversa em bot e contato/canal disponíveis. Pausa, bloqueio, consentimento revogado, exclusão e triagem concluída impedem disparos. O agendamento manual existente foi reutilizado; a conferência de triagem também ocorre antes do envio.
+- **Preservação:** sem atualização retroativa, alteração da política da empresa ou reinício dos ciclos já selecionados pelo titular. Duplicatas, mensagens posteriores, desativação manual e retorno de contato com ciclo anterior não reativam a automação. Não é necessário salvar novamente a política. Sem migração, nova dependência, alteração de tenant por SQL ou envio externo.
+- **Arquivos principais:** repositórios de webhook/follow-up, `test/follow-up-postgres.test.js`, `docs/FOLLOW_UP_AUTOMATICO.md`, manifests e este relatório. Versão `1.28.5`, correção compatível da linha estável; mensagem prevista: `v1.28.5 - ativa follow-up por padrao para novos leads elegiveis`.
+- **Validação:** suíte geral com 752 aprovados/31 condicionais ignorados, zero falhas. Mais 20 verificações PostgreSQL aprovadas, incluindo calendário personalizado, ciclos/contadores anteriores, duplicatas, bloqueios, pausa/retomada, triagem concluída e rollback atômico do webhook. Reutilizado o banco isolado existente `waia_v2_upgrade` de `waia-test`, com código e testes montados exclusivamente desta base estável; zero migrações aplicadas, 140 tabelas preservadas por contagem/hash e serviço devolvido ao estado parado. Manifests e diff conferidos. Evidências locais em `.tmp/follow-up-default-{unit,postgres}.tap`; validações adicionais da imagem ficam em `.tmp/follow-up-default/` quando executadas.
+- **Estado/limites:** preparação local, sem push, promoção de main, deploy ou modificação de configuração de cliente. A publicação deste novo comportamento depende da autorização operacional específica. A seção histórica abaixo permanece como referência, não como versão atual da linha estável.
+
 Atualizado em 23/10/2026. Plano ativo: [WAIA_2.0.0.md](WAIA_2.0.0.md); sequência: [PLAN.md](PLAN.md).
 Este relatório separa inspeção local, histórico de operação e trabalho ainda planejado.
 

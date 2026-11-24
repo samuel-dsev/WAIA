@@ -10,6 +10,8 @@ const missing = () => followUpError('FOLLOW_UP_NOT_FOUND', 'Conversa não encont
 const conflict = () => followUpError('FOLLOW_UP_CONFLICT', 'O follow-up mudou. Atualize a conversa.');
 const allowed = (_rights, settings) => settings?.legacy_pilot === true;
 const defaults = { enabled: false, profile: 'test', version: 0 };
+const botAvailable = c => c && c.modo_atendimento === 'bot' && c.status === 'aberta' && !c.bot_pausado && !c.bloqueado
+  && c.consentimento_status !== 'revogado' && !c.exclusao_solicitada_at && c.number_status === 'ativo' && !c.number_deleted;
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 
 export class FollowUpRepository {
@@ -101,6 +103,34 @@ export class FollowUpRepository {
     await client.query(`UPDATE mensagens m SET status='ignorada_duplicidade' FROM follow_up_actions a WHERE a.empresa_id=$1
       AND a.cycle_id=$2 AND a.message_id=m.id AND a.state='cancelled' AND m.external_message_id IS NULL AND m.status='enfileirada'`, [empresaId, cycleId]);
   }
+  async startCycle(client, empresaId, c, settings, version) {
+    const id = randomUUID(), start = this.clock();
+    await client.query(`INSERT INTO follow_up_cycles(id,empresa_id,conversa_id,contato_id,profile,generation,version,started_at,periods_hours,close_after_hours)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [id, empresaId, c.id, c.contato_id, settings.profile, c.lock_version, version, start, settings.periods_hours, settings.close_after_hours]);
+    const hours = [...settings.periods_hours, settings.close_after_hours];
+    for (const [slot, hour] of hours.entries()) {
+      const due = new Date(+start + Math.round(hour*3600000)), actionId = randomUUID();
+      await client.query(`INSERT INTO follow_up_actions(id,empresa_id,cycle_id,slot,due_at,is_closure) VALUES($1,$2,$3,$4,$5,$6)`, [actionId, empresaId, id, slot, due, slot === hours.length-1]);
+      await client.query(`INSERT INTO outbox_jobs(empresa_id,conversa_id,job_type,dedup_key,payload,disponivel_at,correlation_id)
+        VALUES($1,$2,'process_follow_up',$3,$4::jsonb,$5,$6)`, [empresaId, c.id, `follow-up:${actionId}`, JSON.stringify({ actionId, payloadVersion: 1 }), due, randomUUID()]);
+    }
+  }
+  // Only live ingress calls this while creating the conversation and first message.
+  // Existing conversations and prior individual choices are never backfilled.
+  async startForNewConversation(client, empresaId, conversationId) {
+    const settings = await this.settings(client, empresaId);
+    if (!settings.enabled) return;
+    const c = await this.conversation(client, empresaId, conversationId);
+    if (!botAvailable(c)) return;
+    if ((await client.query('SELECT 1 FROM follow_up_cycles WHERE empresa_id=$1 AND contato_id=$2 LIMIT 1', [empresaId, c.contato_id])).rowCount) return;
+    if ((await client.query('SELECT 1 FROM qualified_leads WHERE empresa_id=$1 AND conversa_id=$2', [empresaId, conversationId])).rowCount) return;
+    const rights = await readCompanyPolicy(client, empresaId, this.clock());
+    if (!allowed(rights, settings) || !await this.activeConfiguration(client, empresaId)) return;
+    const channel = await readChannelExecutionGate(client, { empresaId, numberId: c.numero_whatsapp_id });
+    if (!channel.allowed) return;
+    await this.startCycle(client, empresaId, c, settings, 1);
+    await this.audit(client, empresaId, null, 'follow_up.auto_enabled', conversationId);
+  }
   toggle(auth, empresaId, conversationId, body) {
     const input = parseFollowUp(contactSchema, body);
     return this.access(auth, empresaId, true, false, async client => {
@@ -113,27 +143,16 @@ export class FollowUpRepository {
       if (input.enabled) {
         const settings = await this.settings(client, empresaId), rights = await readCompanyPolicy(client, empresaId, this.clock());
         if (!settings.enabled || !allowed(rights, settings)) throw followUpError('FOLLOW_UP_COMPANY_DISABLED', 'Habilite o follow-up da empresa primeiro.');
-        if (!await this.activeConfiguration(client, empresaId) || c.modo_atendimento !== 'bot' || c.status !== 'aberta' || c.bot_pausado || c.bloqueado
-          || c.consentimento_status === 'revogado' || c.exclusao_solicitada_at || c.number_status !== 'ativo' || c.number_deleted)
+        if (!await this.activeConfiguration(client, empresaId) || !botAvailable(c))
           throw followUpError('FOLLOW_UP_BOT_REQUIRED', 'O contato precisa estar com o bot ativo e disponível.');
         const source = (await client.query(`SELECT 1 FROM mensagens WHERE empresa_id=$1 AND conversa_id=$2 AND direcao='entrada' AND redacted_at IS NULL
           AND (expires_at IS NULL OR expires_at>$3) AND NOT coalesce(outbound_payload->>'historical','false')='true' LIMIT 1`, [empresaId, conversationId, this.clock()])).rowCount;
         if (!source) throw followUpError('FOLLOW_UP_CONTEXT_REQUIRED', 'A conversa precisa ter histórico disponível.');
         if ((await client.query('SELECT 1 FROM qualified_leads WHERE empresa_id=$1 AND conversa_id=$2', [empresaId, conversationId])).rowCount)
           throw followUpError('FOLLOW_UP_ALREADY_COMPLETED', 'A triagem deste contato já foi concluída.');
-        const id = randomUUID(), start = this.clock();
         if ((await client.query(`SELECT 1 FROM follow_up_cycles WHERE empresa_id=$1 AND contato_id=$2 AND enabled`, [empresaId,c.contato_id])).rowCount)
           throw followUpError('FOLLOW_UP_CONTACT_ACTIVE','Este contato já tem follow-up em outra conversa.');
-        await client.query(`INSERT INTO follow_up_cycles(id,empresa_id,conversa_id,contato_id,profile,generation,version,started_at,periods_hours,close_after_hours)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [id, empresaId, conversationId, c.contato_id, settings.profile, c.lock_version, Number(old?.version || 0) + 1, start, settings.periods_hours, settings.close_after_hours]);
-        const hours = [...settings.periods_hours, settings.close_after_hours];
-        for (const [slot, hour] of hours.entries()) {
-          const due = new Date(+start + Math.round(hour*3600000));
-          const actionId = randomUUID();
-          await client.query(`INSERT INTO follow_up_actions(id,empresa_id,cycle_id,slot,due_at,is_closure) VALUES($1,$2,$3,$4,$5,$6)`, [actionId, empresaId, id, slot, due, slot === hours.length-1]);
-          await client.query(`INSERT INTO outbox_jobs(empresa_id,conversa_id,job_type,dedup_key,payload,disponivel_at,correlation_id)
-            VALUES($1,$2,'process_follow_up',$3,$4::jsonb,$5,$6)`, [empresaId, conversationId, `follow-up:${actionId}`, JSON.stringify({ actionId, payloadVersion: 1 }), due, randomUUID()]);
-        }
+        await this.startCycle(client, empresaId, c, settings, Number(old?.version || 0) + 1);
       }
       await this.audit(client, empresaId, auth.user.id, input.enabled ? 'follow_up.enabled' : 'follow_up.disabled', conversationId);
       return this.view(client, empresaId, conversationId);
@@ -163,6 +182,9 @@ export class FollowUpRepository {
       || c.modo_atendimento !== 'bot' || Number(c.lock_version) !== Number(row.generation) || c.status !== 'aberta' || c.bot_pausado || c.bloqueado
       || c.consentimento_status === 'revogado' || c.exclusao_solicitada_at || c.number_status !== 'ativo' || c.number_deleted) {
       await this.cancel(client, empresaId, row.cycle_id, 'AUTOMATION_UNAVAILABLE'); return { blocked: true };
+    }
+    if ((await client.query('SELECT 1 FROM qualified_leads WHERE empresa_id=$1 AND conversa_id=$2', [empresaId, c.id])).rowCount) {
+      await this.cancel(client, empresaId, row.cycle_id, 'TRIAGE_COMPLETED', 'completed'); return { blocked: true };
     }
     const channel = await readChannelExecutionGate(client, { empresaId, numberId: c.numero_whatsapp_id, requiredResource: 'F02' });
     if (!channel.allowed) { await this.cancel(client, empresaId, row.cycle_id, 'CHANNEL_UNAVAILABLE'); return { blocked: true }; }

@@ -7,6 +7,7 @@ import { FollowUpRepository } from '../src/modules/follow-up/repository.js';
 import { compileTenantRuntimeConfigV2 } from '../src/modules/configuration/compiler.js';
 import { readGroupDelivery, groupDeliveryAllowed } from '../src/modules/group-notifier/delivery-images.js';
 import { handleFollowUpDecline } from '../src/modules/follow-up/decline.js';
+import { PostgresWebhookRepository } from '../src/infra/postgres/repositories/webhook-repository.js';
 
 test('follow-up PostgreSQL: opt-in, relógio, persistência, cancelamento, isolamento e fichas', { skip: process.env.RUN_POSTGRES_INTEGRATION !== 'true' }, async t => {
   assert.equal(process.env.NODE_ENV, 'test');
@@ -50,7 +51,7 @@ test('follow-up PostgreSQL: opt-in, relógio, persistência, cancelamento, isola
     async function enable(c) { return repo.toggle(auth,a,c.id,{enabled:true,expectedVersion:0}); }
     async function actions(c) { return (await query(`SELECT a.* FROM follow_up_actions a JOIN follow_up_cycles f ON f.empresa_id=a.empresa_id AND f.id=a.cycle_id WHERE a.empresa_id=$1 AND f.conversa_id=$2 ORDER BY slot`, [a,c.id])).rows; }
     const draft = { text: 'Ainda deseja ajuda com o hatch?', summary: 'Cliente procura hatch e prefere câmbio automático; orçamento não informado.' };
-    await t.test('empresa/contatos novos desligados, habilitação explícita e versão otimista', async () => {
+    await t.test('empresa desligada e conversas preexistentes exigem habilitação explícita', async () => {
       const c = await conversation();
       assert.equal((await repo.read(auth,a,c.id)).contact.enabled,false);
       assert.equal((await repo.read(auth,a)).settings.enabled,false);
@@ -163,6 +164,98 @@ test('follow-up PostgreSQL: opt-in, relógio, persistência, cancelamento, isola
       assert.equal(claim.template.name,'retomar');assert.equal(claim.parameter,draft.text);
       await repo.finish(a,action.id,claim.messageId,`fixture-${randomUUID()}`);
       assert.equal((await actions(c))[0].state,'accepted');
+    });
+    const webhooks = new PostgresWebhookRepository(txpool);
+    webhooks.followUp = repo;
+    const newPhone = () => `5599${String(serial++).padStart(7,'0')}`;
+    const payload = (phone, externalMessageId=randomUUID(), company=a, numberId=number) => ({
+      empresaId:company, numeroWhatsappId:numberId, correlationId:randomUUID(),
+      event:{senderPhone:phone,externalMessageId,messageType:'text',text:'Procuro um hatch.',occurredAt:now},
+    });
+    const ingress = input => webhooks.withTenantTransaction({empresaId:input.empresaId}, tx => webhooks.insertInboundMessage(tx,input));
+    await t.test('novo lead entra ativo nos prazos personalizados e preserva escolhas e contadores existentes',async()=>{
+      const version=(await repo.read(auth,a)).settings.version;
+      await repo.saveSettings(auth,a,{enabled:true,profile:'custom',periodsHours:[0.5,3,25],closeAfterHours:96,expectedVersion:version});
+      const enabled=await conversation(), disabled=await conversation(), untouched=await conversation();
+      await enable(enabled); await enable(disabled);
+      await repo.toggle(auth,a,disabled.id,{enabled:false,expectedVersion:1});
+      const before=[];
+      for(const c of [enabled,disabled,untouched]) before.push(await repo.read(auth,a,c.id));
+      const input=payload(newPhone()), fresh=await ingress(input), c={id:fresh.conversationId};
+      const view=await repo.read(auth,a,c.id), scheduled=await actions(c);
+      assert.equal(view.contact.enabled,true);assert.equal(view.contact.version,1);assert.equal(view.contact.profile,'custom');
+      assert.deepEqual(scheduled.map(row=>(+row.due_at-+now)/3600000),[0.5,3,25,96]);
+      assert.equal(scheduled.at(-1).is_closure,true);
+      assert.equal((await ingress(input)).inserted,false);
+      await ingress(payload(input.event.senderPhone));assert.equal((await actions(c)).length,4);
+      assert.equal((await query("SELECT 1 FROM outbox_jobs WHERE empresa_id=$1 AND conversa_id=$2 AND job_type='process_follow_up'",[a,c.id])).rowCount,4);
+      for(const old of [enabled,disabled,untouched]) {
+        const phone=(await query('SELECT telefone_normalizado FROM contatos WHERE id=$1',[old.contact])).rows[0].telefone_normalizado;
+        await ingress(payload(phone));
+      }
+      const after=[];
+      for(const old of [enabled,disabled,untouched]) after.push(await repo.read(auth,a,old.id));
+      assert.deepEqual(after,before);
+      const policy=await repo.read(auth,a);assert.equal(policy.settings.version,version+1);assert.deepEqual(policy.settings.periodsHours,[0.5,3,25]);
+      await repo.toggle(auth,a,c.id,{enabled:false,expectedVersion:1});
+      await ingress(payload(input.event.senderPhone));assert.equal((await repo.read(auth,a,c.id)).contact.enabled,false);
+      await query("UPDATE conversas SET status='fechada',fechada_at=now() WHERE id=$1",[c.id]);
+      const reopened=await ingress(payload(input.event.senderPhone));assert.notEqual(reopened.conversationId,c.id);
+      assert.equal((await repo.read(auth,a,reopened.conversationId)).contact.enabled,false);
+    });
+    await t.test('contato pausado, bloqueado, com consentimento revogado ou exclusão solicitada não entra ativo',async()=>{
+      for(const changes of ["bot_pausado=true","bloqueado=true","consentimento_status='revogado'","exclusao_solicitada_at=now()"]){
+        const phone=newPhone();
+        await query('INSERT INTO contatos(empresa_id,telefone_normalizado) VALUES($1,$2)',[a,phone]);
+        await query(`UPDATE contatos SET ${changes} WHERE empresa_id=$1 AND telefone_normalizado=$2`,[a,phone]);
+        const fresh=await ingress(payload(phone));
+        assert.equal((await repo.read(auth,a,fresh.conversationId)).contact.enabled,false,changes);
+        assert.equal((await actions({id:fresh.conversationId})).length,0);
+      }
+    });
+    await t.test('empresa desligada, piloto não autorizado e IA inativa impedem o novo padrão',async()=>{
+      const isolatedNumber=(await query(`INSERT INTO numeros_whatsapp(empresa_id,phone_number_id,status) VALUES($1,$2,'ativo') RETURNING id`,[b,randomUUID()])).rows[0].id;
+      const isolated=await ingress(payload(newPhone(),randomUUID(),b,isolatedNumber));
+      assert.equal((await repo.read(auth,b,isolated.conversationId)).contact.enabled,false);
+      await query('UPDATE follow_up_settings SET legacy_pilot=false WHERE empresa_id=$1',[a]);
+      const denied=await ingress(payload(newPhone()));assert.equal((await repo.read(auth,a,denied.conversationId)).contact.enabled,false);
+      await query('UPDATE follow_up_settings SET legacy_pilot=true WHERE empresa_id=$1',[a]);
+      await query('UPDATE empresas SET configuracao_ativa_versao=NULL WHERE id=$1',[a]);
+      const inactive=await ingress(payload(newPhone()));assert.equal((await repo.read(auth,a,inactive.conversationId)).contact.enabled,false);
+      await query('UPDATE empresas SET configuracao_ativa_versao=1 WHERE id=$1',[a]);
+    });
+    await t.test('pausar um novo lead cancela o ciclo; devolver ao bot e receber mensagem não reativam',async()=>{
+      const input=payload(newPhone()), fresh=await ingress(input), c={id:fresh.conversationId};
+      assert.equal((await repo.read(auth,a,c.id)).contact.enabled,true);
+      await query("UPDATE conversas SET modo_atendimento='pausado',lock_version=lock_version+1 WHERE id=$1",[c.id]);
+      await query("UPDATE conversas SET modo_atendimento='bot',lock_version=lock_version+1 WHERE id=$1",[c.id]);
+      await ingress(payload(input.event.senderPhone));
+      assert.equal((await repo.read(auth,a,c.id)).contact.enabled,false);
+      assert.ok((await actions(c)).every(row=>row.state==='cancelled'));
+    });
+    await t.test('triagem concluída bloqueia disparos mesmo se a conversa ainda estiver em bot',async()=>{
+      const fresh=await ingress(payload(newPhone())), c={id:fresh.conversationId}, [action]=await actions(c);
+      const source=(await query('SELECT contato_id FROM conversas WHERE id=$1',[c.id])).rows[0];
+      const reply=await add(c.id,source.contato_id,'saida','Triagem concluída.');
+      await query('INSERT INTO qualified_leads(empresa_id,conversa_id,contato_id,reply_id,config_version) VALUES($1,$2,$3,$4,1)',[a,c.id,source.contato_id,reply.id]);
+      now=new Date(action.due_at);
+      assert.equal((await repo.snapshot(a,action.id)).blocked,true);
+      assert.equal((await repo.read(auth,a,c.id)).contact.reason,'TRIAGE_COMPLETED');
+      assert.ok((await actions(c)).every(row=>row.state==='cancelled'));
+    });
+    await t.test('rollback do webhook desfaz mensagem, ciclo e jobs; repetição cria só um ciclo',async()=>{
+      const input=payload(newPhone());
+      const count=async()=>Number((await query('SELECT count(*) AS count FROM follow_up_cycles WHERE empresa_id=$1',[a])).rows[0].count);
+      const before=await count();
+      await assert.rejects(webhooks.withTenantTransaction({empresaId:a},async tx=>{
+        await webhooks.insertInboundMessage(tx,input);throw Error('syntheticRollback');
+      }),/syntheticRollback/);
+      assert.equal(await count(),before);
+      assert.equal((await query('SELECT 1 FROM mensagens WHERE empresa_id=$1 AND external_message_id=$2',[a,input.event.externalMessageId])).rowCount,0);
+      const fresh=await ingress(input);assert.equal(await count(),before+1);
+      assert.equal((await actions({id:fresh.conversationId})).length,4);
+      const system=payload(newPhone());system.event.messageType='unsupported';system.event.text='';
+      const ignored=await ingress(system);assert.equal((await actions({id:ignored.conversationId})).length,0);
     });
   } finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
 });

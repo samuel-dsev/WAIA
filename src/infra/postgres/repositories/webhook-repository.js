@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { withPlatformTransaction, withTenantTransaction } from "../transaction.js";
 import { normalizeAdReferral } from "../../../modules/whatsapp/ad-referral.js";
 import { normalizeYCloudMediaReference } from "../../../integrations/ycloud/media-reference.js";
+import { FollowUpRepository } from "../../../modules/follow-up/repository.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -51,6 +52,7 @@ export class PostgresTenantResolver {
 export class PostgresWebhookRepository {
   constructor(pool) {
     this.pool = pool;
+    this.followUp = new FollowUpRepository({ pool });
   }
 
   withTenantTransaction(context, callback) {
@@ -81,14 +83,15 @@ export class PostgresWebhookRepository {
         FOR UPDATE`,
       [empresaId, contatoId, numeroWhatsappId],
     );
-    if (existing.rows[0]) return existing.rows[0].id;
+    if (existing.rows[0]) return { id: existing.rows[0].id, created: false };
+    const id = randomUUID();
     const created = await tx.client.query(
-      `INSERT INTO conversas (empresa_id, contato_id, numero_whatsapp_id, correlation_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO conversas (empresa_id, contato_id, numero_whatsapp_id, correlation_id, id)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (empresa_id, contato_id, numero_whatsapp_id) WHERE status = 'aberta'
        DO UPDATE SET updated_at = conversas.updated_at
        RETURNING id`,
-      [empresaId, contatoId, numeroWhatsappId, uuidOrNew(correlationId)],
+      [empresaId, contatoId, numeroWhatsappId, uuidOrNew(correlationId), id],
     );
     await tx.client.query(
       `INSERT INTO estados_conversa (empresa_id, conversa_id)
@@ -96,7 +99,7 @@ export class PostgresWebhookRepository {
        ON CONFLICT (empresa_id, conversa_id) DO NOTHING`,
       [empresaId, created.rows[0].id],
     );
-    return created.rows[0].id;
+    return { id: created.rows[0].id, created: created.rows[0].id === id };
   }
 
   async insertInboundMessage(tx, { empresaId, numeroWhatsappId, event, correlationId }) {
@@ -109,8 +112,10 @@ export class PostgresWebhookRepository {
     if (duplicate.rows[0]) {
       return { inserted: false, messageId: duplicate.rows[0].id, conversationId: duplicate.rows[0].conversa_id };
     }
+    // Follow the company -> conversation lock order used by follow-up controls.
+    await tx.client.query('SELECT id FROM empresas WHERE id=$1 FOR SHARE', [empresaId]);
     const contatoId = await this.#contact(tx, empresaId, event.senderPhone, event.occurredAt);
-    const conversationId = await this.#conversation(tx, {
+    const { id: conversationId, created } = await this.#conversation(tx, {
       empresaId,
       contatoId,
       numeroWhatsappId,
@@ -161,6 +166,7 @@ export class PostgresWebhookRepository {
       );
       return { inserted: false, messageId: row.rows[0]?.id, conversationId: row.rows[0]?.conversa_id };
     }
+    if (created && messageType(event.messageType) !== 'sistema') await this.followUp.startForNewConversation(tx.client, empresaId, conversationId);
     return { inserted: true, messageId: inserted.rows[0].id, conversationId };
   }
 

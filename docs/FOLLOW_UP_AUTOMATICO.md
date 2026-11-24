@@ -1,16 +1,19 @@
-# Follow-up individual — porte estável 1.28.0
+# Follow-up individual — linha estável
+
+**Ajuste 1.28.5, preparado em 24/11/2026 sobre 1.28.4:** novas conversas recebidas pelo webhook iniciam o follow-up por padrão quando a empresa já o habilitou e os critérios de disponibilidade estão atendidos. Usa os períodos e o fechamento já salvos no painel, inclusive o perfil personalizado. Nenhuma configuração, seleção individual ou ciclo existente é atualizado retroativamente. A publicação deste ajuste ainda está pendente.
 
 Implementação autorizada em 20/11/2026, incluindo a alteração posterior para períodos editáveis em horas. Escopo: follow-up individual; campanhas em massa/E9A integral continuam fora desta entrega. Atendimento padrão, roteiro, critérios, catálogo e fechamento preservados.
 
 ## Controles e calendário
 
-- Todas as empresas começam desabilitadas. Contatos existentes e novos começam desmarcados, mesmo após habilitar a empresa. Nenhuma habilitação por nome, seed, SQL, ambiente ou código.
+- Todas as empresas continuam desabilitadas até configuração pelo painel. Com a empresa habilitada, a primeira entrada real de uma conversa nova inicia o ciclo por padrão, respeitando o piloto autorizado, a IA ativa e os critérios de disponibilidade. Conversas existentes permanecem como estavam. Duplicatas, mensagens posteriores e retomadas de contato com ciclo anterior não ativam nem reiniciam o follow-up. Não há habilitação de empresa por nome, seed, SQL ou ambiente.
 - Painel: selecionar empresa → Conversas/Contatos → **Follow-up da empresa**. O botão **Follow-up** do contato abre sua conversa e a ativação individual. Portal: **Follow-up automático** dentro da conversa, sujeito a permissões e X04.
 - Empresa ativa com IA publicada e habilitada; conversa aberta em modo bot; contato/canal disponíveis. Pausa, bloqueio, consentimento revogado ou exclusão solicitada impedem disparos.
-- Marcar o contato inicia o contador **naquele momento**, independentemente da idade do histórico. Cada contato tem âncora, origem, contexto e sequência próprios.
+- A ativação automática inicia o contador na entrada da conversa nova. Marcar manualmente o contato continua iniciando o contador **naquele momento**, independentemente da idade do histórico. Cada contato tem âncora, origem, contexto e sequência próprios. Triagem concluída bloqueia disparos mesmo que o chat ainda esteja em modo bot.
 - Teste: **2, 5, 10 e 15 minutos**, fechamento aos **20 minutos**. Normal: **2h, 24h, 48h e 72h**, fechamento às **96h**. Prazos absolutos desde a ativação, não intervalos somados entre mensagens.
 - Editar/adicionar/remover períodos em horas, inclusive frações (`0,5` hora = 30 minutos). Até 20 mensagens; prazos positivos, distintos e crescentes. É possível remover todos e manter só o fechamento. Este é editável e precisa ser posterior ao último disparo.
 - Salvar a política cancela ciclos existentes, sem habilitar contatos. O operador marca novamente os desejados. A política de um ciclo fica registrada; não troca prazos silenciosamente.
+- Para adotar o novo padrão após a publicação da 1.28.5, não é necessário salvar novamente a política da empresa. Assim, os ciclos já ativados e seus contadores permanecem preservados.
 - Pausar/assumir/fechar cancela próximos disparos. Devolver ao bot não reinicia automaticamente. Períodos vencidos durante indisponibilidade não saem em rajada.
 
 ## Atendimento e fichas
