@@ -9,7 +9,7 @@ import { parseCatalogSalesReply } from "../src/modules/business/catalog-sales.js
 import { matchesWebsiteGalleryPart, websiteCatalogListText } from "../src/modules/business/website-catalog-interaction.js";
 import { replyFromRow, websiteListFormatMetadata } from "../src/modules/jobs/reply-batch.js";
 import { notificationText } from "../src/modules/group-notifier/qualification.js";
-import { CONTEXTUAL_CONTINGENCY } from "../src/modules/ai/choice-clarification.js";
+import { CONTEXTUAL_CONTINGENCY, CONTEXTUAL_PROCESSING_FAILURE } from "../src/modules/ai/choice-clarification.js";
 
 const noDownPayment = { status: "not_informed", amount: null, evidence: null };
 const noWarranty = { status: "none", requestEvidence: null, offerEvidence: null, consentEvidence: null };
@@ -40,6 +40,92 @@ function service(responder, history = [], overrides = {}) {
 const request = (message, extra = {}) => ({ empresaId: "test", conversationId: "chat", correlationId: "c", messageId: "current", message,
   context: { catalog }, ...extra });
 const history = (role, body) => ({ type: "text", direction: role === "user" ? "inbound" : "outbound", status: "sent", body });
+
+test("aceite com agradecimento e saudação recupera metadado financeiro omitido pela IA", async () => {
+  const offer = "Gostaria que eu lhe enviasse uma simulação personalizada do financiamento para o Onix Joy? Posso ajudar a verificar as parcelas para facilitar sua decisão.";
+  const f = service(async () => response("Me informe seu CPF e nascimento, por favor. A entrada é opcional.", { ids: [item.id] }), [history("assistant", offer)]);
+  const reply = await f.ai.reply(request("Sim, obrigada\nBom dia.", { context: { catalog: { ...catalog, financingSession: null, interaction: { step: "finance_offer", productIds: [item.id], direct: false } } } }));
+  assert.equal(reply.source, "ai"); assert.equal(f.factory.requests.length, 1);
+  assert.equal(reply.websiteInteraction.step, "finance_accepted"); assert.equal(reply.leadQualification, undefined);
+  assert.match(reply.text, /CPF e nascimento/u);
+});
+
+test("erro repetido de nome na simulação retoma somente o dado faltante sem aceitar identidade inventada", async () => {
+  const entries = [history("user", "Quero simular o Onix Joy"), history("assistant", "Me informe CPF e nascimento, por favor."),
+    history("user", "00000000000\n01/01/1990\n2.000 de entrada"), history("assistant", CONTEXTUAL_CONTINGENCY)];
+  const f = service(async () => response("Um vendedor vai retornar com a simulação.", { ids: [item.id], action: "finance", qualification: { ...lead, name: "Nome inventado", summary: "Simulação do Onix Joy solicitada. Dados fornecidos para a análise da equipe." } }), entries);
+  const reply = await f.ai.reply(request("simulação"));
+  assert.equal(f.factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.text, "Como posso te chamar?");
+  assert.equal(reply.leadQualification, undefined); assert.equal(reply.pendingNameQualification.name, null);
+  assert.match(reply.pendingNameQualification.summary, /000\.000\.000-00/u);
+  assert.doesNotMatch(reply.pendingNameQualification.summary, /Nome inventado/u);
+  assert.equal(reply.websiteInteraction.step, "finance_accepted");
+  assert.match(JSON.stringify(f.factory.requests[1].request.input), /2\.000 de entrada/u);
+});
+
+test("falhas técnicas sucessivas não silenciam novas mensagens e a resposta útil mantém todo o histórico", async () => {
+  const entries = [history("assistant", "Me informe CPF e nascimento, por favor."), history("user", "00000000000\n01/01/1990")];
+  for (let i = 0; i < 2; i++) {
+    const failed = service(async () => { throw Object.assign(new Error("Falha fictícia"), { code: "AI_TIMEOUT" }); }, entries);
+    const reply = await failed.ai.reply(request("simulação"));
+    assert.equal(reply.text, CONTEXTUAL_PROCESSING_FAILURE); assert.equal(reply.code, undefined);
+    assert.equal(reply.leadQualification, undefined); assert.equal(reply.websiteInteraction, undefined);
+    entries.push(history("user", "simulação"), history("assistant", reply.text));
+  }
+  const f = service(async call => {
+    assert.match(call.instructions, /CONTINUIDADE APÓS CONTINGÊNCIA/u);
+    assert.match(JSON.stringify(call.input), /00000000000/u);
+    return response("Como posso te chamar?", { action: "finance", ids: [item.id] });
+  }, entries);
+  assert.equal((await f.ai.reply(request("Vamos continuar"))).text, "Como posso te chamar?");
+});
+
+test("erro de evidência comercial é reparado no campo correto sem perder troca e interesse", async () => {
+  const original = "Estou interessada em comprar um HB20 ou Up.";
+  const good = { status: "confirmed", interestEvidence: original, offerEvidence: null, consentEvidence: original };
+  const f = service(async call => {
+    if (f.factory.requests.length === 1) return response("Como posso te chamar?", { commercialInterest: { ...good, consentEvidence: null } });
+    assert.match(call.instructions, /ESPECIFICAMENTE customerService\.commercialInterest/u);
+    return response("Como posso te chamar?", { commercialInterest: good, qualification: { status: "awaiting_name", name: null,
+      summary: "Cliente quer comprar HB20 ou Up. Possui C3 2011 completo e não pode enviar fotos agora.", qualification: "Interesse de compra confirmado. Fotos da troca adiadas." } });
+  }, [history("user", "Tenho um C3 2011 completo, mas não consigo mandar fotos agora.")]);
+  const reply = await f.ai.reply(request(original));
+  assert.equal(reply.source, "ai"); assert.equal(f.factory.requests.length, 2); assert.equal(reply.text, "Como posso te chamar?");
+  assert.match(reply.pendingNameQualification.summary, /HB20 ou Up/u); assert.match(reply.pendingNameQualification.summary, /C3 2011/u);
+  assert.equal(reply.messages, undefined); assert.equal(reply.leadQualification, undefined);
+});
+
+test("foco contextual de vários modelos não transforma referência ao carro próprio em ação de catálogo", async () => {
+  const second = { ...item, id: "turim:2", name: "Citroën C3" };
+  const f = service(async () => response("Entendi que você não pode enviar fotos do seu C3 agora. Como posso te chamar?", { ids: [item.id, second.id] }));
+  const reply = await f.ai.reply(request("Tenho um C3 e não consigo mandar fotos dele agora", { context: { catalog: { ...catalog, items: [item, second] } } }));
+  assert.equal(reply.source, "ai"); assert.equal(f.factory.requests.length, 1); assert.equal(reply.messages, undefined);
+  assert.equal(reply.websiteInteraction.step, "discussion"); assert.equal(reply.leadQualification, undefined);
+});
+
+test("fotos adiadas com interesse já comprovado não voltam à pergunta de confirmar interesse", async () => {
+  const original = "Estou interessada em comprar um HB20 ou Up.";
+  const f = service(async () => response("Quando puder, envie fotos para avaliação. Como posso te chamar?", {
+    commercialInterest: { status: "confirmed", interestEvidence: original, offerEvidence: null, consentEvidence: original },
+    qualification: { status: "awaiting_name", name: null, summary: "Cliente quer HB20 ou Up e oferece um C3 2011. Fotos adiadas.", qualification: "Interesse confirmado; aguarda nome." },
+  }), [history("user", original)]);
+  const reply = await f.ai.reply(request("Só que no momento não consigo mandar fotos dele"));
+  assert.equal(f.factory.requests.length, 2); assert.equal(reply.text, "Como posso te chamar?");
+  assert.match(reply.pendingNameQualification.summary, /C3 2011/u); assert.equal(reply.leadQualification, undefined);
+});
+
+test("nome conhecido e finalidade de compra concluem sem descartar ficha por convite extra da IA", async () => {
+  const original = "Preciso de um carro para trabalhar com Uber.";
+  const f = service(async () => response("Entendi, Ana! Você procura um carro para trabalhar com Uber. Gostaria de conhecer outras opções?", {
+    commercialInterest: { status: "confirmed", interestEvidence: original, offerEvidence: null, consentEvidence: original },
+    qualification: { ...lead, summary: "Ana Teste procura um carro para trabalhar com Uber e deseja financiar sem entrada.", qualification: "Intenção de compra declarada e nome informado." },
+  }), [history("assistant", "Me informe seu nome, por favor."), history("user", "Ana Teste"), history("assistant", CONTEXTUAL_CONTINGENCY)],
+  { leadQualificationClosing: "Obrigada! Um vendedor entrará em contato para dar continuidade ao seu atendimento." });
+  const reply = await f.ai.reply(request(original));
+  assert.equal(f.factory.requests.length, 1); assert.equal(reply.leadQualification.name, "Ana Teste");
+  assert.match(reply.text, /trabalhar com Uber/u); assert.doesNotMatch(reply.text, /\?|CPF|nascimento/u);
+  assert.ok(reply.text.endsWith("Obrigada! Um vendedor entrará em contato para dar continuidade ao seu atendimento."));
+});
 
 test("dúvida de financiamento sem entrada recebe convite de simulação sem coleta antecipada", async () => {
   let count = 0;
@@ -204,12 +290,12 @@ test("aceite vago de opções chama IA apenas para esclarecer e repete até esco
   assert.equal(reply.source, "ai"); assert.equal(reply.websiteInteraction.step, "finance_accepted");
 });
 
-test("falha usa somente a nova contingência, sem pergunta concatenada ou efeitos", async () => {
+test("falha técnica é distinguida de incompreensão, sem pergunta concatenada ou efeitos", async () => {
   const offer = "Você prefere fotos do veículo ou uma simulação?";
   for (const responder of [async () => { throw Error("falha fictícia"); }, async () => response("Envie CPF.", { action: "finance", ids: [item.id] })]) {
     const { ai } = service(responder, [history("assistant", offer)], { contingencyMessage: "CONTINGÊNCIA GENÉRICA ANTIGA" });
     const result = await ai.reply(request("sim"));
-    assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_CONTINGENCY);
+    assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_PROCESSING_FAILURE);
     assert.doesNotMatch(result.text, /GENÉRICA|CPF/u);
     for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(result[key], undefined);
   }
@@ -282,13 +368,13 @@ test("histórico da repetição preserva perguntas sobre financiamento e permite
 
 test("contingência única sobrevive à recriação do serviço e não bloqueia resposta útil posterior", async () => {
   const entries = [history("assistant", "Como posso te chamar?")];
-  const first = service(async () => { throw Error("falha fictícia"); }, entries);
+  const first = service(async () => response(CONTEXTUAL_CONTINGENCY), entries);
   const initial = await first.ai.reply(request("asdfg"));
   assert.equal(initial.text, CONTEXTUAL_CONTINGENCY);
   entries.push(history("user", "asdfg"), history("assistant", initial.text), history("user", "qwerty"));
-  const restarted = service(async () => { throw Error("falha fictícia"); }, entries);
+  const restarted = service(async () => response(CONTEXTUAL_CONTINGENCY), entries);
   const repeated = await restarted.ai.reply(request("zxcv"));
-  assert.equal(restarted.factory.requests.length, 1, "A IA continua sendo consultada.");
+  assert.equal(restarted.factory.requests.length, 2, "A IA continua sendo consultada e reavalia a interpretação.");
   assert.equal(repeated.text, ""); assert.equal(repeated.code, "AI_CONTINGENCY_ALREADY_SENT");
   for (const key of ["messages", "leadQualification", "websiteInteraction", "tradeInEvaluation"]) assert.equal(repeated[key], undefined);
   const recovered = service(async () => response("Obrigada, Ana. Informe seu CPF e nascimento.", { action: "finance", ids: [item.id] }), entries);
@@ -341,7 +427,7 @@ test("retirar coleta não transforma texto vazio ou ficha não comprovada em res
   for (const answer of ["Informe seu CPF e nascimento.", "Gostaria? Informe seu CPF e nascimento."]) {
     const f = service(async () => response(answer), [history("assistant", CONTEXTUAL_CONTINGENCY)]);
     const reply = await f.ai.reply(request("É possível financiar o valor inteiro?", { context: { catalog: { ...catalog, financingSession: null } } }));
-    assert.equal(reply.source, "fallback"); assert.equal(reply.text, ""); assert.equal(reply.code, "AI_CONTINGENCY_ALREADY_SENT");
+    assert.equal(reply.source, "fallback"); assert.equal(reply.text, CONTEXTUAL_PROCESSING_FAILURE); assert.equal(reply.code, undefined);
     assert.equal(reply.leadQualification, undefined);
   }
 });
@@ -358,12 +444,12 @@ test("texto genérico repetido pela IA é substituído uma vez e reavaliado sem 
   }
 });
 
-test("contingência não entregue não impede a primeira mensagem e quota não a duplica", async () => {
-  const unsent = service(async () => { throw Error("falha fictícia"); }, [{ ...history("assistant", CONTEXTUAL_CONTINGENCY), status: "failed" }]);
+test("contingência não entregue não impede esclarecimento; falta de quota informa indisponibilidade", async () => {
+  const unsent = service(async () => response(CONTEXTUAL_CONTINGENCY), [{ ...history("assistant", CONTEXTUAL_CONTINGENCY), status: "failed" }]);
   assert.equal((await unsent.ai.reply(request("asdfg"))).text, CONTEXTUAL_CONTINGENCY);
   const limited = service(async () => assert.fail("Quota esgotada não chama provedor."), [history("assistant", CONTEXTUAL_CONTINGENCY)], { monthlyTokenLimit: 1 });
   const reply = await limited.ai.reply(request("asdfg"));
-  assert.equal(reply.reason, "monthly_limit"); assert.equal(reply.code, "AI_CONTINGENCY_ALREADY_SENT"); assert.equal(reply.text, "");
+  assert.equal(reply.reason, "monthly_limit"); assert.equal(reply.code, undefined); assert.equal(reply.text, CONTEXTUAL_PROCESSING_FAILURE);
 });
 
 test("modo contextual atravessa compilação e envia saudações, aliases, menu e escolhas para IA", async () => {
@@ -764,10 +850,10 @@ test("nome mal extraído é reprocessado semanticamente antes de pedir de novo",
   assert.equal(factory.requests.length, 2); assert.equal(reply.source, "ai"); assert.equal(reply.leadQualification.name, "Caio");
 });
 
-test("falha na pergunta implícita usa a frase única solicitada, sem menu ou pergunta anexada", async () => {
+test("falha técnica na pergunta implícita não acusa incompreensão nem pede repetição", async () => {
   const { ai } = service(async () => { throw Error("falha fictícia"); }, [history("assistant", "Para continuar, só preciso saber como posso te chamar, por favor.")]);
   const result = await ai.reply(request("Não entendi direito"));
-  assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_CONTINGENCY);
+  assert.equal(result.source, "fallback"); assert.equal(result.text, CONTEXTUAL_PROCESSING_FAILURE);
   assert.equal(result.leadQualification, undefined);
 });
 

@@ -1,6 +1,6 @@
 import { availableCatalogProducts } from "./catalog-messages.js";
 import { vehicleFactsText } from "../../core/vehicle-facts.js";
-import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion } from "../ai/choice-clarification.js";
+import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion, lastPendingQuestion } from "../ai/choice-clarification.js";
 import { pendingWebsiteFinancingModel } from './vehicle-financing-context.js';
 
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -191,7 +191,7 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
     || catalog.interaction?.step === "finance_accepted" && catalog.interaction.productIds.includes(productId)) return true;
   if (pendingWebsiteFinancingModel(catalog, message, history)?.productIds.includes(productId)) return true;
   if (/\b(?:quero|gostaria|vamos|preciso|aceito|pode(?: me)?|poderia)\b.{0,60}\b(?:simular|simulacao|financiar|financiamento)\b/u.test(answer)) return true;
-  const last = history.findLast((item) => item.role === "assistant")?.content || "";
+  const last = lastPendingQuestion(history) || "";
   const offer = catalog.interaction?.step === "finance_offer" && catalog.interaction.direct
     && catalog.interaction.productIds[0] === productId;
   // A short acceptance needs a current financing question, never an older offer.

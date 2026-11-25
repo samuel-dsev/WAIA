@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion, lastPendingQuestion, parseChoiceClarification, contextualContingencyReply, CONTEXTUAL_CONTINGENCY } from "../src/modules/ai/choice-clarification.js";
+import { ambiguousChoiceReply, acceptsAllChoices, lastChoiceQuestion, lastPendingQuestion, parseChoiceClarification, contextualContingencyReply, CONTEXTUAL_CONTINGENCY, CONTEXTUAL_PROCESSING_FAILURE } from "../src/modules/ai/choice-clarification.js";
 import { hasWebsiteFinancingConsent, hasWebsitePhotoConsent, pendingWebsiteFinancingSession } from "../src/modules/business/website-catalog-interaction.js";
 
 const offer = "O Jeep custa R$ 139.900,00.\n\nGostaria que eu enviasse algumas fotos dele? Ou deseja simular um financiamento para esse modelo?";
@@ -80,4 +80,25 @@ test("pergunta de coleta continua pendente quando escrita como frase sem interro
   const history = [{ role: "assistant", content: "Recebi as fotos. Para continuar, só preciso saber como posso te chamar, por favor." }];
   assert.equal(lastChoiceQuestion(history), null);
   assert.equal(ambiguousChoiceReply("Caio, desculpe não me apresentei.", history), null);
+});
+
+test("oferta de simulação de follow-up continua válida após explicação, agradecimento e saudação", () => {
+  const proposal = "Gostaria que eu lhe enviasse uma simulação personalizada do financiamento para o Onix Joy?";
+  const entries = [{ role: "assistant", content: proposal + " Posso ajudar a verificar as parcelas para facilitar sua decisão." }];
+  assert.equal(lastPendingQuestion(entries), proposal);
+  for (const message of ["Sim, obrigada\nBom dia.", "Sim, obrigada", "simulação"]) {
+    assert.equal(hasWebsiteFinancingConsent({}, message, "turim:1", entries), true);
+    assert.equal(hasWebsiteFinancingConsent({}, message, "turim:1", [...entries, { role: "assistant", content: CONTEXTUAL_CONTINGENCY }]), true);
+    assert.equal(hasWebsiteFinancingConsent({}, message, "turim:1", [...entries, { role: "assistant", content: CONTEXTUAL_PROCESSING_FAILURE }]), true);
+  }
+  assert.equal(hasWebsiteFinancingConsent({}, "sim", "turim:1", [...entries, { role: "assistant", content: "Gostaria de fotos do Onix?" }]), false);
+  assert.equal(hasWebsiteFinancingConsent({}, "não quero simular", "turim:1", entries), false);
+});
+
+test("pedido de documentos sem interrogação preserva todos os dados e sobrevive à falha técnica", () => {
+  const collect = "Me informe seu CPF e data de nascimento, por favor.\n\nSe for dar entrada, pode me passar o valor que pretende dar de entrada!";
+  const entries = [{ role: "assistant", content: collect }, { role: "assistant", content: CONTEXTUAL_PROCESSING_FAILURE }];
+  assert.match(lastPendingQuestion(entries), /CPF e data de nascimento/u);
+  assert.match(lastPendingQuestion(entries), /entrada/u);
+  assert.equal(lastChoiceQuestion(entries), null);
 });

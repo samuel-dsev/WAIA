@@ -1,7 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { preserveCollectedFinancingData, hasCollectedFinancingDocuments, collectedFinancingFields } from "../src/modules/group-notifier/collected-financing-data.js";
+import { CONTEXTUAL_CONTINGENCY, CONTEXTUAL_PROCESSING_FAILURE } from '../src/modules/ai/choice-clarification.js';
 const collection = (values) => [{ role: "assistant", content: "Por favor, informe seu CPF e data de nascimento." }, ...values.map((content) => ({ role: "user", content }))];
+
+test("documentos enviados depois da falha continuam respondendo à coleta original", () => {
+  const values = ['00011122233', '01/01/1990'];
+  for (const failure of [CONTEXTUAL_CONTINGENCY, CONTEXTUAL_PROCESSING_FAILURE]) {
+    const transcript = [collection([])[0], { role: 'assistant', content: failure }, ...values.map(content => ({ role: 'user', content }))];
+    assert.equal(hasCollectedFinancingDocuments(values, transcript), true);
+    assert.deepEqual(collectedFinancingFields(values, transcript), { cpf: '00011122233', birthDate: '01/01/1990', city: undefined });
+  }
+  const changed = [collection([])[0], { role: 'assistant', content: 'Qual é o seu telefone de contato?' }, ...values.map(content => ({ role: 'user', content }))];
+  assert.equal(hasCollectedFinancingDocuments(values, changed), false);
+});
 
 test("ficha mantém relato e acrescenta CPF, nascimento e cidade literalmente informados", () => {
   const card = { name: "Marina", summary: "Simulação do Onix, entrada 10 mil e Gol 2012 na troca. CPF e nascimento fornecidos.", qualification: "Análise pela equipe." };

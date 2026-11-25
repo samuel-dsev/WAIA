@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { catalogSalesFormat, parseCatalogSalesReply, normalizeCatalogBrowseState } from '../src/modules/business/catalog-sales.js';
-import { parseCommercialInterest } from '../src/modules/business/commercial-interest.js';
+import { commercialInterestFormat, offersOptionalTriage, parseCommercialInterest } from '../src/modules/business/commercial-interest.js';
 import { customerNameTurn } from '../src/modules/ai/customer-name-turn.js';
 
 const filters = (extra = {}) => ({ category: null, minPrice: null, maxPrice: null, models: [], minYear: null, maxYear: null, ...extra });
@@ -84,6 +84,25 @@ test('confirmação comercial exige fonte original, oferta correta e ausência d
   const consent = 'Sim';
   const offer = 'Quer uma simulação para o Onix? O vendedor pode ajudar.';
   assert.throws(() => parseCommercialInterest({ ...confirmed, offerEvidence: offer, consentEvidence: consent }, [{ role: 'user', content: original }, { role: 'assistant', content: offer }, { role: 'user', content: consent }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+});
+
+test('interesse de compra em linguagem comum é aceito com prova original e sem nova confirmação', () => {
+  for (const original of ['Eu q estou interessada nesse tipo de carro.', 'Estou interessada em comprar um hb20 ou up', 'Preciso de um carro pra mim trabalhar com urber']) {
+    const confirmed = { status: 'confirmed', interestEvidence: original, offerEvidence: null, consentEvidence: original };
+    const transcript = [{ role: 'user', content: original }];
+    assert.equal(parseCommercialInterest(confirmed, transcript), true);
+    const schema = commercialInterestFormat(transcript);
+    assert.deepEqual(schema.anyOf[1].properties.consentEvidence.enum, [original]);
+    assert.throws(() => parseCommercialInterest(confirmed, [...transcript, { role: 'user', content: 'Não quero contato de vendedor.' }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+  }
+  for (const original of ['Sim, obrigada', 'Bom dia.', 'Quero uma simulação', 'Não estou interessada em comprar', 'Estou interessada em comprar, mas só estou fazendo cotações']) {
+    assert.equal(commercialInterestFormat([{ role: 'user', content: original }]).anyOf.length, 1, original);
+  }
+});
+
+test('reconhecer fotos adiadas não é repetir uma oferta de avaliação', () => {
+  for (const text of ['Entendi que você não pode enviar fotos agora.', 'Você não consegue mandar fotos do C3 agora; entendi.', 'Você deseja continuar a negociação com um vendedor?']) assert.equal(offersOptionalTriage(text), false, text);
+  for (const text of ['Você pode enviar fotos para avaliação?', 'Gostaria de uma simulação?', 'Posso avaliar por fotos?']) assert.equal(offersOptionalTriage(text), true, text);
 });
 
 test('nome em bloco é apenas pista literal e não incorpora cidade, pergunta ou citação', () => {

@@ -91,7 +91,7 @@ export function contextualVehicleServiceFormat(base, { transcript, photoAppraisa
     format.schema.properties.customerService.properties.warranty = { anyOf: alternatives };
   }
   format.schema.required.push("customerService");
-  format.schema.properties.customerService.properties.commercialInterest = commercialInterestFormat();
+  format.schema.properties.customerService.properties.commercialInterest = commercialInterestFormat(transcript);
   format.schema.properties.customerService.required.push("commercialInterest");
   if (photoAppraisalEnabled) {
     const service = format.schema.properties.customerService;
@@ -140,7 +140,7 @@ export const CONTEXTUAL_VEHICLE_SERVICE_INSTRUCTIONS = `ATENDIMENTO CONTEXTUAL D
 
 function customerQuote(value, transcript) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 2000
-    && transcript.some((part) => part.role === "user" && ownBody(part).includes(value.trim()));
+    && transcript.some((part) => part.role === "user" && evidenceLine(ownBody(part)).includes(evidenceLine(value)));
 }
 
 /** The model interprets intent. Runtime accepts only evidence from original

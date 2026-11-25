@@ -1,11 +1,16 @@
 const normalize = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 
 export const CONTEXTUAL_CONTINGENCY = "Não entendi, pode ser mais claro na sua solicitação?";
+export const CONTEXTUAL_PROCESSING_FAILURE = "Tive uma falha ao processar sua mensagem. As informações que você enviou continuam no atendimento; você não precisa repeti-las.";
 const contingencyPhrases = /(?:Não entendi, pode ser mais claro na sua solicitação\?|Pode confirmar sua resposta para eu continuar\?|Pode confirmar qual opção você deseja\?\s*Se desejar mais de uma opção, me diga quais\.)/giu;
 const deliveredBody = (part) => String(part?.content || "").split("\n[Em resposta à mensagem:")[0].trim();
 
 export function isContextualContingency(text, config = {}) {
   return String(text || "").search(contingencyPhrases) >= 0 || isConfiguredContingency(text, config);
+}
+
+export function isContextualProcessingFailure(text) {
+  return normalize(text) === normalize(CONTEXTUAL_PROCESSING_FAILURE);
 }
 
 export function contextualContingencyReply(history, config = {}) {
@@ -23,17 +28,19 @@ export function lastPendingQuestion(history, config = {}) {
   if (index < 0) return null;
   const original = deliveredBody(history[index]);
   let body = original.replace(contingencyPhrases, "").trim();
-  if (!body || isConfiguredContingency(body, config) || isContextualContingency(original, config) && /^(?:Gostaria\?|Pode ser\?)$/iu.test(body)) {
+  if (!body || isContextualProcessingFailure(body) || isConfiguredContingency(body, config) || isContextualContingency(original, config) && /^(?:Gostaria\?|Pode ser\?)$/iu.test(body)) {
     return lastPendingQuestion(history.slice(0, index), config);
   }
   const end = body.lastIndexOf("?");
-  if (end >= 0 && /^(?:por favor[, ]+)?(?:me (?:informe|diga)|aguardo)\b/iu.test(body.slice(end + 1).trim())) body = body.slice(0, end + 1);
+  const requestsData = /\b(?:informe|diga|passe|me (?:conte|fale)|precis[oa]mos? saber|preciso saber|(?:pode|poderia) me (?:dizer|informar|passar)|como (?:posso|podemos) (?:te |lhe )?chamar)\b/iu;
+  // Follow-up offers often end with an explanatory sentence after the question.
+  // That sentence does not cancel the offer or create a new choice.
+  if (end >= 0 && (!requestsData.test(body.slice(end + 1)) || /^(?:por favor[, ]+)?(?:me (?:informe|diga)|aguardo)\b/iu.test(body.slice(end + 1).trim()))) body = body.slice(0, end + 1);
   if (!body.endsWith("?")) {
     // Requests remain pending even when conversational punctuation is a period.
     // Recover the original sentence; interpretation of its answer belongs to AI.
-    const sentence = body.split(/(?<=[.!?])\s+|\n\s*\n/u).at(-1)?.trim();
-    if (!sentence || sentence.length > 1000 || !/\b(?:informe|diga|passe|me (?:conte|fale)|precis[oa]mos? saber|preciso saber|(?:pode|poderia) me (?:dizer|informar)|como (?:posso|podemos) (?:te |lhe )?chamar)\b/iu.test(sentence)) return null;
-    return sentence.replace(/[.!]+$/u, "") + "?";
+    if (body.length > 1000 || !requestsData.test(body)) return null;
+    return body.replace(/[.!]+$/u, "") + "?";
   }
   const sentences = body.split(/(?<=[.!?])\s+|\n\s*\n/u);
   const statement = sentences.findLastIndex((sentence) => !sentence.trim().endsWith("?"));

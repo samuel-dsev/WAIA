@@ -1,3 +1,5 @@
+import { isContextualContingency, isContextualProcessingFailure } from '../ai/choice-clarification.js';
+
 const normalized = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 
 function collectionBodies(evidence, transcript) {
@@ -5,6 +7,7 @@ function collectionBodies(evidence, transcript) {
   let collecting = false;
   for (const part of transcript) {
     if (part.role === "assistant") {
+      if (isContextualContingency(part.content) || isContextualProcessingFailure(part.content)) continue;
       const text = normalized(part.content);
       collecting = /\b(?:cpf|nascimento)\b/u.test(text) && /\b(?:informe|informar|envie|enviar|preciso|passe|qual|por favor)\b/u.test(text)
         && !/\b(?:nao|nunca) (?:informe|envie|enviar|informar)\b/u.test(text);

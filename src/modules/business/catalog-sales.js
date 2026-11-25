@@ -205,7 +205,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
   if (website && action === "browse" && omittedVehicleSearch(catalog, message, query)) throw invalid();
   if (website && contextualServiceEnabled && hasWebsiteCatalogLink(text)) throw invalid();
   const clarification = website && websiteReferenceClarification(catalog, message, value.productIds);
-  if (clarification && !(contextualServiceEnabled && action === "none" && !value.productIds.length)) {
+  if (clarification && !(contextualServiceEnabled && action === "none")) {
     if (contextualServiceEnabled) throw invalid();
     return clarification;
   }
