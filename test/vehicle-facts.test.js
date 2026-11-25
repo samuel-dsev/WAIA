@@ -100,9 +100,11 @@ test("paginação usa o corpo completo novo, preserva ordem e respeita 4096 cara
   const result = (message, browseState) => parseCatalogSalesReply(JSON.stringify({ text: "", productIds: [], catalogAction: browseState ? "more" : "browse",
     filters: { category: null, minPrice: null, maxPrice: null } }), { ...catalog, browseState }, { message });
   const first = result("Quero conhecer os modelos");
-  const next = result("Mais opções", { filters: first.catalogBrowse.filters, seenProductIds: selected.map(({ id }) => id) });
-  assert.deepEqual(first.messages[0].websiteInteraction.productIds, selected.map(({ id }) => id));
-  assert.equal(next.messages[0].websiteInteraction.productIds[0], items[selected.length].id);
+  const firstIds = first.messages[0].websiteInteraction.productIds;
+  const next = result("Mais opções", { filters: first.catalogBrowse.filters, seenProductIds: firstIds });
+  assert.deepEqual(firstIds, items.slice(0, 3).map(({ id }) => id));
+  assert.equal(next.messages[0].websiteInteraction.productIds[0], items[3].id);
+  assert.ok(next.messages[0].websiteInteraction.productIds.length <= 3);
 });
 
 test("checkpoint reconhece lista legada e versão 2, rejeita versão inválida e não expõe metadados ao WhatsApp", () => {

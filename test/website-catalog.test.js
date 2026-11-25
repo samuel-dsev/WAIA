@@ -70,7 +70,7 @@ test("pedidos por faixa da Turim montam lista em texto e suprimem redirecionamen
   const turn = (text, extra) => runtime.handle({ conversationId: "conversation", type: "text", text, ...extra });
   assert.equal((await turn("Oi")).text, "Você já tem um modelo em mente?");
   const catalogList = await turn("", { action: "catalog.list" });
-  assert.deepEqual(catalogList.messages[0].websiteInteraction.productIds, ["turim:4", "turim:1", "turim:2", "turim:3"]);
+  assert.deepEqual(catalogList.messages[0].websiteInteraction.productIds, ["turim:4", "turim:1", "turim:2"]);
   const budget = await turn("quais modelos até 60 mil vcs tem disponível");
   assert.deepEqual(budget.messages[0].websiteInteraction.productIds, ["turim:1", "turim:2", "turim:3"]);
   assert.equal(budget.catalogBrowse.filters.maxPrice, 60_000);

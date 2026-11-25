@@ -1,3 +1,5 @@
+import { commercialInterestFormat, parseCommercialInterest } from './commercial-interest.js';
+
 const invalid = () => Object.assign(new Error("Dados contextuais do atendimento inválidos."), { code: "AI_INVALID_CUSTOMER_SERVICE" });
 const normalize = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 const ownBody = (part) => String(part.content || "").split("\n[Em resposta à mensagem:")[0].trim();
@@ -89,6 +91,8 @@ export function contextualVehicleServiceFormat(base, { transcript, photoAppraisa
     format.schema.properties.customerService.properties.warranty = { anyOf: alternatives };
   }
   format.schema.required.push("customerService");
+  format.schema.properties.customerService.properties.commercialInterest = commercialInterestFormat();
+  format.schema.properties.customerService.required.push("commercialInterest");
   if (photoAppraisalEnabled) {
     const service = format.schema.properties.customerService;
     service.properties.tradeInRequest = { type: "object", additionalProperties: false,
@@ -142,6 +146,10 @@ function customerQuote(value, transcript) {
 /** The model interprets intent. Runtime accepts only evidence from original
  * customer messages; quotations and assistant suggestions cannot become facts. */
 export function parseCustomerService(value, transcript, { photoAppraisalEnabled = false } = {}) {
+  const commercialInterestConfirmed = parseCommercialInterest(value?.commercialInterest, transcript);
+  if (value && Object.hasOwn(value, "commercialInterest")) {
+    value = { ...value }; delete value.commercialInterest;
+  }
   const withRequest = photoAppraisalEnabled && keys(value, ["downPayment", "warranty", "tradeInRequest"]);
   if (!withRequest && !keys(value, ["downPayment", "warranty"])) throw invalid();
   const tradeInPhotoRequest = withRequest ? photoAppraisalRequest(value.tradeInRequest, transcript) : false;
@@ -181,7 +189,7 @@ export function parseCustomerService(value, transcript, { photoAppraisalEnabled 
     }
     if (!warrantyAccepted) throw invalid();
   }
-  return { downPayment: down, warrantyAccepted, tradeInPhotoRequest };
+  return { downPayment: down, warrantyAccepted, tradeInPhotoRequest, commercialInterestConfirmed };
 }
 
 export function downPaymentLine(down) {

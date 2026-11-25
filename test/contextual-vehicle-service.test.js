@@ -20,9 +20,9 @@ const item = { id: "turim:1", name: "Onix Joy", price: 55900, mileageKm: 73000, 
   introduction: "🚗 *ONIX JOY*\n\nUma opção para o dia a dia.", description: "Carro flex." };
 const catalog = { source: { type: "website_catalog", status: "healthy" }, salesMode: true, items: [item],
   photoHistoryProductIds: [item.id], financingSession: { productIds: [item.id], status: "pending" } };
-const response = (text, { downPayment = noDownPayment, warranty = noWarranty, qualification = collecting, action = "none", ids = [], evaluation, tradeRequest } = {}) => ({
-  output_text: JSON.stringify({ text, catalogAction: action, productIds: ids, filters: { category: null, minPrice: null, maxPrice: null },
-    leadQualification: qualification, customerService: { downPayment, warranty, ...(tradeRequest === undefined ? {} : { tradeInRequest: tradeRequest }) }, ...(evaluation === undefined ? {} : { tradeInEvaluation: evaluation }) }), usage: { input_tokens: 10, output_tokens: 10 },
+const response = (text, { downPayment = noDownPayment, warranty = noWarranty, qualification = collecting, action = "none", ids = [], evaluation, tradeRequest, commercialInterest, filters = { category: null, minPrice: null, maxPrice: null } } = {}) => ({
+  output_text: JSON.stringify({ text, catalogAction: action, productIds: ids, filters,
+    leadQualification: qualification, customerService: { downPayment, warranty, ...(commercialInterest === undefined ? {} : { commercialInterest }), ...(tradeRequest === undefined ? {} : { tradeInRequest: tradeRequest }) }, ...(evaluation === undefined ? {} : { tradeInEvaluation: evaluation }) }), usage: { input_tokens: 10, output_tokens: 10 },
 });
 function service(responder, history = [], overrides = {}) {
   const factory = new MemoryResponsesClientFactory(responder);
@@ -40,6 +40,119 @@ function service(responder, history = [], overrides = {}) {
 const request = (message, extra = {}) => ({ empresaId: "test", conversationId: "chat", correlationId: "c", messageId: "current", message,
   context: { catalog }, ...extra });
 const history = (role, body) => ({ type: "text", direction: role === "user" ? "inbound" : "outbound", status: "sent", body });
+
+test("dúvida de financiamento sem entrada recebe convite de simulação sem coleta antecipada", async () => {
+  let count = 0;
+  const { ai, factory } = service(async () => response(++count === 1
+    ? "Sim, nós trabalhamos com financiamento sem entrada. A equipe confirmará as condições."
+    : "Sim, nós trabalhamos com financiamento sem entrada, sujeito à análise. Gostaria de fazer uma simulação?"));
+  const result = await ai.reply(request("Vcs financiam sem entrada?", { context: { catalog: { ...catalog, financingSession: null } } }));
+  assert.equal(result.source, "ai"); assert.equal(factory.requests.length, 2);
+  assert.match(result.text, /simulação\?$/u); assert.doesNotMatch(result.text, /CPF|nascimento/iu);
+  assert.equal(result.leadQualification, undefined); assert.equal(result.websiteInteraction, undefined);
+});
+
+test("nome, cidade e localização em mensagens sucessivas respondem e concluem avaliação no mesmo turno", async () => {
+  const entries = [history("user", "Quero avaliar meu Celta na troca pelo Onix."),
+    { ...history("user", ""), type: "image", mediaStorageKey: "synthetic-photo" },
+    history("assistant", "Recebi as fotos do seu veículo! Para finalizar, como posso te chamar?")];
+  let count = 0;
+  const tradeRequest = { status: "photo_appraisal_requested", requestEvidence: entries[0].body };
+  const evaluation = { step: "photos_received", interestName: "Onix Joy", interestSource: "customer" };
+  const card = { status: "qualified", name: "Sérgio", summary: "Sérgio é de Roseira e quer avaliar seu Celta na troca pelo Onix Joy. Enviou fotos e perguntou onde fica a loja.", qualification: "Solicitou análise da troca e informou nome." };
+  const { ai, factory } = service(async () => {
+    if (++count === 1) return { ...response("Como posso te chamar?", { tradeRequest, evaluation }),
+      output_text: JSON.stringify({ ...JSON.parse(response("Como posso te chamar?", { tradeRequest, evaluation }).output_text), turnIntent: "clarify" }) };
+    return response("Ficamos em Taubaté, São Paulo.\n\nObrigado, Sérgio! Um vendedor dará continuidade à avaliação por aqui.", { tradeRequest, evaluation, qualification: card });
+  }, entries, { tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true });
+  const turnMessages = ["Sérgio", "Sou de roseira", "Vcs são de onde"].map((text, i) => ({ id: `current-${i}`, type: "text", text }));
+  const result = await ai.reply(request(turnMessages.map((part) => part.text).join("\n"), { turnMessages }));
+  assert.equal(result.source, "ai"); assert.equal(factory.requests.length, 2);
+  assert.equal(result.leadQualification.name, "Sérgio"); assert.match(result.leadQualification.summary, /Roseira/u);
+  assert.match(result.text, /Taubaté[\s\S]*vendedor/u); assert.doesNotMatch(result.text, /\?|Como posso te chamar/u);
+  assert.equal(result.tradeInEvaluation.step, "completed");
+});
+
+test("nome reconhecido na pergunta final provoca reavaliação quando IA insiste em coletar nome", async () => {
+  const intent = "Quero negociar o Onix Joy, sem simulação por enquanto.";
+  const commercialInterest = { status: "confirmed", interestEvidence: intent, offerEvidence: null, consentEvidence: intent };
+  let count = 0;
+  const { ai, factory } = service(async () => response(++count === 1 ? "Para finalizar, como posso te chamar?" : "Obrigada, Ana! Um vendedor dará continuidade à negociação por aqui.",
+    { commercialInterest, qualification: count === 1 ? collecting : { ...lead, name: "Ana", summary: "Ana quer negociar Onix Joy, sem simular agora." } }),
+  [history("user", intent), history("assistant", "Para finalizar, como posso te chamar?")]);
+  const result = await ai.reply(request("Ana"));
+  assert.equal(result.source, "ai"); assert.equal(factory.requests.length, 2); assert.equal(result.leadQualification.name, "Ana");
+});
+
+test("interesse confirmado após cotação permite aguardar nome sem fotos ou documentos", async () => {
+  const objective = "Só estou fazendo cotações. Meu Celta vale 35 mil e tem histórico de leilão; o restante seria financiado.";
+  const offer = "Entendi. Deseja negociar o Onix Joy com um vendedor?";
+  const consent = "Sim, quero negociar, mas não quero enviar fotos agora.";
+  const commercialInterest = { status: "confirmed", interestEvidence: objective, offerEvidence: offer, consentEvidence: consent };
+  const pending = { status: "awaiting_name", name: null, summary: "Interesse no Onix Joy. Cliente informou Celta na troca, tabela de 35 mil e histórico declarado de leilão. Restante seria financiado, sem simulação realizada. Adiou fotos. Confirmou que deseja negociar com vendedor.", qualification: "Interesse comercial confirmado; fotos e simulação não realizadas." };
+  const { ai } = service(async () => response("Para finalizar, como posso te chamar?", { commercialInterest, qualification: pending }),
+    [history("user", objective), history("assistant", offer)], { tradeInEvaluationEnabled: true, leadImageHandoffEnabled: true });
+  const result = await ai.reply(request(consent, { context: { catalog: { ...catalog, financingSession: null } } }));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification, undefined);
+  assert.equal(result.pendingNameQualification.name, null);
+  for (const fact of ["Onix", "Celta", "35 mil", "leilão", "sem simulação", "Adiou fotos"]) assert.ok(result.pendingNameQualification.summary.includes(fact));
+  assert.doesNotMatch(result.text, /fotos|CPF|nascimento/iu);
+});
+
+test("cotação sem confirmação mantém coleta e interrompe ofertas repetidas", async () => {
+  const { ai } = service(async () => response("Entendi. Você deseja negociar o Onix com um vendedor?"),
+    [history("assistant", "Podemos avaliar por fotos. Pode enviá-las?")]);
+  const result = await ai.reply(request("Só estou fazendo cotações para um bom negócio."));
+  assert.equal(result.source, "ai"); assert.equal(result.leadQualification, undefined); assert.equal(result.pendingNameQualification, undefined);
+  assert.doesNotMatch(result.text, /fotos|simulação|CPF/iu);
+});
+
+test("oferta repetida após recusa é reavaliada e insistência do modelo termina em confirmação de interesse", async () => {
+  const { ai, factory } = service(async () => response("Podemos fazer uma avaliação por fotos. Gostaria de enviar fotos do carro?"));
+  const result = await ai.reply(request("Só estou fazendo cotações para um bom negócio."));
+  assert.equal(factory.requests.length, 2); assert.equal(result.source, "ai");
+  assert.match(result.text, /negociação com um vendedor/u);
+  assert.doesNotMatch(result.text, /fotos|simulação|CPF/iu);
+  assert.equal(result.leadQualification, undefined); assert.equal(result.pendingNameQualification, undefined);
+});
+
+test("aceite de simulação, citação e recusa de contato não viram confirmação comercial", async () => {
+  const objective = "Estou olhando o Onix.";
+  for (const [offer, consent] of [["Um vendedor analisa a simulação. Quer simular?", "Sim"],
+    ["Deseja negociar com vendedor?", "Não quero falar com vendedor."], ["Deseja negociar com vendedor?", "Não sei"]]) {
+    const commercialInterest = { status: "confirmed", interestEvidence: objective, offerEvidence: offer, consentEvidence: consent };
+    const { ai } = service(async () => response("Obrigado! Um vendedor retornará.", { commercialInterest, qualification: lead }),
+      [history("user", objective), history("assistant", offer)]);
+    const result = await ai.reply(request(consent));
+    assert.equal(result.source, "fallback"); assert.equal(result.leadQualification, undefined);
+  }
+});
+
+test("nome com novo pedido de fotos atende a galeria e mantém a triagem aberta", async () => {
+  const intent = "Quero negociar o Onix Joy.";
+  const commercialInterest = { status: "confirmed", interestEvidence: intent, offerEvidence: null, consentEvidence: intent };
+  const { ai } = service(async () => response("Estas são as fotos solicitadas. Depois podemos continuar a negociação.", { action: "products", ids: [item.id], commercialInterest }),
+    [history("user", intent), history("assistant", "Para finalizar, como posso te chamar?")]);
+  const result = await ai.reply(request("Ana. Me envie fotos do Onix."));
+  assert.equal(result.source, "ai"); assert.ok(result.messages.some((part) => part.imageUrl));
+  assert.equal(result.leadQualification, undefined); assert.equal(result.pendingNameQualification, undefined);
+});
+
+test("Compass mais antigo é reavaliado como busca contextual e mostra somente anos anteriores", async () => {
+  const recent = { ...item, id: "turim:2", name: "Jeep Compass Longitude", year: 2023, price: 139900 };
+  const older = { ...recent, id: "turim:3", year: 2018, price: 99000 };
+  const vehicles = { ...catalog, financingSession: null, items: [item, recent, older], interaction: { step: "discussion", productIds: [recent.id], direct: true } };
+  let count = 0;
+  const { ai, factory } = service(async () => {
+    const data = response("Temos esta opção anterior ao Compass 2023. Gostaria de mais detalhes?", { action: "browse", filters: { category: null, minPrice: null, maxPrice: null, models: ["Compass"], minYear: null, maxYear: 2022 } });
+    if (++count === 1) data.output_text = JSON.stringify({ ...JSON.parse(data.output_text), turnIntent: "clarify" });
+    return data;
+  }, [history("assistant", "O Compass 2023 custa R$ 139.900,00."), history("user", "Está fora do meu orçamento."), history("assistant", "Quer procurar opções mais acessíveis?")]);
+  const result = await ai.reply(request("Compass mais antigo", { context: { catalog: vehicles } }));
+  assert.equal(result.source, "ai"); assert.equal(factory.requests.length, 2);
+  assert.deepEqual(result.messages[0].websiteInteraction.productIds, [older.id]);
+  assert.doesNotMatch(result.text, /Onix|139\.900|Não entendi/u);
+});
 
 test("simulação completa sem nome prepara espera e preserva documentos, entrada e veículo", async () => {
   const pending = { status: "awaiting_name", name: null, summary: "Cliente pediu simulação do Onix Joy.", qualification: "Simulação aceita e dados fornecidos." };

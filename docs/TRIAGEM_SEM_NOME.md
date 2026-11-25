@@ -14,6 +14,8 @@ A ficha informa **“NOME NÃO INFORMADO”**, preserva os dados e o WhatsApp do
 
 ## Cancelamento e disponibilidade
 
+Na correção 1.29.1, a triagem contextual de veículos também pode cumprir os critérios por **interesse comercial confirmado**, sem simulação ou avaliação. Esses métodos são opcionais para esse caminho: a ficha descreve o que foi efetivamente informado e o que foi adiado. Confirmado o interesse e faltando apenas nome, aplica-se o mesmo prazo e os mesmos guardas abaixo. Cotação isolada, recusa de contato e silêncio não substituem confirmação de interesse. Detalhes em [Ajustes de triagem contextual](AJUSTES_TRIAGEM_CONTEXTUAL.md).
+
 - Qualquer nova mensagem do cliente invalida o timer anterior, incluindo nome, recusa ou mudança de assunto. O atendimento normal interpreta a resposta e pode concluir com nome ou preparar nova pergunta final, quando cabível.
 - Pausa/assunção humana, retomada com outra geração, conversa fechada, alteração da revisão, bloqueio, revogação de consentimento, exclusão e expiração/remoção de evidências impedem o encaminhamento antigo.
 - Sem IA/triagem publicada, canal/permissão disponíveis e grupo habilitado, o timer não cria ficha nem pausa o chat. A configuração continua sendo feita pelo painel.

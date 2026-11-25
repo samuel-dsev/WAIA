@@ -11,7 +11,7 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
 }, async () => {
   assert.ok(process.env.DATABASE_URL); assert.ok(process.env.DATABASE_MIGRATOR_URL);
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL });
+  const owner = new pg.Pool({ connectionString: process.env.DATABASE_MIGRATOR_URL, options: "-c app.is_platform_admin=true" });
   let empresaId;
   try {
     empresaId = (await owner.query("INSERT INTO empresas (slug,nome,nome_exibicao,status) VALUES ($1,'Espera IA','Espera IA','ativa') RETURNING id", ["ai-delay-" + randomUUID()])).rows[0].id;
@@ -95,9 +95,11 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     const listSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
     const listMessageId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Até 60 mil','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, listSequence, randomUUID()])).rows[0].id;
     const websiteInteraction = { step: "list", productIds: ["turim:1", "turim:2"] };
+    const vehicleFilters = { category: null, minPrice: null, maxPrice: 60_000, models: ["Onix", "Etios"], minYear: 2017, maxYear: 2018 };
     const website = await handlers.prepareReply({ empresaId, message: { id: listMessageId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, origin: "deterministic_flow",
       reply: { text: "Lista da Turim", messages: [{ text: "Lista da Turim", websiteInteraction }],
-        catalogBrowse: { filters: { category: null, minPrice: null, maxPrice: 60_000 }, priorSeenProductIds: [] } } });
+        catalogBrowse: { filters: vehicleFilters, priorSeenProductIds: [] } } });
+    assert.deepEqual((await new PostgresJobHandlerRepository(pool).catalogBrowseState({ empresaId, conversationId })).filters, vehicleFilters);
     const nextSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
     const selectionId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Gostei do primeiro','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, nextSequence, randomUUID()])).rows[0].id;
     const websiteScope = { empresaId, conversationId, messageId: selectionId };
@@ -106,18 +108,19 @@ test("PostgreSQL real: prazo persiste, job aguarda e permissão de envio é reva
     assert.deepEqual(await handlers.websiteInteraction(websiteScope), { ...websiteInteraction, direct: true });
     assert.equal(await handlers.websiteInteraction({ ...websiteScope, empresaId: randomUUID() }), null);
     assert.deepEqual((await handlers.catalogBrowseState({ empresaId, conversationId })).seenProductIds, websiteInteraction.productIds);
+    assert.deepEqual((await new PostgresJobHandlerRepository(pool).catalogBrowseState({ empresaId, conversationId })).filters, vehicleFilters);
     await owner.query("UPDATE mensagens SET outbound_payload = $2::jsonb WHERE id = $1", [selectionId, JSON.stringify({ adReferral: { headline: "Outro anúncio" } })]);
     assert.equal(await handlers.websiteInteraction(websiteScope), null);
     const imageUrls = Array.from({ length: 100 }, (_, index) => `https://turimautos.com/storage/veiculos/test-gallery-${index}.jpg`);
     const gallery = websiteGalleryReply({ id: "turim:1", name: "Modelo teste", imageUrl: imageUrls[0], imageUrls });
     const galleryBatch = await handlers.prepareReply({ empresaId, origin: "ai",
       message: { id: selectionId, conversationId, contactId, numeroWhatsappId: numberId, correlationId: randomUUID() }, reply: gallery });
-    assert.equal(galleryBatch.messages.length, 101);
-    assert.deepEqual(galleryBatch.messages.slice(0, -1).map(({ imageUrl }) => imageUrl), imageUrls);
+    assert.equal(galleryBatch.messages.length, 100);
+    assert.deepEqual(galleryBatch.messages.map(({ imageUrl }) => imageUrl), imageUrls);
     assert.ok(galleryBatch.messages.slice(1, -1).every(({ text, websiteInteraction }) => text === "" && websiteInteraction === undefined));
     const prompt = galleryBatch.messages.at(-1);
     assert.match(prompt.text, /simulação de financiamento/u);
-    assert.equal(prompt.imageUrl, undefined);
+    assert.equal(prompt.imageUrl, imageUrls.at(-1));
     assert.deepEqual(prompt.websiteInteraction, { step: "finance_offer", productIds: ["turim:1"] });
     const answerSequence = Number((await owner.query("UPDATE conversas SET next_sequence=next_sequence+1 WHERE id=$1 RETURNING next_sequence-1 AS sequence", [conversationId])).rows[0].sequence);
     const answerId = (await owner.query("INSERT INTO mensagens (empresa_id,conversa_id,contato_id,numero_whatsapp_id,direcao,tipo,corpo,status,sequence,correlation_id) VALUES ($1,$2,$3,$4,'entrada','texto','Sim','processando',$5,$6) RETURNING id", [empresaId, conversationId, contactId, numberId, answerSequence, randomUUID()])).rows[0].id;

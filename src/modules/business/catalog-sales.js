@@ -1,6 +1,7 @@
 import { availableCatalogProducts, productMessage } from "./catalog-messages.js";
 import { chooseWebsiteVehicle, websiteCatalogList, websiteCatalogListText, websiteGalleriesReply, websiteReferenceClarification, WEBSITE_CATALOG_LIST_FORMAT_VERSION, CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION, validCatalogContinuation } from "./website-catalog-interaction.js";
 import { isPropertyCatalog, propertyFilters, realEstateSalesFormat, parseRealEstateReply } from './real-estate-catalog.js';
+import { vehicleSearchFilters, matchesVehicleSearch, omittedVehicleSearch, inheritVehicleBudget, VEHICLE_SEARCH_INSTRUCTIONS } from './vehicle-search.js';
 
 const ACTIONS = ["none", "browse", "more", "products", "details", "interest"];
 const EMPTY_FILTERS = Object.freeze({ category: null, minPrice: null, maxPrice: null });
@@ -9,11 +10,14 @@ const invalid = () => Object.assign(new Error("Seleção comercial de catálogo 
 const plain = (value) => value && typeof value === "object" && !Array.isArray(value);
 
 function filters(value) {
-  if (!plain(value) || Object.keys(value).length !== 3 || !["category", "minPrice", "maxPrice"].every((key) => Object.hasOwn(value, key))
+  const search = plain(value) && ["models", "minYear", "maxYear"].some((key) => Object.hasOwn(value, key));
+  if (!plain(value) || Object.keys(value).length !== (search ? 6 : 3) || !["category", "minPrice", "maxPrice"].every((key) => Object.hasOwn(value, key))
     || !(value.category === null || typeof value.category === "string" && value.category.length > 0 && value.category.length <= 200)
     || [value.minPrice, value.maxPrice].some((price) => price !== null && (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 1e9))
     || value.minPrice !== null && value.maxPrice !== null && value.minPrice > value.maxPrice) throw invalid();
-  return { category: value.category, minPrice: value.minPrice, maxPrice: value.maxPrice };
+  let vehicle = {};
+  try { if (search) vehicle = vehicleSearchFilters(value); } catch { throw invalid(); }
+  return { category: value.category, minPrice: value.minPrice, maxPrice: value.maxPrice, ...vehicle };
 }
 
 export function normalizeCatalogBrowseState(value) {
@@ -37,7 +41,7 @@ export function catalogSalesFormat(catalog) {
   const actions = catalog.source.type === "website_catalog"
     ? [...ACTIONS.filter((action) => action !== "interest"), "choose", "finance", "finance_decline"]
     : ACTIONS.filter((action) => action !== "interest" || catalog.interestHandoff?.enabled === true);
-  return {
+  const format = {
     type: "json_schema", name: "catalog_sales_reply", strict: true,
     schema: {
       type: "object", additionalProperties: false,
@@ -57,6 +61,13 @@ export function catalogSalesFormat(catalog) {
       required: ["text", "productIds", "catalogAction", "filters"],
     },
   };
+  if (catalog.source.type === "website_catalog") {
+    const query = format.schema.properties.filters;
+    Object.assign(query.properties, { models: { type: "array", maxItems: 5, items: { type: "string" } },
+      minYear: { type: ["integer", "null"] }, maxYear: { type: ["integer", "null"] } });
+    query.required.push("models", "minYear", "maxYear");
+  }
+  return format;
 }
 
 export const CATALOG_SALES_INSTRUCTIONS = `FORMATO COMERCIAL DO CATÁLOGO:
@@ -82,15 +93,16 @@ export const WEBSITE_CATALOG_SALES_INSTRUCTIONS = `ESTOQUE DO SITE:
 - Use products com os IDs exatos quando o cliente pedir FOTOS de um ou mais veículos específicos (até três por turno), mesmo se ele veio de outro anúncio ou já recebeu a ficha. O sistema envia toda a galeria na ordem do estoque. A primeira foto leva somente o título e o primeiro parágrafo de apresentação da descrição do anúncio; não acrescente preço, campos do resumo, equipamentos ou endereço nessa legenda. A continuidade fica na legenda da última imagem. Dois modelos diferentes pedidos juntos não são versões ambíguas: envie ambos. Só esclareça quando realmente houver várias unidades possíveis para o mesmo nome, usando productIds vazio.
 - Pedidos de mais informações, ficha, equipamentos, opcionais, diferenciais, preço ou disponibilidade usam details em UMA resposta textual, sem reenviar fotos. Use a descrição sincronizada do anúncio em catalog.items[].description, que inclui a introdução e o restante do texto do veículo; envie os equipamentos, diferenciais e valor publicado quando forem o pedido, sem repetir desnecessariamente a introdução. Não deduza equipamentos a partir do nome ou do resumo antigo. Rodapés de contato/localização do anúncio não fazem parte da descrição do veículo; endereço da loja somente se o cliente solicitar. Se a descrição não trouxer o dado, peça confirmação da equipe.
 - Quando catalog.interaction estiver em list ou gallery e houver uma escolha ou confirmação de interesse por um veículo inequívoco, use choose com o ID visto. O sistema oferece as fotos após a lista. Uma escolha recente prevalece sobre o modelo original do anúncio. Sim isolado após uma lista não escolhe um veículo.
-- Para este cenário de catálogo, mantenha a triagem em collecting até o cliente aceitar ou pedir de forma explícita a simulação para o veículo escolhido. Nesse caso, use finance, continue os critérios existentes, obtenha o nome se faltar e considere apenas o veículo confirmado. Quando qualificar, o sistema usa o encerramento configurado e envia o resumo pelo fluxo existente. A entrada por anúncio não comprova aceite de simulação.
+- A triagem pode concluir por simulação aceita e dados completos, avaliação ou interesse comercial confirmado conforme os guardas aplicáveis. Use finance somente para a simulação aceita, nunca como requisito para todos os encaminhamentos. A entrada por anúncio não comprova interesse real nem aceite de simulação.
 - Ao confirmar que a loja trabalha com financiamento, comece com “Sim, nós trabalhamos com financiamento”.
 - Resolva referências pelo histórico completo, pelas mensagens citadas e pelo assunto mais recente, sem exigir que o cliente repita o nome: "os dois", "ambos", "eles", "deles", "dele", "esse", "o primeiro", "o outro" e outras formas naturais apontam aos modelos discutidos. catalog.interaction.productIds registra o último conjunto discutido; catalog.financingSession.productIds preserva os modelos de uma simulação pendente. A escolha explícita mais recente prevalece sobre esses auxiliares. Em "dele", use o único referente claro; se houver dois referentes igualmente possíveis, pergunte brevemente qual dos dois, citando seus nomes. Nunca substitua uma referência resolvida por uma pergunta genérica de início de atendimento.
 - Use finance com os IDs exatos dos veículos confirmados (de um a três) APENAS para aceite contextual ou pedido explícito de simulação, ou para retomar uma simulação já aceita em catalog.financingSession. "Quero fazer a simulação dos dois" seleciona ambos e "quero sim, dos dois" após a oferta de simulação também. Colete os dados comuns uma única vez e registre todos os modelos na mesma ficha para análise da equipe, sem forçar a escolha de apenas um. Uma resposta curta só aceita simulação se responder à última pergunta enviada sobre simulação. Se a última pergunta ofereceu opções semelhantes, "Entendi" seguido de "Pode sim" usa browse e envia apenas a lista. Ofertas antigas não autorizam coleta de dados. Não peça CPF, nascimento ou dados para simulação sem esse aceite.
 - Em finance, text contém a continuação natural conforme os critérios publicados; mantenha collecting enquanto houver dados faltando ou outro pedido pendente. Para fotos, comparação ou dúvidas durante a coleta, use a ação desse pedido e collecting, preservando a simulação pendente; nunca conclua só porque o cliente informou o nome. Use none para respostas comuns; não use finance para dúvidas sobre se a loja aceita financiamento.
 - Se o cliente pedir para saber mais sobre modelos cujas galerias já foram enviadas, responda em texto usando details com os IDs desses modelos e filtros null; text precisa conter informações ou uma pergunta útil. Não reenvie as fotos somente porque ele pediu informações adicionais. Pedidos explícitos de fotos ou de reenvio continuam usando products.
 - Ao concluir finance, preencha summary e qualification com a ficha completa e os dados coletados para a simulação, conforme a triagem estruturada. Identifique todos os veículos escolhidos em productIds também no resumo. Nunca reduza a ficha a "confirmou interesse em simular" nem descarte dados já informados, como os campos pessoais previstos no roteiro, cidade, entrada e troca.
-- Use finance_decline com os IDs da simulação recusada ou cancelada. Responda naturalmente em text e mantenha collecting. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação. Em none/details, inclua em productIds os modelos efetivamente discutidos quando estiverem identificados, para preservar o foco mesmo numa resposta textual sem galeria.
-- Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.`;
+- Use finance_decline com os IDs da simulação recusada ou cancelada. Responda naturalmente, respeitando o encerramento por interesse confirmado se aplicável. Um pedido de fotos ou uma pausa para outra dúvida não cancela a simulação. Em none/details, inclua em productIds os modelos efetivamente discutidos quando estiverem identificados, para preservar o foco mesmo numa resposta textual sem galeria.
+- Se a categoria solicitada não estiver cadastrada, peça confirmação em texto. Confirme disponibilidade somente com um ID do estoque atual. Use productIds vazio quando não houver uma ficha confirmada.
+${VEHICLE_SEARCH_INSTRUCTIONS}`;
 
 export function catalogSalesInstructions({ contextualServiceEnabled = false } = {}) {
   if (!contextualServiceEnabled) return CATALOG_SALES_INSTRUCTIONS;
@@ -119,7 +131,8 @@ export function asksForWebsiteVehicleDetails(message) {
 function filteredProducts(products, query) {
   return products.filter((item) => (!query.category || normalize(item.category) === normalize(query.category))
     && (query.minPrice === null || typeof item.price === "number" && item.price >= query.minPrice)
-    && (query.maxPrice === null || typeof item.price === "number" && item.price <= query.maxPrice));
+    && (query.maxPrice === null || typeof item.price === "number" && item.price <= query.maxPrice)
+    && matchesVehicleSearch(item, query));
 }
 
 const websiteStockUnconfirmed = "Não consegui confirmar esse veículo no estoque publicado. Posso verificar com a equipe?";
@@ -138,10 +151,21 @@ export function websiteCatalogPage(catalog, query = { ...EMPTY_FILTERS }, seen =
   }
   const candidates = filteredProducts(availableCatalogProducts(catalog), query);
   if (!candidates.length) {
-    if (contextual) throw invalid();
+    if (contextual) {
+      const all = availableCatalogProducts(catalog);
+      const preferredCategories = new Set(all.filter((item) => matchesVehicleSearch(item, { models: query.models })).map((item) => item.category).filter(Boolean));
+      const alternatives = filteredProducts(all, { ...query, models: [], minYear: null, maxYear: null })
+        .filter((item) => !preferredCategories.size || preferredCategories.has(item.category)).slice(0, 3);
+      const target = query.models?.length ? query.models.join(" ou ") : "veículos";
+      const opening = `Não encontrei ${target} com todos os critérios dessa busca no estoque atual.`;
+      if (!alternatives.length) return { text: opening + " Quer considerar outra faixa de valor ou modelo?" };
+      const text = opening + "\n\nComo alternativas, com diferenças de modelo ou ano, estas opções respeitam os demais filtros:\n\n"
+        + websiteCatalogListText(alternatives, { formatVersion: CONTEXTUAL_CATALOG_LIST_FORMAT_VERSION, continuation: "Alguma dessas alternativas faz sentido para você?" });
+      return { text, websiteInteraction: { step: "discussion", productIds: alternatives.map((item) => item.id) } };
+    }
     return { text: "Não encontrei veículos com esses critérios no estoque publicado. Quer consultar outra faixa ou modelo?" };
   }
-  const selected = websiteCatalogList(candidates.filter((item) => !seen.includes(item.id)), continuation);
+  const selected = websiteCatalogList(candidates.filter((item) => !seen.includes(item.id)).slice(0, 3), continuation);
   if (!selected.length) {
     if (contextual) throw invalid();
     return { text: "Já mostrei as opções dessa busca. Quer mudar a faixa de preço ou o modelo?" };
@@ -178,6 +202,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
     || !Array.isArray(value.productIds) || value.productIds.length > 3 || new Set(value.productIds).size !== value.productIds.length
     || value.productIds.some((id) => !byId.has(id))) throw invalid();
   const query = filters(value.filters), action = value.catalogAction, text = value.text.trim();
+  if (website && action === "browse" && omittedVehicleSearch(catalog, message, query)) throw invalid();
   if (website && contextualServiceEnabled && hasWebsiteCatalogLink(text)) throw invalid();
   const clarification = website && websiteReferenceClarification(catalog, message, value.productIds);
   if (clarification && !(contextualServiceEnabled && action === "none" && !value.productIds.length)) {
@@ -255,7 +280,7 @@ export function parseCatalogSalesReply(output, catalog, { leadQualificationEnabl
       return { text: `Sobre ${names}, o que você gostaria de saber para decidir?` };
     }
   } else {
-    activeFilters = action === "more" && previous ? previous.filters : query;
+    activeFilters = action === "more" && previous ? previous.filters : website ? inheritVehicleBudget(query, previous?.filters, message) : query;
     seen = action === "more" && previous ? previous.seenProductIds : [];
     if (website) return websiteCatalogPage(catalog, activeFilters, seen, contextualServiceEnabled ? { continuation: text } : {});
     const candidates = filteredProducts(products, activeFilters);
