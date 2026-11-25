@@ -97,6 +97,25 @@ function setup({ configs, histories = {}, responder, secretResolver, timeoutMs =
   return { service, clientFactory, ledger, historyRequests, configResolver };
 }
 
+test('nome e pergunta transcritos concluem a triagem, respondem à dúvida e preservam relato de áudio anterior', async () => {
+  const text = 'Sou Ana, de Roseira. Vocês são de onde?';
+  const history = [
+    { id: 'audio-original', sequence: 1, type: 'audio', direction: 'inbound', audioTranscriptionStatus: 'completed', audioTranscription: 'Preciso de atendimento para uma questão trabalhista.' },
+    { id: 'pergunta-nome', sequence: 2, type: 'text', direction: 'outbound', body: 'Para finalizar, como posso te chamar?', status: 'sent' },
+    { id: 'audio-atual', sequence: 3, type: 'audio', direction: 'inbound', audioTranscriptionStatus: 'completed', audioTranscription: text },
+  ];
+  const ai = setup({ configs: [config('tenant-a', { audioTranscriptionEnabled: true, contextualServiceEnabled: true, leadQualificationEnabled: true,
+    leadQualificationCriteria: 'Nome e relato suficiente de questão trabalhista.', leadQualificationClosing: 'A equipe continuará por aqui.' })], histories: { 'tenant-a': history },
+    responder: async () => ({ output_text: JSON.stringify({ text: 'Ana, ficamos em Taubaté. A equipe continuará por aqui.',
+      leadQualification: { status: 'qualified', name: 'Ana', summary: 'Ana, de Roseira, solicita atendimento para questão trabalhista e pergunta a localização.', qualification: 'Informou nome e relato da área atendida.' } }), usage: {} }) });
+  const result = await ai.service.reply(request('tenant-a', { messageId: 'audio-atual', message: text,
+    turnMessages: [{ id: 'audio-atual', type: 'audio', text, audioTranscriptionStatus: 'completed', audioTranscription: text }] }));
+  assert.equal(result.source, 'ai'); assert.equal(result.leadQualification.name, 'Ana'); assert.match(result.text, /Taubaté/u);
+  const input = ai.clientFactory.requests[0].request.input;
+  assert.equal(input.filter(p => p.content === text).length, 1);
+  assert.ok(input.some(p => p.content === 'Preciso de atendimento para uma questão trabalhista.'));
+});
+
 test("um modelo específico usa todas as fotos validadas do site na ordem", async () => {
   const imageUrl = "https://turimautos.com/storage/veiculos/onix-teste.jpg";
   const imageUrls = [imageUrl, "https://turimautos.com/storage/veiculos/onix-interior.jpg", "https://turimautos.com/storage/veiculos/onix-painel.jpg"];

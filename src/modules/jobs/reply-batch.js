@@ -6,7 +6,7 @@ import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 
 const invalid = () => Object.assign(new Error("Checkpoint de mensagens inválido."), { code: "BOT_REPLY_BATCH_INVALID", retryable: false });
 const columns = "id, corpo, outbound_payload, external_message_id, status";
-const maxReplyParts = 303; // Até três veículos com 100 fotos e a pergunta em texto.
+const maxReplyParts = 304; // Três veículos com 100 fotos/perguntas e um aviso de áudio.
 
 export function websiteListFormatMetadata(part) {
   const interaction = normalizeWebsiteInteraction(part.websiteInteraction);
@@ -30,6 +30,7 @@ export function replyFromRow(row) {
     ...websiteListFormatMetadata(row.outbound_payload || {}),
     ...(row.outbound_payload?.tradeInEvaluation ? { tradeInEvaluation: normalizeTradeInEvaluation(row.outbound_payload.tradeInEvaluation) } : {}),
     ...(row.outbound_payload?.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
+    ...(row.outbound_payload?.inboundTurnIncludesAudio ? { inboundTurnIncludesAudio: true } : {}),
     ...(Number.isInteger(row.outbound_payload?.catalogPhotoIndex) ? { catalogPhotoIndex: row.outbound_payload.catalogPhotoIndex } : {}),
     ...(row.outbound_payload?.nonLeadHandoff ? { nonLeadHandoff: row.outbound_payload.nonLeadHandoff } : {}),
     sendNotBefore: row.outbound_payload?.sendNotBefore || null,
@@ -122,6 +123,7 @@ export async function prepareReplyBatch(client, { empresaId, message, reply, ori
     const payload = { buttons: part.buttons, ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
       ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
       ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
+      ...(reply.inboundTurnIncludesAudio ? { inboundTurnIncludesAudio: true } : {}),
       ...(part.catalogProductId ? { catalogProductId: part.catalogProductId } : {}),
       ...(part.websiteInteraction ? { websiteInteraction: part.websiteInteraction } : {}),
       ...(part.catalogListFormatVersion === undefined ? {} : { catalogListFormatVersion: part.catalogListFormatVersion }),

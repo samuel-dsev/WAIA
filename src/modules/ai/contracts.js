@@ -43,6 +43,7 @@ export function requireAiRequest(input) {
     id: requiredText(part.id, "turnMessages.id", 200),
     text: part.type === "image" ? optionalText(part.text, "turnMessages.text", 8_000) : requiredText(part.text, "turnMessages.text", 8_000),
     ...(part.type === "image" ? { type: "image", mediaStored: part.mediaStored === true } : {}),
+    ...(part.type === "audio" ? { type: "audio", audioTranscription: requiredText(part.audioTranscription || part.text, "turnMessages.audioTranscription", 8_000), audioTranscriptionStatus: "completed" } : {}),
   }));
   if (turnMessages && (!turnMessages.length || new Set(turnMessages.map((part) => part.id)).size !== turnMessages.length)) throw new TypeError("Turno inválido.");
   return Object.freeze({
@@ -82,6 +83,7 @@ export function normalizeAiConfig(input, empresaId) {
     empresaId,
     enabled: input.enabled === true,
     contextualServiceEnabled: input.contextualServiceEnabled === true,
+    audioTranscriptionEnabled: input.audioTranscriptionEnabled === true,
     leadImageHandoffEnabled: input.leadImageHandoffEnabled === true,
     leadIntakeOnlyEnabled: input.leadIntakeOnlyEnabled === true,
     nonLeadHandoffMessage: input.leadIntakeOnlyEnabled === true ? optionalText(input.nonLeadHandoffMessage, "nonLeadHandoffMessage", 1000) : "",

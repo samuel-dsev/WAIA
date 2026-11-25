@@ -121,6 +121,9 @@ import { createRetentionRunner, startRetentionScheduler } from "../operations/re
 import { startWorkerHeartbeat } from "../operations/worker-heartbeat.js";
 import { createPostgresOperationalLogSink } from "../operations/postgres-log-sink.js";
 import { PrivateMediaStore } from "../infra/media/private-media-store.js";
+import { AudioTranscriptionService } from '../modules/audio/audio-service.js';
+import { PostgresAudioRepository } from '../modules/audio/postgres-audio-repository.js';
+import { AUDIO_MIME_TYPES, AUDIO_MAX_BYTES } from '../modules/audio/audio-policy.js';
 import {
   RedisMetricsRegistry,
   createMetricsHandler,
@@ -470,6 +473,14 @@ export function createPostgresRuntime({
     authService,
     accounts: createAccountsRuntime({ pool, redis, config }),
     aiService,
+    audioService: new AudioTranscriptionService({
+      repository: new PostgresAudioRepository(pool),
+      messageRepository: new PostgresJobHandlerRepository(pool),
+      configResolver: new PostgresAiConfigResolver(pool),
+      secretResolver: new AiSecretResolver({ sharedApiKey: config.openai.apiKey, credentialVault }),
+      metaGateway,
+      mediaStore: new PrivateMediaStore({ root: config.media.storageRoot, maxBytes: AUDIO_MAX_BYTES, allowedMimeTypes: AUDIO_MIME_TYPES }),
+    }),
     tenantDefinitionRepository,
     metaGateway,
     metaAppRepository,
@@ -714,6 +725,7 @@ export function createWorkerRuntime({
       tenantDefinitionRepository: runtime.tenantDefinitionRepository,
       metaGateway: runtime.metaGateway,
       aiService: runtime.aiService,
+      audioService: runtime.audioService,
       orderRepository: new PostgresOrderRepository(runtime.pool),
       appointmentRepository: new PostgresAppointmentRepository(runtime.pool),
       handoffRepository: new ConversationHandoffRepository(runtime.conversationService),

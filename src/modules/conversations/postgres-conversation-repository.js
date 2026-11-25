@@ -100,6 +100,9 @@ function mapMessage(row, extra = {}) {
     direction: fromDatabase(row.direcao),
     type: fromDatabase(row.tipo),
     body: row.corpo,
+    audioTranscription: row.audio_transcription || null,
+    audioTranscriptionStatus: row.audio_transcription_status || null,
+    audioDurationSeconds: row.audio_duration_seconds || null,
     mediaExternalId: row.media_external_id,
     mediaStorageKey: row.media_storage_key,
     mediaMimeType: row.media_mime_type,
@@ -433,7 +436,8 @@ export class PostgresConversationRepository {
             FOR UPDATE SKIP LOCKED
          )
          UPDATE mensagens message
-            SET corpo = NULL, outbound_payload = '{}'::jsonb, media_external_id = NULL, media_storage_key = NULL,
+            SET corpo = NULL, audio_transcription = NULL, audio_transcription_status = NULL, audio_duration_seconds = NULL,
+                outbound_payload = '{}'::jsonb, media_external_id = NULL, media_storage_key = NULL,
                 media_mime_type = NULL, media_size_bytes = NULL,
                 media_sha256 = NULL, media_stored_at = NULL,
                 error_code = NULL, error_sanitized = NULL,

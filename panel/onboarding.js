@@ -847,8 +847,12 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     }
     const ai = state.configuration.ai;
     card.append(element("p", "wizard-empty", "A IA reúne as mensagens de texto e responde após 15 segundos sem novas mensagens, considerando o histórico completo disponível da conversa."));
+    const audioUsage = state.audioUsage?.find(item => item.currentPeriod);
+    const audioSeconds = Number(audioUsage?.usedSeconds || 0) + Number(audioUsage?.reservedSeconds || 0);
+    card.append(element('p', 'wizard-empty', `Áudio neste mês: ${Math.floor(audioSeconds / 60)} min ${audioSeconds % 60} s de 30 min (inclui tempo reservado e chamadas sem confirmação).`));
     const schema = [
       { name: "enabled", path: "ai.enabled", label: "IA habilitada", type: "checkbox", value: ai.enabled },
+      { name: "audioTranscriptionEnabled", path: "ai.audioTranscriptionEnabled", label: "Transcrever áudios e responder com IA", type: "checkbox", value: ai.audioTranscriptionEnabled === true, help: "Disponível para qualquer empresa com IA OpenAI. Exibe a transcrição no histórico e usa o texto na conversa. Limite de 30 minutos por empresa por mês, renovado no primeiro dia no fuso da empresa, sem acumular saldo. Usa a mesma chave da IA; ao atingir o limite ou não conseguir transcrever, pede texto ao cliente." },
       { name: "contextualServiceEnabled", path: "ai.contextualServiceEnabled", label: "Usar IA contextual em todas as mensagens do cliente", type: "checkbox", value: ai.contextualServiceEnabled === true, help: "Saudações, escolhas, dúvidas e encerramentos seguem o histórico e o roteiro, sem respostas automáticas por palavra-chave. Preserva pausas humanas e validações de envio. No estoque de veículos, registra entrada opcional e pedidos de esclarecimento de garantia na ficha." },
       { name: "catalogSalesEnabled", path: "ai.catalogSalesEnabled", label: "Apresentar catálogo em páginas de três produtos, com abertura e pergunta final", type: "checkbox", value: ai.catalogSalesEnabled === true },
       { name: "leadQualificationEnabled", path: "ai.leadQualificationEnabled", label: "Qualificar leads e encaminhar para análise humana com notificação ao grupo configurado", type: "checkbox", value: ai.leadQualificationEnabled === true },
@@ -870,6 +874,7 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
     ];
     const form = stepForm(schema, (values) => {
       state.configuration.ai = { ...state.configuration.ai, ...values };
+      if (!values.audioTranscriptionEnabled) delete state.configuration.ai.audioTranscriptionEnabled;
       if (values.keyMode !== "own") delete state.configuration.ai.credentialRef;
     });
     form.addEventListener("change", () => renderStep());
@@ -1415,16 +1420,18 @@ export function createOnboardingWizard({ apiFetch, confirmAction, toast, onSessi
   async function render({ empresaId, mount, signal } = {}) {
     state.disposed = false; state.empresaId = empresaId; state.mount = mount;
     const tenant = await apiFetch(endpoint(), { signal });
-    const [progress, draft, capabilities, credentials, numbers, metaApps, users] = await Promise.all([
+    const [progress, draft, capabilities, credentials, numbers, metaApps, users, audioUsage] = await Promise.all([
       apiFetch(endpoint("/onboarding"), { signal }), optional(endpoint("/configuration/draft"), signal, { allowNotFound: true }),
       apiFetch(endpoint("/action-catalog"), { signal }), apiFetch(endpoint("/credentials?page=1&pageSize=100"), { signal }),
       apiFetch(endpoint("/numbers?page=1&pageSize=100"), { signal }), apiFetch(endpoint("/meta-applications"), { signal }),
       apiFetch(endpoint("/users?page=1&pageSize=100"), { signal }),
+      apiFetch(endpoint('/audio-usage?page=1&pageSize=1&sort=period&direction=desc'), { signal }),
     ]);
     state.tenant = tenant; state.progress = progress; state.currentStep = number(progress.currentStep, 1);
     state.draftVersion = number(draft?.draftVersion, 0); state.configuration = normalizeDraft(draft?.configuration, tenant);
     state.capabilities = Array.isArray(capabilities) ? capabilities : list(capabilities);
     state.credentials = list(credentials); state.numbers = list(numbers); state.metaApps = list(metaApps); state.users = list(users);
+    state.audioUsage = list(audioUsage);
     state.generation = draft ? 0 : 1; state.savedGeneration = 0; state.conflict = null; state.tenantDirty = false;
     renderShell();
   }

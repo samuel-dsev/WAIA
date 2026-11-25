@@ -77,7 +77,7 @@ export function createYCloudWebhookService({ connectionResolver, credentialVault
         } }],
       }] });
     } catch { reject(400, "YCLOUD_PAYLOAD_INVALID"); }
-    if (inbound && message.type === "image" && message.image?.link) {
+    if (inbound && ['image', 'audio'].includes(message.type) && message[message.type]?.link) {
       try {
         const media = message[message.type];
         const providerReference = normalizeYCloudMediaReference({ provider: "ycloud", mediaId: media.id,

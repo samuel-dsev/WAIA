@@ -177,6 +177,9 @@ const definitions = {
     filters: ["model", "keyType", "success", "conversationId", "from", "to"],
     sorts: ["occurredAt", "totalTokens", "estimatedCost"],
   },
+  "audio-usage": {
+    read: "admin", write: "none", fields: {}, filters: [], sorts: ["period"],
+  },
   integrations: {
     read: "admin",
     write: "admin",

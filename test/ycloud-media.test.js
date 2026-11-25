@@ -15,6 +15,33 @@ function gateway(fetchImpl, wabaId = "waba-a") {
 }
 const scope = { empresaId: "tenant-a", numeroWhatsappId: "number-a" };
 
+test('YCloud: mensagem de voz preserva referência autenticada e aceita OGG Opus sem liberar URLs externas', async () => {
+  const now = Date.now(), events = [], data = Buffer.from('synthetic ogg audio');
+  const audio = ycloudMediaReference({ mediaId: 'voice-1', data, mimeType: 'audio/ogg; codecs=opus' });
+  const service = createYCloudWebhookService({ clock: () => now,
+    connectionResolver: { async resolveByWebhookPublicId() { return { id: 'connection', empresaId: 'tenant-a', mode: 'ycloud', state: 'active', appSecretCredentialId: 'sign',
+      numbers: [{ id: 'number-a', phoneNumberId: 'phone-a', wabaId: 'waba-a', numeroE164: '+5511999990001', status: 'ativo' }] }; } },
+    credentialVault: { async getCredentialForUse() { return 'synthetic-signing'; } }, repository: { async recordValidWebhook() {} },
+    ingestionService: { async ingestEvents(value) { events.push(...value); } },
+  });
+  const payload = { id: 'voice-event', apiVersion: 'v2', type: 'whatsapp.inbound_message.received', whatsappInboundMessage: {
+    id: 'ycloud-voice', wamid: 'wamid.voice', wabaId: 'waba-a', to: '+5511999990001', from: '+5511999990002', sendTime: new Date(now).toISOString(),
+    type: 'audio', audio: { id: audio.mediaId, link: audio.url, mime_type: audio.mimeType, sha256: audio.sha256, voice: true },
+  } };
+  const send = () => { const rawBody = Buffer.from(JSON.stringify(payload)), time = Math.floor(now/1000);
+    return service.ingest({ webhookPublicId: 'synthetic-public-id', rawBody, signature: `t=${time},s=${createHmac('sha256','synthetic-signing').update(`${time}.`).update(rawBody).digest('hex')}` }); };
+  await send(); assert.equal(events[0].messageType, 'audio'); assert.equal(events[0].externalMessageId, 'wamid.voice');
+  assert.equal(events[0].media.providerReference.mimeType, 'audio/ogg');
+  const client = gateway(async (url, options) => {
+    assert.equal(url,audio.url); assert.equal(options.headers['X-API-Key'],'synthetic-key');
+    return new Response(data,{headers:{'Content-Type':'audio/ogg; codecs=opus'}});
+  });
+  const result = await client.downloadMedia(scope,{ mediaId: audio.mediaId, providerMedia: events[0].media.providerReference, allowedMimeTypes: ['audio/ogg'] });
+  assert.deepEqual(result.data,data);
+  payload.whatsappInboundMessage.audio.link = audio.url.replace('api.ycloud.com','example.test');
+  await assert.rejects(send(),{code:'YCLOUD_PAYLOAD_INVALID'}); assert.equal(events.length,1);
+});
+
 test("YCloud: imagem autenticada preserva referência privada sem trocar a identidade do webhook", async () => {
   const now = Date.now(), events = [];
   const service = createYCloudWebhookService({ clock: () => now,

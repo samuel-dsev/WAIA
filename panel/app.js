@@ -1271,8 +1271,18 @@ function conversationMessage(message) {
   const item = node("article", "message");
   const direction = message.direction || message.direcao || "inbound";
   item.dataset.direction = ({ entrada: "inbound", saida: "outbound" })[direction] || direction;
-  item.append(paragraph(message.text || message.body || "Mensagem sem conteúdo exibível."));
-  if (message.mediaMimeType) {
+  const audio = ['audio'].includes(message.type || message.tipo);
+  item.append(paragraph(message.text || message.body || (audio ? 'Áudio recebido' : "Mensagem sem conteúdo exibível.")));
+  if (audio) {
+    if (message.audioTranscriptionStatus === 'completed' && message.audioTranscription) {
+      item.append(nodeWithText('strong', 'Transcrição do áudio'), paragraph(message.audioTranscription));
+    } else {
+      const labels = { processing: 'Transcrição em processamento.', failed: 'Não foi possível transcrever o áudio.', uncertain: 'Transcrição sem confirmação. O áudio não será reenviado automaticamente.',
+        empty: 'Nenhuma fala foi identificada.', unsupported: 'Formato ou duração de áudio não aceitos.', quota_exceeded: 'Limite mensal de 30 minutos atingido.' };
+      item.append(paragraph(labels[message.audioTranscriptionStatus] || 'Sem transcrição.'));
+    }
+  }
+  if (message.mediaMimeType && !audio) {
     item.append(button("Ver mídia privada", () => openReceiptPreview(message.id), "button button-secondary button-small"));
   }
   item.append(nodeWithText("small", `${message.responseOrigin || message.origin || message.source || "Origem não informada"} · ${message.status || "Estado não informado"} · ${formatDate(message.createdAt)}`));

@@ -117,7 +117,7 @@ const RESOURCES = Object.freeze({
     filters: { status: "status", mode: "modo_atendimento", contactId: "contato_id", numberId: "numero_whatsapp_id" }, sorts: { lastMessageAt: "ultima_mensagem_at", createdAt: "created_at", status: "status" }, search: ["correlation_id::text"],
   }),
   messages: descriptor({
-    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", operatorId: "operador_usuario_id", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
+    table: "mensagens", fields: {}, select: { conversationId: "conversa_id", contactId: "contato_id", direction: "direcao", type: "tipo", body: "corpo", audioTranscription: "audio_transcription", audioTranscriptionStatus: "audio_transcription_status", audioDurationSeconds: "audio_duration_seconds", mediaMimeType: "media_mime_type", mediaSizeBytes: "media_size_bytes", mediaSha256: "media_sha256", externalMessageId: "external_message_id", status: "status", responseOrigin: "origem_resposta", operatorId: "operador_usuario_id", sequence: "sequence", attempts: "tentativas", error: "error_sanitized", correlationId: "correlation_id" },
     filters: { conversationId: "conversa_id", beforeSequence: "sequence", contactId: "contato_id", status: "status", direction: "direcao", type: "tipo", correlationId: "correlation_id", from: "created_at", to: "created_at" }, sorts: { createdAt: "created_at", sequence: "sequence", status: "status" },
   }),
   logs: descriptor({
@@ -134,6 +134,12 @@ const RESOURCES = Object.freeze({
     table: "uso_ia", fields: {}, select: { conversationId: "conversa_id", model: "modelo", keyType: "tipo_chave", inputTokens: "input_tokens", outputTokens: "output_tokens", totalTokens: "total_tokens", estimatedCost: "custo_estimado", success: "sucesso", error: "error_sanitized", occurredAt: "occurred_at" },
     dates: { createdAt: "created_at" },
     filters: { model: "modelo", keyType: "tipo_chave", success: "sucesso", conversationId: "conversa_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", totalTokens: "total_tokens", estimatedCost: "custo_estimado" },
+  }),
+  "audio-usage": descriptor({
+    table: "audio_quota_accounts", fields: {},
+    select: { period: "periodo::text", usedSeconds: "seconds_used", reservedSeconds: "seconds_reserved", monthlyLimitSeconds: "monthly_limit_seconds",
+      currentPeriod: "periodo = (SELECT date_trunc('month',now() AT TIME ZONE e.timezone)::date FROM empresas e WHERE e.id=r.empresa_id)" },
+    sorts: { period: "periodo" },
   }),
   integrations: descriptor({
     table: "integracoes", fields: { type: "tipo", name: "nome", enabled: "habilitada", requiredForConfirmation: "obrigatoria_para_confirmacao", status: "status", configuration: "configuracao" },
@@ -925,7 +931,7 @@ export class PostgresAdminRepository {
         [empresaId, id],
       );
       await client.query(
-        `UPDATE mensagens SET corpo = NULL, outbound_payload = '{}'::jsonb,
+        `UPDATE mensagens SET corpo = NULL, audio_transcription = NULL, audio_transcription_status = NULL, audio_duration_seconds = NULL, outbound_payload = '{}'::jsonb,
             media_external_id = NULL, error_code = NULL, error_sanitized = NULL,
             redacted_at = CASE WHEN media_storage_key IS NULL THEN COALESCE(redacted_at, now()) ELSE redacted_at END, updated_at = now(),
             status = CASE WHEN status IN ('recebida', 'enfileirada', 'processando', 'falhou') THEN 'ignorada_duplicidade' ELSE status END

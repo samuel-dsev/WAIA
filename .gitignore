@@ -19,6 +19,7 @@ docs/*
 !docs/ESPERA_RESPOSTAS_IA.md
 !docs/NOTIFICACOES_GRUPOS.md
 !docs/CONTINUIDADE_ATENDIMENTO_1.29.2.md
+!docs/TRANSCRICAO_AUDIO.md
 RELATORIO.md
 AGENTS.md
 package-lock.json

@@ -136,7 +136,7 @@ const DRAFT_OBJECT_SCHEMAS = Object.freeze([
   ] ],
   [ /^\/humanHandoff$/u, ["message", "channel", "assigneeRef", "cooldownSeconds", "salesInterestMessage", "pauseOnBusinessAppMessage"] ],
   [ /^\/ai$/u, [
-    "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
+    "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens", "audioTranscriptionEnabled",
     "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "contextualServiceEnabled", "leadImageHandoffEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
   ] ],
   [ /^\/flows$/u, ["definitions"] ],
@@ -561,7 +561,7 @@ function parseHumanHandoff(value, path) {
 function parseAi(value, path) {
   const object = plainObject(value, path, { optional: true });
   allowedKeys(object, path, [
-    "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens",
+    "enabled", "provider", "model", "personality", "prompt", "maxOutputTokens", "audioTranscriptionEnabled",
     "monthlyTokenLimit", "monthlyCostLimit", "keyMode", "credentialRef", "fallbackMessage", "followUpQuestion", "responseDelayEnabled", "contextualServiceEnabled", "leadImageHandoffEnabled", "catalogSalesEnabled", "leadQualificationEnabled", "leadQualificationCriteria", "leadQualificationClosing", "leadIntakeOnlyEnabled", "tradeInEvaluationEnabled", "tradeInEvaluationClosing",
   ]);
   const enabled = boolean(object.enabled, pointer(path, "enabled"), false);
@@ -571,6 +571,7 @@ function parseAi(value, path) {
   }
   return {
     enabled,
+    ...(object.audioTranscriptionEnabled === undefined ? {} : { audioTranscriptionEnabled: boolean(object.audioTranscriptionEnabled, pointer(path, "audioTranscriptionEnabled")) }),
     ...(object.leadIntakeOnlyEnabled === undefined ? {} : { leadIntakeOnlyEnabled: boolean(object.leadIntakeOnlyEnabled, pointer(path, "leadIntakeOnlyEnabled")) }),
     ...(object.responseDelayEnabled === undefined ? {} : { responseDelayEnabled: boolean(object.responseDelayEnabled, pointer(path, "responseDelayEnabled")) }),
     ...(object.contextualServiceEnabled === undefined ? {} : { contextualServiceEnabled: boolean(object.contextualServiceEnabled, pointer(path, "contextualServiceEnabled")) }),
@@ -798,6 +799,10 @@ export function parseTenantRuntimeConfigV2(input) {
   }
   if (parsed.ai.contextualServiceEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled || !parsed.ai.prompt)) {
     fail("CONTEXTUAL_SERVICE_CONFIGURATION_REQUIRED", "/ai/contextualServiceEnabled", "Atendimento contextual exige IA habilitada e roteiro preenchido.");
+  }
+  if (parsed.ai.audioTranscriptionEnabled === true && (!enabled.has("ai_freeform") || !parsed.ai.enabled
+    || parsed.ai.provider !== "openai" || parsed.ai.keyMode === "simulated")) {
+    fail("AUDIO_TRANSCRIPTION_CONFIGURATION_REQUIRED", "/ai/audioTranscriptionEnabled", "Transcrição de áudio exige IA OpenAI habilitada e chave própria ou compartilhada. Limite fixo de 30 minutos por empresa por mês.");
   }
   if (parsed.ai.leadImageHandoffEnabled === true && (!parsed.ai.contextualServiceEnabled || !parsed.ai.leadQualificationEnabled
     || parsed.ai.leadIntakeOnlyEnabled || !enabled.has("human_handoff"))) {

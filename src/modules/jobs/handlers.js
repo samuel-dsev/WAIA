@@ -6,6 +6,7 @@ import { INBOUND_COOLDOWN_MS, loadInboundTurn } from "./inbound-turn.js";
 import { loadTradeInEvaluationSession } from "./trade-in-session.js";
 import { normalizeTradeInEvaluation } from "../business/trade-in-evaluation.js";
 import { inboundMessageContent } from "../ai/inbound-content.js";
+import { audioFallback } from "../audio/audio-policy.js";
 import { storeInboundMedia } from "./store-inbound-media.js";
 import { queueLeadImages } from "../group-notifier/delivery-images.js";
 import { hydrateReply, prepareReplyBatch, loadCatalogBrowseState, websiteListFormatMetadata } from "./reply-batch.js";
@@ -116,6 +117,7 @@ export class PostgresJobHandlerRepository {
         `SELECT m.id, m.empresa_id, m.conversa_id, m.contato_id, m.numero_whatsapp_id,
                 m.tipo, m.corpo, m.media_external_id, m.media_storage_key,
                 m.media_mime_type, m.media_size_bytes, m.media_sha256, m.external_message_id,
+                m.audio_transcription, m.audio_transcription_status, m.audio_duration_seconds,
                 m.correlation_id, m.outbound_payload, m.sequence, c.telefone_normalizado
            FROM mensagens m
            JOIN contatos c ON c.empresa_id = m.empresa_id AND c.id = m.contato_id
@@ -134,6 +136,9 @@ export class PostgresJobHandlerRepository {
         numeroWhatsappId: row.numero_whatsapp_id,
         type: fromDatabase(row.tipo),
         text: row.corpo || "",
+        audioTranscription: row.audio_transcription || null,
+        audioTranscriptionStatus: row.audio_transcription_status || null,
+        audioDurationSeconds: row.audio_duration_seconds || null,
         adReferral: normalizeAdReferral(row.outbound_payload?.adReferral),
         replyToExternalMessageId: row.outbound_payload?.replyToExternalMessageId || null,
         mediaId: row.media_external_id || null,
@@ -186,7 +191,9 @@ export class PostgresJobHandlerRepository {
                 outbound_payload = outbound_payload - 'providerMedia',
                 updated_at = now()
           WHERE empresa_id = $1 AND id = $2 AND media_external_id = $3
-            AND direcao = 'entrada' AND tipo IN ('imagem', 'documento')
+            AND direcao = 'entrada' AND tipo IN ('imagem', 'documento', 'audio')
+            AND redacted_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+            AND EXISTS(SELECT 1 FROM contatos ct WHERE ct.empresa_id=mensagens.empresa_id AND ct.id=mensagens.contato_id AND ct.deleted_at IS NULL)
             AND (media_storage_key IS NULL OR media_storage_key = $4)
         RETURNING id`,
         [empresaId, messageId, mediaId, stored.storageKey, stored.mimeType, stored.sizeBytes, stored.sha256],
@@ -343,6 +350,7 @@ export class PostgresJobHandlerRepository {
             ...listFormatMetadata,
             ...(reply.inboundTurnSequence == null ? {} : { inboundTurnSequence: reply.inboundTurnSequence }),
             ...(reply.inboundTurnIncludesImages ? { inboundTurnIncludesImages: true } : {}),
+            ...(reply.inboundTurnIncludesAudio ? { inboundTurnIncludesAudio: true } : {}),
             ...(reply.salesInterest ? { salesInterest: reply.salesInterest } : {}),
             ...(reply.leadQualification ? { leadQualification: reply.leadQualification } : {}),
             ...(reply.pendingNameQualification ? { pendingNameQualification: reply.pendingNameQualification } : {}),
@@ -381,6 +389,15 @@ export class PostgresJobHandlerRepository {
               AND newer.direcao='entrada' AND newer.redacted_at IS NULL
               AND newer.sequence>(checkpoint.outbound_payload->>'inboundTurnSequence')::bigint)
           AND ct.deleted_at IS NULL AND NOT ct.bloqueado AND NOT ct.bot_pausado
+          AND NOT EXISTS (SELECT 1 FROM mensagens checkpoint
+            WHERE checkpoint.empresa_id=m.empresa_id AND checkpoint.source_message_id=m.id
+              AND checkpoint.outbound_payload->>'inboundTurnIncludesAudio'='true'
+              AND (ct.consentimento_status='revogado' OR ct.exclusao_solicitada_at IS NOT NULL OR ct.anonimizado_at IS NOT NULL
+                OR NOT EXISTS (SELECT 1 FROM configuracoes_revisoes r WHERE r.empresa_id=e.id
+                  AND r.config_version=e.configuracao_ativa_versao AND e.configuracao_runtime_modo='versionado'
+                  AND e.versao_configuracao=e.configuracao_ativa_versao
+                  AND r.configuracao_compilada #>> '{configuration,ai,enabled}'='true'
+                  AND r.configuracao_compilada #>> '{configuration,ai,audioTranscriptionEnabled}'='true')))
           AND n.deleted_at IS NULL AND n.status = 'ativo'`,
       [empresaId, messageId],
     )).rowCount > 0;
@@ -491,6 +508,7 @@ export function createWorkerHandlers({
   tenantDefinitionRepository,
   metaGateway,
   aiService,
+  audioService,
   orderRepository,
   appointmentRepository,
   handoffRepository,
@@ -572,9 +590,9 @@ export function createWorkerHandlers({
     if (!prepared?.messages && prepared?.externalMessageId && ["enviada", "entregue", "lida"].includes(prepared.status)) {
       return { replied: true, resumed: true };
     }
-    if (prepared && (message.type === "text" || prepared.inboundTurnIncludesImages && message.type === "image") && typeof repository.inboundTurn === "function") {
+    if (prepared && (message.type === "text" || prepared.inboundTurnIncludesImages && message.type === "image" || prepared.inboundTurnIncludesAudio && message.type === "audio") && typeof repository.inboundTurn === "function") {
       const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id,
-        ...(prepared.inboundTurnIncludesImages ? { includeImages: true } : {}) });
+        ...(prepared.inboundTurnIncludesImages ? { includeImages: true } : {}), ...(prepared.inboundTurnIncludesAudio ? { includeAudio: true } : {}) });
       if (current && current.sequence > message.sequence) {
         await repository.cancelPreparedReply?.({ empresaId: reference.empresaId, messageId: message.id });
         return { skipped: true, reason: "inbound_turn_changed" };
@@ -589,9 +607,11 @@ export function createWorkerHandlers({
       const activeFlow = acceptsContextualImages
         ? await conversationService.getState?.({ empresaId: reference.empresaId, conversationId: message.conversationId }) : null;
       const includeImages = acceptsContextualImages && !["orders", "appointments", "flows"].includes(activeFlow?.flowKey);
-      if ((message.type === "text" || includeImages && message.type === "image") && storedDefinition?.ai?.enabled === true
+      const includeAudio = storedDefinition?.ai?.enabled === true && storedDefinition.ai.audioTranscriptionEnabled === true;
+      let audioNotice = null;
+      if ((message.type === "text" || includeImages && message.type === "image" || includeAudio && message.type === "audio") && storedDefinition?.ai?.enabled === true
         && typeof repository.inboundTurn === "function") {
-        inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(includeImages ? { includeImages: true } : {}) });
+        inboundTurn = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(includeImages ? { includeImages: true } : {}), ...(includeAudio ? { includeAudio: true } : {}) });
         if (!inboundTurn) return { skipped: true, reason: "inbound_turn_already_answered" };
         if (Date.parse(inboundTurn.readyAt) > clock().getTime()) return { deferUntil: inboundTurn.readyAt };
         if (message.id !== inboundTurn.messageId) {
@@ -611,6 +631,34 @@ export function createWorkerHandlers({
           }
         }
       }
+      if (includeAudio) {
+        const parts = inboundTurn?.messages || [message];
+        for (const part of parts.filter(part => part.type === 'audio')) {
+          const source = part.id === message.id ? message : await repository.inboundMessage({ ...reference, messageId: part.id });
+          if (!source) return { skipped: true, reason: 'audio_source_unavailable' };
+          const result = await audioService?.transcribe({ empresaId: reference.empresaId, message: source, canContinue: execution.canContinue });
+          if (result?.blocked) return { skipped: true, reason: 'audio_transcription_blocked' };
+          if (result?.deferUntil) return { deferUntil: result.deferUntil };
+          part.audioTranscriptionStatus = result?.status || 'failed';
+          part.audioTranscription = result?.text || null;
+          part.text = result?.status === 'completed' ? result.text : '';
+          if (part.id === message.id) message = { ...message, ...part };
+          if (result?.status !== 'completed') audioNotice = audioFallback(result?.status);
+        }
+        if (inboundTurn) inboundTurn.messages = parts.filter(part => part.type !== 'audio' || part.audioTranscriptionStatus === 'completed');
+        if (execution.canContinue && !execution.canContinue()) throw Object.assign(new Error('Lease de processamento foi perdido.'), { code: 'PROCESSING_LEASE_LOST', retryable: true });
+        if (message.type === 'audio' && message.audioTranscriptionStatus === 'completed' && followUpRepository) {
+          const declined = await handleFollowUpDecline(followUpRepository, { empresaId: reference.empresaId, message, metaGateway, canContinue: execution.canContinue });
+          if (declined) return declined;
+        }
+        // A transcription can take longer than the grouping delay. Include any
+        // text/audio that arrived meanwhile before paying for the normal reply.
+        if (inboundTurn) {
+          const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId,
+            messageId: message.id, includeAudio: true, ...(inboundTurn.includesImages ? { includeImages: true } : {}) });
+          if (current?.sequence !== inboundTurn.sequence) return current ? { deferUntil: current.readyAt } : { skipped: true, reason: 'inbound_turn_changed' };
+        }
+      }
       let generatedByAi = false;
       let responseDelayEnabled = true;
       try {
@@ -627,6 +675,8 @@ export function createWorkerHandlers({
       }
       if (mediaRejected) {
         reply = { text: "Não consegui aceitar esse arquivo. Envie uma imagem JPEG, PNG ou WEBP, ou um PDF, com até 10 MB.", buttons: [] };
+      } else if (audioNotice && !(inboundTurn ? inboundTurn.messages.length : message.text?.trim())) {
+        reply = { text: audioNotice, buttons: [] };
       } else {
         const definition = storedDefinition;
         responseDelayEnabled = definition.ai?.responseDelayEnabled !== false;
@@ -702,7 +752,7 @@ export function createWorkerHandlers({
         reply = await runtime.handle({
           conversationId: message.conversationId,
           contactId: message.contactId,
-          type: message.type,
+          type: includeAudio && (message.type === 'audio' || inboundTurn?.messages.some(part => part.type === 'audio')) ? 'text' : message.type,
           text: inboundTurn ? inboundTurn.messages.map(inboundMessageContent).join("\n") : message.text,
           selectionId: message.type === "interactive" ? message.text : undefined,
           mediaId: message.mediaId,
@@ -713,12 +763,17 @@ export function createWorkerHandlers({
           mediaSizeBytes: message.mediaSizeBytes,
           mediaSha256: message.mediaSha256,
         });
+        if (audioNotice) {
+          if (reply.messages?.length) reply.messages = [{ text: audioNotice, buttons: [] }, ...reply.messages];
+          else if (reply.text) reply.text = `${audioNotice}\n\n${reply.text}`;
+        }
       }
       if (inboundTurn && reply.module !== "human_handoff") {
-        const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(inboundTurn.includesImages ? { includeImages: true } : {}) });
+        const current = await repository.inboundTurn({ empresaId: reference.empresaId, conversationId: message.conversationId, messageId: message.id, ...(inboundTurn.includesImages ? { includeImages: true } : {}), ...(inboundTurn.includesAudio ? { includeAudio: true } : {}) });
         if (current?.sequence !== inboundTurn.sequence) return current ? { deferUntil: current.readyAt } : { skipped: true, reason: "inbound_turn_changed" };
         reply.inboundTurnSequence = inboundTurn.sequence;
         if (inboundTurn.includesImages) reply.inboundTurnIncludesImages = true;
+        if (inboundTurn.includesAudio) reply.inboundTurnIncludesAudio = true;
       }
       if (reply.code === "HANDOFF_COOLDOWN") {
         return { skipped: true, reason: "handoff_cooldown" };

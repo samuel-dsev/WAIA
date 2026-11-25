@@ -169,7 +169,7 @@ export class MultiTenantAiService {
       const evaluationEnabled = config.tradeInEvaluationEnabled && qualifies && !intakeOnly;
       const leadPhotosEnabled = config.leadImageHandoffEnabled && config.contextualServiceEnabled && qualifies && !intakeOnly;
       const recoverPartialQualification = Boolean(realEstateCatalog) || leadPhotosEnabled && !evaluationEnabled;
-      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingImages: leadPhotosEnabled || evaluationEnabled || Boolean(contextualVehicleService) || Boolean(realEstateCatalog && config.contextualServiceEnabled) });
+      const transcript = await loadConversationContext(this.conversationService, request, occurredAt, { includeIncomingAudio: config.audioTranscriptionEnabled, includeIncomingImages: leadPhotosEnabled || evaluationEnabled || Boolean(contextualVehicleService) || Boolean(realEstateCatalog && config.contextualServiceEnabled) });
       const photoHandoff = { photosHandoffEnabled: config.leadImageHandoffEnabled && evaluationEnabled, storedPhotos: transcript.storedPhotos };
       const qualificationEvidence = [...transcript.evidence, ...(request.turnMessages ? request.turnMessages.map((part) => part.text) : [request.message])];
       promptHistory = transcript.input;

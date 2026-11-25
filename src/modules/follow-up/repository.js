@@ -188,10 +188,12 @@ export class FollowUpRepository {
     }
     const channel = await readChannelExecutionGate(client, { empresaId, numberId: c.numero_whatsapp_id, requiredResource: 'F02' });
     if (!channel.allowed) { await this.cancel(client, empresaId, row.cycle_id, 'CHANNEL_UNAVAILABLE'); return { blocked: true }; }
-    const messages = (await client.query(`SELECT id,direcao,tipo,corpo,sequence,status,source_message_id,outbound_payload,external_message_id,
+    const messages = (await client.query(`SELECT id,direcao,tipo,
+        CASE WHEN tipo='audio' AND audio_transcription_status='completed' AND $4::boolean THEN audio_transcription ELSE corpo END AS corpo,
+        sequence,status,source_message_id,outbound_payload,external_message_id,
         coalesce(provider_timestamp,created_at) AS sent_at,created_at FROM mensagens WHERE empresa_id=$1 AND conversa_id=$2
         AND redacted_at IS NULL AND (expires_at IS NULL OR expires_at>$3) AND (direcao='entrada' OR status IN ('enviada','entregue','lida'))
-        AND NOT coalesce(outbound_payload->>'historical','false')='true' ORDER BY sequence`, [empresaId, c.id, this.clock()])).rows;
+        AND NOT coalesce(outbound_payload->>'historical','false')='true' ORDER BY sequence`, [empresaId, c.id, this.clock(), config.compiled.configuration.ai.audioTranscriptionEnabled === true])).rows;
     const inbound = messages.filter(m => m.direcao === 'entrada'), lastInbound = inbound.at(-1), last = messages.at(-1);
     if (!lastInbound || !last?.corpo) { await this.cancel(client, empresaId, row.cycle_id, 'CONTEXT_UNAVAILABLE'); return { blocked: true }; }
     // Wait for the normal worker; never race an unanswered customer message.
