@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { normalizePricing } from "./pricing.js";
+import { normalizeCacheUsage, nullableCacheCost } from "./usage.js";
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
@@ -153,6 +154,8 @@ export class MemoryAiLedger {
       inputTokens,
       outputTokens,
       totalTokens,
+      ...normalizeCacheUsage(input, inputTokens),
+      cacheAdjustedCost: nullableCacheCost(input.cacheAdjustedCost),
       cost,
       pricingVersion: input.pricingVersion,
       configVersion: input.configVersion,

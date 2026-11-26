@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { withTenantTransaction } from "../../infra/postgres/transaction.js";
 import { verifyCompiledTenantRuntimeConfigV2 } from "../configuration/index.js";
+import { normalizeCacheUsage, nullableCacheCost } from "./usage.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const uuidOrNew = (value) => UUID_PATTERN.test(String(value || "")) ? value : randomUUID();
@@ -214,6 +215,7 @@ export class PostgresAiLedger {
       const inputTokens = Math.max(0, Math.ceil(Number(input.inputTokens) || 0));
       const outputTokens = Math.max(0, Math.ceil(Number(input.outputTokens) || 0));
       const totalTokens = inputTokens + outputTokens;
+      const cacheUsage = normalizeCacheUsage(input, inputTokens);
       const cost = Math.max(0, Number(input.cost) || 0);
       const accountResult = await client.query(
         `UPDATE ai_quota_accounts SET
@@ -245,8 +247,9 @@ export class PostgresAiLedger {
         `INSERT INTO uso_ia (
            empresa_id, conversa_id, mensagem_id, provedor, modelo, tipo_chave,
            input_tokens, output_tokens, total_tokens, custo_estimado, sucesso,
-           error_code, correlation_id, occurred_at, reservation_id, pricing_version, config_version
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           error_code, correlation_id, occurred_at, reservation_id, pricing_version, config_version,
+           cached_input_tokens, cache_write_input_tokens, cache_adjusted_cost
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
          ON CONFLICT (empresa_id, reservation_id) WHERE reservation_id IS NOT NULL DO NOTHING`,
         [
           input.empresaId,
@@ -266,6 +269,9 @@ export class PostgresAiLedger {
           input.reservationId,
           input.pricingVersion || "unknown",
           Number(input.configVersion || 1),
+          cacheUsage.cachedInputTokens,
+          cacheUsage.cacheWriteInputTokens,
+          nullableCacheCost(input.cacheAdjustedCost),
         ],
       );
       return { usage: this.#usage(account), alertTriggered };
@@ -323,8 +329,8 @@ export class ResponsesClientFactory {
 export class VersionedPricingCatalog {
   constructor(prices = {}) {
     const defaults = {
-      "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-09-04" },
-      "gpt-4.1-mini-2025-04-14": { inputPerMillion: 0.4, outputPerMillion: 1.6, version: "openai-2026-09-04" },
+      "gpt-4.1-mini": { inputPerMillion: 0.4, cachedInputPerMillion: 0.1, outputPerMillion: 1.6, version: "openai-2026-11-25-cache-v1" },
+      "gpt-4.1-mini-2025-04-14": { inputPerMillion: 0.4, cachedInputPerMillion: 0.1, outputPerMillion: 1.6, version: "openai-2026-11-25-cache-v1" },
     };
     let overrides = prices;
     if (typeof prices === "string") {

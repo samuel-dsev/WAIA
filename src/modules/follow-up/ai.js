@@ -1,5 +1,6 @@
 import { normalizeAiConfig } from '../ai/contracts.js';
-import { normalizePricing, estimateTokens, calculateCost } from '../ai/pricing.js';
+import { normalizePricing, estimateTokens, calculateCost, calculateCacheAdjustedCost } from '../ai/pricing.js';
+import { normalizeProviderUsage } from '../ai/usage.js';
 import { isPromptInjectionAttempt } from '../ai/guardrails.js';
 import { FOLLOW_UP_INSTRUCTIONS, draftFormat, parseDraft } from './policy.js';
 
@@ -29,13 +30,14 @@ export async function draftLegacyFollowUp(service, input) {
     if (config.provider !== 'simulated' && !credentials?.apiKey) throw new Error('FOLLOW_UP_AI_CREDENTIAL');
     const client = await service.clientFactory.create({ empresaId: input.empresaId, provider: config.provider, apiKey: credentials?.apiKey || null });
     const response = await client.responses.create(request, { signal: AbortSignal.timeout(service.timeoutMs), maxRetries: 0 });
-    usage = { inputTokens: Number(response.usage?.input_tokens || 0), outputTokens: Number(response.usage?.output_tokens || 0) };
+    usage = normalizeProviderUsage(response);
     if (response.status === 'incomplete') throw new Error('FOLLOW_UP_AI_INCOMPLETE');
     const draft = parseDraft(response.output_text, input.isClosure); success = true; return draft;
   } finally {
     await service.ledger.finalize({ empresaId: input.empresaId, reservationId: reservation.reservationId, conversationId: input.conversationId,
       messageId: input.messageId, correlationId: input.correlationId, provider: config.provider, model: config.model, keyType: config.keyType,
-      ...usage, cost: calculateCost(pricing, usage), pricingVersion: pricing.version, configVersion: config.version, success,
+      ...usage, cost: calculateCost(pricing, usage), cacheAdjustedCost: calculateCacheAdjustedCost(pricing, usage),
+      pricingVersion: pricing.version, configVersion: config.version, success,
       ...(success ? {} : { errorCode: 'FOLLOW_UP_DRAFT_FAILED' }), occurredAt: new Date() });
   }
 }

@@ -7,7 +7,8 @@ import {
   isPromptInjectionAttempt,
   serializeTenantContext,
 } from "./guardrails.js";
-import { calculateCost, estimateTokens, normalizePricing } from "./pricing.js";
+import { calculateCost, calculateCacheAdjustedCost, estimateTokens, normalizePricing } from "./pricing.js";
+import { normalizeProviderUsage, addProviderUsage } from "./usage.js";
 import { catalogSelectionFormat, parseCatalogSelection, CATALOG_SELECTION_INSTRUCTIONS } from "../business/catalog-messages.js";
 import { asksForWebsiteVehicleDetails, hasWebsiteCatalogLink, catalogSalesFormat, parseCatalogSalesReply, catalogSalesInstructions, WEBSITE_CATALOG_SALES_INSTRUCTIONS } from "../business/catalog-sales.js";
 import { isPropertyCatalog, REAL_ESTATE_SALES_INSTRUCTIONS } from '../business/real-estate-catalog.js';
@@ -24,12 +25,6 @@ import { normalizeTradeInEvaluation, tradeInEvaluationFormat, tradeInEvaluationI
   mayQualifyTradeInEvaluation, evaluationLeadCard, evaluationClosing, evaluationAnswerWithoutFollowUp, declinesTradeInEvaluation, announcesEvaluationBooking, announcesEvaluationDelivery, EVALUATION_CLOSING } from "../business/trade-in-evaluation.js";
 import { qualificationFormat, qualificationInstructions, parseQualification, asksOnlyForCustomerName, qualificationContinuation, contextualQualificationContinuation, announcesQualificationClosing, QUALIFICATION_CLOSING, QUALIFICATION_RECHECK_INSTRUCTIONS } from "../group-notifier/qualification.js";
 import { leadIntakeFormat, parseLeadIntake, intakeQuestion, LEAD_INTAKE_INSTRUCTIONS, LEAD_INTAKE_RECHECK_INSTRUCTIONS } from "../group-notifier/lead-intake.js";
-
-function normalizeUsage(response) {
-  const inputTokens = Math.max(0, Number(response?.usage?.input_tokens ?? response?.usage?.inputTokens) || 0);
-  const outputTokens = Math.max(0, Number(response?.usage?.output_tokens ?? response?.usage?.outputTokens) || 0);
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-}
 
 function timeoutError() {
   const error = new Error("Tempo limite da IA excedido.");
@@ -330,10 +325,7 @@ export class MultiTenantAiService {
             ...(repairFormat ? { text: { format: repairFormat } } : {}) } : groundedRequest,
         remainingMs, { headers: { "X-Client-Request-Id": repair
           ? `${String(request.correlationId).slice(0, 504)}:recheck` : String(request.correlationId).slice(0, 512) } });
-        const usage = normalizeUsage(response);
-        providerUsage = { inputTokens: (providerUsage?.inputTokens || 0) + usage.inputTokens,
-          outputTokens: (providerUsage?.outputTokens || 0) + usage.outputTokens,
-          totalTokens: (providerUsage?.totalTokens || 0) + usage.totalTokens };
+        providerUsage = addProviderUsage(providerUsage, normalizeProviderUsage(response));
         let text = String(response?.output_text || "").trim();
         if (!text) throw Object.assign(new Error("A IA não retornou texto."), { code: "AI_EMPTY_RESPONSE" });
         if (response.status === "incomplete") throw Object.assign(new Error("Resposta incompleta da IA."), { code: "AI_INCOMPLETE_RESPONSE" });
@@ -798,6 +790,7 @@ export class MultiTenantAiService {
         && asksOnlyForCustomerName(reply.text)) reply.pendingNameQualification = pendingNameQualification;
       const usage = providerUsage;
       const cost = calculateCost(pricing, usage);
+      const cacheAdjustedCost = calculateCacheAdjustedCost(pricing, usage);
       const finalized = await this.ledger.finalize({
         reservationId: reservation.reservationId,
         empresaId: request.empresaId,
@@ -809,6 +802,7 @@ export class MultiTenantAiService {
         keyType,
         ...usage,
         cost,
+        cacheAdjustedCost,
         pricingVersion: pricing.version,
         configVersion: config.version,
         success: true,
@@ -827,7 +821,7 @@ export class MultiTenantAiService {
         ...reply,
         source: "ai",
         reason: choiceQuestion ? "clarification_needed" : qualificationIssue ? "qualification_needs_information" : "completed",
-        usage: Object.freeze({ ...usage, cost, pricingVersion: pricing.version }),
+        usage: Object.freeze({ ...usage, cost, cacheAdjustedCost, pricingVersion: pricing.version }),
         quota: finalized.usage,
       });
     } catch (error) {
@@ -845,6 +839,9 @@ export class MultiTenantAiService {
             keyType,
             inputTokens: providerUsage?.inputTokens || 0,
             outputTokens: providerUsage?.outputTokens || 0,
+            cachedInputTokens: providerUsage?.cachedInputTokens ?? null,
+            cacheWriteInputTokens: providerUsage?.cacheWriteInputTokens ?? null,
+            cacheAdjustedCost: providerUsage && pricing ? calculateCacheAdjustedCost(pricing, providerUsage) : null,
             cost: providerUsage && pricing ? calculateCost(pricing, providerUsage) : 0,
             pricingVersion: pricing?.version || "unknown",
             configVersion: config.version,

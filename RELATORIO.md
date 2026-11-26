@@ -1,5 +1,13 @@
 # Continuidade — WAIA
 
+## Medição de cache da IA — candidata 1.31.0, 25/11/2026
+
+- **Pedido/base:** prosseguir na sequência de economia sem mudar atendimento. Primeira etapa preparada localmente na estável `dev`, sobre `576f6c0`/1.30.0; alterações locais anteriores preservadas. WAIA 2.0 fora do escopo.
+- **Implementação:** coleta de cache informado pela OpenAI no atendimento e follow-up, inclusive reavaliação e falha com consumo conhecido; estimativa com tarifa de cache separada da base conservadora da quota. Painel/API exibem metadados e estimativas em US$, distinguindo ausência de medição e zero. Payload, conteúdo do roteiro/histórico, modelo, cadência, limites e bloqueios preservados.
+- **Dados/limites:** migração aditiva 064 em `uso_ia`, registros anteriores continuam desconhecidos. Sem inventar desconto para tarifa ausente ou gravação com preço não tratado. Nenhuma chamada externa paga, envio WhatsApp, alteração de empresa ou otimização de prefixo/chave nesta etapa.
+- **Validação:** Node 24 local: 819 aprovados/35 condicionais/zero falhas. Node 22: 80 testes afetados aprovados, mais repetição dos oito casos de cache após ajuste final. PostgreSQL real: cenário de persistência/RLS/idempotência/quota aprovado, dados das 142 tabelas preservados por contagem/hash e contêiner devolvido parado. Sem comprovação de cache real ou envio externo.
+- **Revisão/publicação:** versão 1.31.0 nos manifests; escopo, arquivos, fontes de preço e continuação em [CACHE_IA.md](docs/CACHE_IA.md). Commit/push/deploy pendentes de autorização própria; próxima etapa depende da observação após publicação.
+
 ## Transcrição de áudio — candidata local 1.30.0, 25/11/2026
 
 - **Pedido/base:** implementação expressamente autorizada, ampliando o plano conversacional anterior para também responder com a transcrição. Checkout principal WAIA, branch `dev`, sobre `b1b8223`/1.29.2. Encerramento do outro chat, Git e registros da publicação conferidos; alterações locais anteriores preservadas. WAIA 2.0/`new` fora do escopo.

@@ -529,7 +529,10 @@ test("mede tokens, custo e versões de preço/configuração", async () => {
     inputTokens: 100,
     outputTokens: 50,
     totalTokens: 150,
+    cachedInputTokens: null,
+    cacheWriteInputTokens: null,
     cost: 0.0006,
+    cacheAdjustedCost: null,
     pricingVersion: "2026-08-v1",
   });
   assert.equal(setupAi.ledger.events[0].pricingVersion, "2026-08-v1");
@@ -624,8 +627,9 @@ test("catálogo PostgreSQL possui preço versionado para o modelo padrão", asyn
   const pricing = await new VersionedPricingCatalog().get({ model: "gpt-4.1-mini-2025-04-14" });
   assert.deepEqual(pricing, {
     inputPerMillion: 0.4,
+    cachedInputPerMillion: 0.1,
     outputPerMillion: 1.6,
-    version: "openai-2026-09-04",
+    version: "openai-2026-11-25-cache-v1",
   });
 });
 

@@ -131,7 +131,13 @@ const RESOURCES = Object.freeze({
     filters: { action: "acao", result: "resultado", actorId: "ator_usuario_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", action: "acao", result: "resultado" },
   }),
   "ai-usage": descriptor({
-    table: "uso_ia", fields: {}, select: { conversationId: "conversa_id", model: "modelo", keyType: "tipo_chave", inputTokens: "input_tokens", outputTokens: "output_tokens", totalTokens: "total_tokens", estimatedCost: "custo_estimado", success: "sucesso", error: "error_sanitized", occurredAt: "occurred_at" },
+    table: "uso_ia", fields: {}, select: {
+      conversationId: "conversa_id", provider: "provedor", model: "modelo", keyType: "tipo_chave",
+      inputTokens: "input_tokens", outputTokens: "output_tokens", totalTokens: "total_tokens", estimatedCost: "custo_estimado",
+      cachedInputTokens: "cached_input_tokens", cacheWriteInputTokens: "cache_write_input_tokens", cacheAdjustedCost: "cache_adjusted_cost",
+      pricingVersion: "pricing_version", configVersion: "config_version",
+      success: "sucesso", error: "error_sanitized", occurredAt: "occurred_at",
+    },
     dates: { createdAt: "created_at" },
     filters: { model: "modelo", keyType: "tipo_chave", success: "sucesso", conversationId: "conversa_id", from: "occurred_at", to: "occurred_at" }, sorts: { occurredAt: "occurred_at", totalTokens: "total_tokens", estimatedCost: "custo_estimado" },
   }),

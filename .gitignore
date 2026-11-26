@@ -20,6 +20,7 @@ docs/*
 !docs/NOTIFICACOES_GRUPOS.md
 !docs/CONTINUIDADE_ATENDIMENTO_1.29.2.md
 !docs/TRANSCRICAO_AUDIO.md
+!docs/CACHE_IA.md
 RELATORIO.md
 AGENTS.md
 package-lock.json

@@ -1,6 +1,7 @@
 import { createOnboardingWizard } from "./onboarding.js?v=1.27.0";
 import { renderGroupNotifier } from "./group-notifier.js";
 import { createAttendanceScriptEditor, scriptSaveRequest } from "./attendance-script.js";
+import { formatAiCost } from "./ai-usage.js";
 
 const API_BASE = "/api/admin";
 const REFRESH_INTERVAL_MS = 30_000;
@@ -148,12 +149,13 @@ const VIEW_DEFINITIONS = {
   usage: {
     title: "Consumo de IA",
     eyebrow: "Custos e limites",
-    description: "Tokens, custo estimado, tipo de chave e aproximação do limite mensal.",
+    description: "Entrada reaproveitada está incluída nos tokens de entrada. A estimativa com cache usa a tarifa de reaproveitamento; a quota mantém a base conservadora. Valores não medidos aparecem como —.",
     resource: "ai-usage",
     permission: "usage",
     columns: [
       ["occurredAt", "Data"], ["model", "Modelo"], ["keyType", "Tipo de chave"],
-      ["inputTokens", "Entrada"], ["outputTokens", "Saída"], ["estimatedCost", "Custo estimado"], ["success", "Sucesso"],
+      ["inputTokens", "Entrada"], ["cachedInputTokens", "Entrada reaproveitada"], ["cacheWriteInputTokens", "Gravação em cache"],
+      ["outputTokens", "Saída"], ["estimatedCost", "Base da quota (US$)"], ["cacheAdjustedCost", "Estimativa com cache (US$)"], ["success", "Sucesso"],
     ],
   },
   logs: {
@@ -1743,6 +1745,7 @@ function valueNode(value, key = "") {
 
 function formatValue(value, key = "") {
   if (value == null || value === "") return "—";
+  if (["estimatedCost", "cacheAdjustedCost"].includes(key)) return formatAiCost(value);
   if (Array.isArray(value)) return value.map(displayValue).join(", ") || "—";
   if (typeof value === "object") return Object.entries(value).map(([name, item]) => `${humanize(name)}: ${displayValue(item)}`).join(" · ");
   if (/at$|date|data|horario|scheduled/iu.test(key)) return formatDate(value);

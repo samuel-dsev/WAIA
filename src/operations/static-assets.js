@@ -3,7 +3,7 @@ import express from 'express';
 // Only files used by the shipped interfaces belong on the HTTP surface.
 // Local pilots, backups and untracked experiments must never become assets.
 export const STATIC_ASSETS = Object.freeze({
-  panel: Object.freeze(["index.html","app.js","styles.css","attendance-script.js","group-notifier.js","onboarding.js"]),
+  panel: Object.freeze(["index.html","app.js","styles.css","attendance-script.js","group-notifier.js","onboarding.js","ai-usage.js"]),
   portal: Object.freeze(["index.html","app.js","styles.css"]),
 });
 
