@@ -111,3 +111,41 @@ test('nome em bloco é apenas pista literal e não incorpora cidade, pergunta ou
   assert.deepEqual(customerNameTurn(question, [{ content: 'Bom dia\n[Em resposta à mensagem: Sérgio]' }]), []);
   assert.deepEqual(customerNameTurn('Qual carro?', [{ content: 'Sérgio' }]), []);
 });
+
+test('evidências comerciais multilinha geram enums aceitos pelo contrato strict sem perder a fonte original', () => {
+  const original = 'Tenho interesse em um auto Hatch, até 50mil\nAguardo\n\nClara';
+  const offer = 'Podemos esclarecer os próximos passos.\n\nVocê gostaria de continuar a negociação com um vendedor?';
+  const consent = 'Sim, por favor\nClara';
+  for (const transcript of [[{ role: 'user', content: original }],
+    [{ role: 'assistant', content: offer }, { role: 'user', content: consent }]]) {
+    const schema = commercialInterestFormat(transcript);
+    const inspect = (node) => {
+      if (!node || typeof node !== 'object') return;
+      for (const value of node.enum || []) if (typeof value === 'string') assert.doesNotMatch(value, /[\r\n\t]/u);
+      Object.values(node).forEach(inspect);
+    };
+    inspect(schema);
+    const fields = schema.anyOf[1].properties;
+    const card = Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.enum?.[0] ?? null]));
+    assert.equal(parseCommercialInterest(card, transcript), true);
+    assert.throws(() => parseCommercialInterest(card, [{ role: 'assistant', content: original }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+  }
+});
+
+test('intenção explícita de trocar o veículo usa contexto comercial e não confunde manutenção ou citações', () => {
+  const prior = [{ role: 'user', content: 'Aceita veículo na troca?' },
+    { role: 'assistant', content: 'Podemos avaliar seu veículo para uma possível troca. Gostaria de enviar fotos?' }];
+  const original = 'Já quero trocar mas não sei como fazer';
+  const card = { status: 'confirmed', interestEvidence: original, offerEvidence: null, consentEvidence: original };
+  assert.equal(parseCommercialInterest(card, [...prior, { role: 'user', content: original }]), true);
+  for (const message of ['Quero trocar o óleo do carro', 'Quero trocar a correia dentada', 'Quero trocar o câmbio automático',
+    'Não quero trocar meu carro', 'Será que posso trocar meu carro?']) {
+    assert.throws(() => parseCommercialInterest({ ...card, interestEvidence: message, consentEvidence: message },
+      [...prior, { role: 'user', content: message }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' }, message);
+  }
+  assert.throws(() => parseCommercialInterest(card, [{ role: 'user', content: original }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+  assert.throws(() => parseCommercialInterest(card, [...prior, { role: 'user', content: original },
+    { role: 'user', content: 'Não quero mais contato de vendedor.' }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+  assert.throws(() => parseCommercialInterest(card, [...prior, { role: 'user', content: original },
+    { role: 'user', content: 'Não quero mais trocar meu carro.' }]), { code: 'AI_INVALID_CUSTOMER_SERVICE' });
+});

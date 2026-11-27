@@ -210,10 +210,10 @@ export function hasWebsiteFinancingConsent(catalog, message, productId, history)
 export function hasWebsitePhotoConsent(message, history) {
   const answer = normalize(message);
   if (ambiguousChoiceReply(message, history)) return false;
-  if (/\bnao\b[^.!?\n]{0,35}\b(?:envie|mande|quero|preciso|mostre)\b[^.!?\n]{0,25}\bfotos?\b/u.test(answer)
+  if (/\bnao\b[^.!?\n]{0,35}\b(?:envie|mande|encaminhe|quero|preciso|mostre)\b[^.!?\n]{0,25}\bfotos?\b/u.test(answer)
     || /^(?:nao|agora nao|dispenso)[.! ]*$/u.test(answer)) return false;
   const requested = answer.split(/\b(?:mas|porem)\b|[;.!?\n]/u).some((part) => /\b(?:fotos?|imagens?)\b/u.test(part)
-    && /\b(?:tem|teria|manda(?:r|m|e)?|envia(?:r|m)?|envie|mostra(?:r|m)?|mostre|ver|quero|gostaria|pode|poderia)\b/u.test(part)
+    && /\b(?:tem|teria|manda(?:r|m|e)?|envia(?:r|m)?|envie|encaminh(?:ar|a|e|em)|mostra(?:r|m)?|mostre|ver|quero|gostaria|pode|poderia|puder)\b/u.test(part)
     && !/\b(?:nao|sem)\b.{0,35}\b(?:fotos?|imagens?)\b/u.test(part));
   if (requested) return true;
   if (acceptsAllChoices(message, history) && /\b(?:fotos?|imagens?)\b/iu.test(lastChoiceQuestion(history))) return true;

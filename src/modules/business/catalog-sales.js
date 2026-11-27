@@ -116,11 +116,11 @@ export function catalogSalesInstructions({ contextualServiceEnabled = false } = 
 }
 
 export function asksForVehiclePhoto(message) {
-  const text = normalize(message).replace(/\s+/gu, " ");
+  const text = normalize(message);
   if (/\b(?:sem|nao (?:quero|mande|envie|mostre)) (?:as? )?(?:fotos?|imagens?)\b/u.test(text)) return false;
   const photoQuestion = /^(?:(?:voce|voces) )?(?:tem|teria|possui|possuem) (?:algumas? |as? )?(?:fotos?|imagens?)\b/u;
-  const photoCommand = /^(?:(?:pode|poderia) )?(?:me )?(?:manda(?:r|m|e)?|envia(?:r|m)?|envie|mostra(?:r|m)?|mostre|quero ver) (?:me )?(?:as? |umas? )?(?:fotos?|imagens?)\b/u;
-  return text.split(/\s*[,;.!?]\s*/u).some((part) => photoQuestion.test(part) || photoCommand.test(part));
+  const photoCommand = /^(?:(?:se )?(?:pode|poderia|puder) )?(?:me )?(?:manda(?:r|m|e)?|envia(?:r|m)?|envie|encaminh(?:ar|a|e|em)|mostra(?:r|m)?|mostre|quero ver) (?:me )?(?:as? |umas? )?(?:fotos?|imagens?)\b/u;
+  return text.split(/\s*[,;.!?\n]\s*/u).some((part) => photoQuestion.test(part.replace(/\s+/gu, ' ')) || photoCommand.test(part.replace(/\s+/gu, ' ')));
 }
 
 export function asksForWebsiteVehicleDetails(message) {

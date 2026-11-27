@@ -1,4 +1,6 @@
 export function inboundMessageContent(part) {
+  if (part.type === "video") return "[Vídeo recebido do cliente; sem análise automática; não substitui fotos armazenadas.]"
+    + ((part.text || part.body || "").trim() ? "\nLegenda escrita pelo cliente: " + (part.text || part.body) : "");
   if (part.type === "audio") return part.audioTranscriptionStatus === "completed" ? part.audioTranscription || part.text || "" : "";
   if (part.type !== "image") return part.text || part.body || "";
   const caption = part.text ?? part.body ?? "";

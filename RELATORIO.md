@@ -1,5 +1,11 @@
 # Continuidade — WAIA
 
+## Falhas dos três atendimentos Turim — candidata 1.31.1, 27/11/2026
+
+- **Base/escopo:** `dev`/`a952180` (1.31.0), produção consultada em 1.30.0/Turim revisão 35. Pedido atual autoriza correção e commit; deploy continua pendente. Checkout/repositório WAIA 2.0 fora do escopo; alterações locais anteriores preservadas.
+- **Diagnóstico/correção:** `AI_INVALID_CATALOG_SELECTION` no pedido de encaminhar fotos; `invalid_json_schema` por quebras de linha nos enums comerciais, reproduzido na OpenAI com texto fictício; `AI_INVALID_LEAD_QUALIFICATION` na troca sem fotos armazenadas e sem reconhecimento da intenção explícita de trocar. Corrigidos os guardas e o caminho comercial com prova original; vídeo passa a fornecer somente metadado. Assinatura literal corrige status de nome contraditório sem nova chamada; a espera de 15 minutos sem nome é preservada.
+- **Validação/limites:** 826 testes locais aprovados/35 condicionais ignorados, sem falhas; três cenários com IA real aprovados, com uma chamada por cenário, dados fictícios e candidata em memória, sem envio WhatsApp ou gravação no banco. Docker local indisponível; sem PostgreSQL/Redis reais nem build local nesta rodada. Nenhum chat foi retomado, reprocessado ou reenviado; nenhuma configuração publicada foi alterada. [Evidências, limites e conjunto do commit](docs/TURIM_FALHAS_1.31.1.md).
+
 ## Medição de cache da IA — candidata 1.31.0, 25/11/2026
 
 - **Pedido/base:** prosseguir na sequência de economia sem mudar atendimento. Primeira etapa preparada localmente na estável `dev`, sobre `576f6c0`/1.30.0; alterações locais anteriores preservadas. WAIA 2.0 fora do escopo.

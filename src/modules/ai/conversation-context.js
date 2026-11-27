@@ -24,13 +24,14 @@ export async function loadConversationContext(service, request, now, { includeIn
     .filter(item => item.type !== 'audio' || includeIncomingAudio && item.audioTranscriptionStatus === 'completed' && !isPromptInjectionAttempt(item.body))
     .map((item) => [item.externalMessageId, item]));
   const input = retained.filter((item) => !ids.has(item.id))
-    .filter((item) => (["text", "image", "interactive"].includes(item.type) || includeIncomingAudio && item.type === "audio" && item.audioTranscriptionStatus === "completed") && (typeof item.body === "string" && item.body.trim()
+    .filter((item) => (["text", "image", "interactive"].includes(item.type) || includeIncomingImages && item.direction === "inbound" && item.type === "video" || includeIncomingAudio && item.type === "audio" && item.audioTranscriptionStatus === "completed") && (typeof item.body === "string" && item.body.trim()
+      || includeIncomingImages && item.direction === "inbound" && item.type === "video"
       || includeIncomingImages && item.direction === "inbound" && item.type === "image" && (item.mediaExternalId || item.mediaStorageKey)))
     .filter((item) => item.type !== "image" || item.direction === "outbound" || includeIncomingImages)
     .filter((item) => item.direction === "inbound" || item.direction === "outbound"
       && (!item.status || ["sent", "delivered", "read"].includes(item.status)))
     .filter((item) => item.direction !== "inbound" || !isPromptInjectionAttempt(item.body))
-    .map((item) => item.type === "image" && item.direction === "inbound" ? { ...item, body: inboundMessageContent(item) } : item)
+    .map((item) => ["image", "video"].includes(item.type) && item.direction === "inbound" ? { ...item, body: inboundMessageContent(item) } : item)
     .map((item) => {
       const quoted = byExternalId.get(item.replyToExternalMessageId);
       return { role: item.direction === "inbound" ? "user" : "assistant",

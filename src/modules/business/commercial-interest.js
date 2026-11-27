@@ -1,14 +1,26 @@
 const normalize = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 const body = (part) => String(part?.content || "").split("\n[Em resposta à mensagem:")[0].trim();
+const evidenceLine = value => String(value).replace(/\s+/gu, ' ').trim();
 const invalid = (reason) => Object.assign(new Error("Interesse comercial sem confirmação original."), { code: "AI_INVALID_CUSTOMER_SERVICE", validationReason: `COMMERCIAL_INTEREST_${reason}` });
 const refusesContact = (text) => /\b(?:nao (?:quero|desejo) (?:mais )?(?:comprar|negociar|contato|atendimento|falar|vendedor)|nao tenho interesse|sem interesse|desisti)\b/u.test(normalize(text));
 const methodSubject = /\b(?:fotos?|avalia\p{L}*|simula\p{L}*|financiamento|cotac\p{L}*)\b/u;
+
+function directVehicleTrade(answer, transcript) {
+  const clauses = answer.split(/\b(?:mas|porem|so que)\b|[,;.!?\n]/u);
+  const wants = clauses.some(clause => !/\b(?:nao|talvez|se eu)\b/u.test(clause)
+    && /\b(?:quero|gostaria de) trocar(?: (?:de )?(?:(?:o|um|meu) )?(?:carro|veiculo)\b|\s*$)/u.test(clause.trim()));
+  // A short "quero trocar" needs the actual vehicle trade already discussed.
+  // An oil/belt/gearbox replacement never matches this purchase intent.
+  return wants && transcript.some(part => /\b(?:veiculo|carro)\b.{0,100}\b(?:troca|trocar)\b|\b(?:troca|trocar)\b.{0,100}\b(?:veiculo|carro)\b/u.test(normalize(body(part))));
+}
 
 export const COMMERCIAL_INTEREST_INSTRUCTIONS = `ENCERRAMENTO POR INTERESSE COMERCIAL:
 - Simulação de financiamento e avaliação por fotos são caminhos OPCIONAIS para concluir a triagem comercial de veículos, não requisitos universais. Interesse real de compra/negociação confirmado também permite ficha e vendedor. Essa regra substitui a antiga exigência de simular ou receber fotos; não remove critérios de outros ramos nem autoriza coletar documentos sem aceite.
 - Tente compreender objetivo, modelo/faixa, troca e condições, aproveitando tudo já informado. Se o cliente recusar, adiar ou não quiser prosseguir com simulação/fotos (inclusive "só estou fazendo cotações"), pare de repetir essas ofertas. Confirme uma vez se deseja negociar o veículo ou continuar com um vendedor, sem pressionar. Uma dúvida, busca de catálogo, cotação isolada, silêncio ou recusa ao contato não comprovam confirmação. Se disser que não quer atendimento, respeite; não prepare ficha por interesse.
 - Preencha customerService.commercialInterest com status=confirmed somente com evidência ORIGINAL de intenção explícita de compra/negociação ou aceite da pergunta atual de confirmar interesse/continuidade com vendedor. interestEvidence copia uma mensagem original com o objetivo. Em aceite de oferta, offerEvidence copia a mensagem inteira da assistente, consentEvidence a mensagem inteira do cliente; em pedido direto, offerEvidence=null e consentEvidence copia o pedido direto inteiro. Não use o anúncio, a oferta da IA ou uma recusa como intenção do cliente. Preserve a confirmação original quando depois vier o nome.
+- Em uma negociação de troca de veículo já discutida, “já quero trocar, mas não sei como fazer” é intenção comercial explícita. Preserve essa mensagem original quando vier nome ou valor de quitação depois. Não confunda com trocar óleo, correia, câmbio ou outra manutenção, nem com dúvida sobre se é possível trocar.
 - Com interesse confirmado, responda às dúvidas atuais e peça SOMENTE o nome se faltar, com awaiting_name e ficha factual de tudo coletado. Não exija fotos, CPF, nascimento ou simulação desse caminho. Se o nome já estiver no histórico, responda às dúvidas que puder e finalize qualified no mesmo turno, avisando continuidade por vendedor. Para dúvidas que só a equipe pode resolver, explique esse limite e encaminhe o pedido no resumo. Solicitação de novas fotos, nova busca ou comparação ainda por cumprir é atendida antes de concluir. Recusa somente aos métodos não é recusa ao atendimento humano.
+- Se o turno atual apenas informa nome, quitação ou outros dados finais, sem nova pergunta ou busca, encerre agradecendo e informando a continuidade por vendedor. Preserve as preferências e correções na ficha; não recomece a consulta nem recomende modelos espontaneamente no encerramento. Em especial, não ofereça carro automático quando o cliente disse que não quer esse câmbio. Nunca atribua ao estoque características contrárias à ficha.
 - No resumo, mantenha número pelo sistema, carro(s) de interesse, objetivo, troca e características/histórico declarados (inclusive sinistro/leilão), orçamento, cidade e demais dados realmente recebidos. Registre quais métodos foram recusados/adiados; não diga que houve avaliação, fotos ou simulação se não houve. Ao pedir o nome, a regra de 15 minutos sem resposta continua valendo para essa ficha.`;
 
 export function commercialInterestEvidence(transcript) {
@@ -39,9 +51,9 @@ export function commercialInterestFormat(transcript) {
   else {
     const candidates = commercialInterestEvidence(transcript);
     if (candidates.direct.length) alternatives.push(envelope({ status: { type: "string", enum: ["confirmed"] },
-      interestEvidence: { ...original, enum: candidates.direct }, offerEvidence: { type: "null" }, consentEvidence: { ...original, enum: candidates.direct } }));
+      interestEvidence: { ...original, enum: [...new Set(candidates.direct.map(evidenceLine))] }, offerEvidence: { type: "null" }, consentEvidence: { ...original, enum: [...new Set(candidates.direct.map(evidenceLine))] } }));
     for (const { offer, consent } of candidates.accepted) alternatives.push(envelope({ status: { type: "string", enum: ["confirmed"] },
-      interestEvidence: { ...original, enum: [consent] }, offerEvidence: { type: "string", enum: [offer] }, consentEvidence: { ...original, enum: [consent] } }));
+      interestEvidence: { ...original, enum: [evidenceLine(consent)] }, offerEvidence: { type: "string", enum: [evidenceLine(offer)] }, consentEvidence: { ...original, enum: [evidenceLine(consent)] } }));
   }
   return { anyOf: alternatives };
 }
@@ -91,7 +103,11 @@ export function parseCommercialInterest(value, transcript) {
     || /^(?:nao|nao quero|nao sei|negativo|dispenso|so (?:estou )?(?:olhando|cotando|pesquisando))[.! ]*$/u.test(answer)) throw invalid("DECLINED");
   if (value.offerEvidence === null) {
     const directInterest = /\b(?:quero (?:comprar|negociar|fechar|falar com (?:um |o )?vendedor)|(?:tenho|estou com) interesse (?:em|no|na)|gostaria de (?:comprar|negociar|falar com (?:um |o )?vendedor)|estou interessad[oa] (?:em|n[oa]|ness[ea]|nest[ea])|preciso (?:de )?(?:um |o )?(?:carro|veiculo)\b[^.!?]*\b(?:trabalhar|comprar|uber|urber))\b/u.test(answer);
-    if (!directInterest || /\b(?:nao (?:estou|sou) interessad[oa]|so (?:estou )?(?:cotando|pesquisando|olhando|fazendo cotacoes))\b/u.test(answer)) throw invalid("INTENT");
+    const tradeInterest = directVehicleTrade(answer, transcript.slice(0, consent + 1));
+    if (!directInterest && tradeInterest && transcript.slice(consent + 1).some(part => part.role === 'user'
+      && /\b(?:nao (?:quero|vou|desejo) (?:mais )?trocar|desisti da troca)\b/u.test(normalize(body(part))))) throw invalid("DECLINED");
+    if (!(directInterest || tradeInterest)
+      || /\b(?:nao (?:estou|sou) interessad[oa]|so (?:estou )?(?:cotando|pesquisando|olhando|fazendo cotacoes))\b/u.test(answer)) throw invalid("INTENT");
   } else {
     const offer = body(transcript.slice(0, consent).findLast((part) => part.role === "assistant"));
     const question = normalize(offer).split(/[.!]/u).at(-1)?.trim() || "";
